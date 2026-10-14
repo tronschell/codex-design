@@ -158,27 +158,16 @@ export function useProject() {
           }
         } else {
           const query = new URLSearchParams(location.search), bound = binding.current;
-          const targetFor = (projectId: string): CanvasTarget => bound || { projectId, boardId: query.get('board') || undefined, pageId: query.get('page') || undefined };
-          const openFirst = async (list: ProjectSummary[], request: number) => {
-            if (!live || request !== navigation.current) return;
-            if (list[0]) await load(list[0].id, targetFor(list[0].id));
-            else {
-              const next = await client.create('Untitled project', 'blank');
-              if (live && request === navigation.current) await setSnapshot(next);
-            }
-          };
           const requestedId = bound?.projectId || query.get('project');
           if (requestedId) {
-            const loading = load(requestedId, targetFor(requestedId)), request = navigation.current;
-            const listing = refreshProjects().catch(() => null);
-            const loaded = await loading;
-            if (loaded || bound || !live || request !== navigation.current) return;
-            const list = await listing;
-            // Preserve the existing fallback when an old standalone URL names a missing project.
-            if (list && !list.some(item => item.id === requestedId)) await openFirst(list, request);
+            const target = bound || { projectId: requestedId, boardId: query.get('board') || undefined, pageId: query.get('page') || undefined };
+            const loading = load(requestedId, target);
+            void refreshProjects().catch(() => {});
+            await loading;
           } else {
-            const list = await refreshProjects();
-            await openFirst(list, intent);
+            await refreshProjects();
+            if (!live || intent !== navigation.current) return;
+            clearPane(); setLoading(false); setHydrated(true);
           }
         }
       } catch (error) { if (live && intent === navigation.current) { setError(errorMessage(error)); setLoading(false); setHydrated(true); } }
@@ -187,7 +176,7 @@ export function useProject() {
     const retry = () => { void initialize(); };
     window.addEventListener(TOKEN_CHANGED_EVENT, retry);
     return () => { live = false; window.removeEventListener(TOKEN_CHANGED_EVENT, retry); };
-  }, [clearPane, load, refreshProjects, setSnapshot]);
+  }, [clearPane, load, refreshProjects]);
   useEffect(() => onCanvasLaunch(launch => { if (launch.selection) void load(launch.selection.projectId, launch.selection, launch); }), [load]);
 
   const commit = useCallback((operations: Operation[], onApplied?: (before: DesignProject, after: DesignProject) => void): Promise<DesignProject | null> => {

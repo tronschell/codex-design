@@ -26,7 +26,7 @@ For clients using the common MCP config format:
 }
 ```
 
-Ask the agent: **“Create a new mobile reading-app design in Codex Design and open its canvas.”** `canvas_open_canvas` requests opening the exact project, board and page in the default browser and returns `standaloneUrl`. If opening is unavailable, follow that URL yourself. An unbound request opens a project chooser; it never selects another conversation's latest project. Keep the returned IDs in each conversation and pass them explicitly on later calls.
+Ask the agent: **“Create a new mobile reading-app design in Codex Design and open its canvas.”** `canvas_open_canvas` requests opening the exact project, board and page in the default browser and returns `standaloneUrl`. If opening is unavailable, follow that URL yourself. An unbound request opens a project chooser; it never selects another conversation's latest project. Keep the returned IDs in each conversation and pass them explicitly on later calls. Opening the bare browser URL also requires a project choice. A stale project link keeps its requested URL and shows its error beside the chooser; choosing a project explicitly replaces that URL with its current project/board/page.
 
 The agent can read the complete bundled design guidance through MCP, progressively build native layers or supported JSX, reuse design-system tokens/components, import media, read comments and export source. Browser changes and agent changes share the same revision-checked store and live synchronization.
 

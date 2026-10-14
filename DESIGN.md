@@ -24,6 +24,8 @@ The optional GaugeReel starter is an illustrative recreation from the user's ref
 
 Mobile designs show the application artboard with a blank safe zone at the top and bottom. Do not draw a simulated clock, connectivity/battery icons, camera cutout, home indicator or rounded phone bezel by default. For the packaged JSX device wrappers, iOS reserves 54px top/34px bottom (the original titled navbar retains its existing 62px top reservation), and Android reserves 32px/24px. Explicit device presentations can opt into original chrome. Keep application controls below that zone; the safe area itself contains no decorative placeholders.
 
+Browser windows without a bound project open the existing Projects menu over a blank canvas. A missing-project link keeps its error and chooser rather than selecting another design.
+
 Empty live canvases remain blank. Do not add welcome icons, introductory copy, frame preset cards, or persistent shortcut reminders over the canvas. Frame presets belong in the toolbar menu and shortcut references in tooltips and the help dialog.
 
 Project design system and Board inspiration are compact icon controls before History in the title bar; History stays directly beside comments. Each opens a spatial canvas with independent pan/zoom and a dense right editor. Returning restores the design canvas selection and viewport. Keep the chrome neutral grey and the blue selection outline; actual color swatches and uploaded imagery represent the user's content. Categorized token cards show names, current values and restrained previews. Inspiration cards preserve aspect ratio and reveal notes and intended use in the editor. Empty libraries keep their canvas clear and put actions in the toolbar and panel.

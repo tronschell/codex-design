@@ -284,7 +284,7 @@ export default function App() {
     catch { /* Embedded hosts may provide an opaque URL with no writable history. */ }
   }, [project?.id, board?.id, page?.id, historyOpen]);
   useEffect(() => { if (boardNavigation) { setHistoryOpen(false); setHistoryPreview(null); setChangeFlash(null); historyReturn.current = null; setBoardId(boardNavigation.boardId); setPageId(boardNavigation.pageId || ''); } }, [boardNavigation]);
-  useEffect(() => { if (embedded && hydrated && !loading && !liveProject) setMenu('project'); }, [hydrated, loading, liveProject?.id]);
+  useEffect(() => { if (hydrated && !loading && !liveProject) setMenu('project'); }, [hydrated, loading, liveProject?.id]);
   useEffect(() => { setLibrary(null); setHistoryOpen(false); setHistoryPreview(null); setChangeFlash(null); historyReturn.current = null; }, [liveProject?.id]);
   useEffect(() => {
     if (!project || !page) return;
