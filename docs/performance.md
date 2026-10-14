@@ -525,3 +525,14 @@ User effect: one title-bar library entry replaces separate system/inspiration en
 Read-only compiled MCP inspection of the actual Forma revision 25 (one page, no definitions) returned 35 tools, two design-system history entries and a transparent SVG map of 188,935 B at 2,420 × 1,968 design pixels. The selected 2× raster dimensions are 4,840 × 3,936 pixels; these dimensions were computed by the real export, not a measured PNG download. SVG rendering warnings disclose foreignObject/CSS and font substitution. The browser bounds PNG to 16,384 px per side / 64,000,000 pixels and map assets to 48 MiB raw / 64 MiB embedded. Those caps are inspected resource limits, not measurements of peak allocation.
 
 Production builds/package, strict unused-symbol compilation, empty static UI detector findings and bounded source review are the verification method. Direct read-only MCP inspection confirms existing-project parsing, scoped history and SVG generation. The currently open host pane caches the previous UI, even after reopening the same resource; new tab controls and actual PNG raster/download remain unexercised until a host restart. No test, fixture, assertion/self-check or test dependency was added or run. No user designs were edited for verification; the original GaugeReel hash remains `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`.
+
+## Refined Properties footprint — October 14, 2026
+
+This adds editing capabilities, not a measured runtime optimization. Method: Node `fs.stat().size` over the existing production artifacts before edits (the `873be92` application baseline) and the final production build/package on the same machine with unchanged dependencies. Workload: self-contained canvas widget and bundled MCP runtime, excluding designs/media.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Canvas widget | 759,046 B | 803,102 B | +44,056 B | +5.80% |
+| MCP runtime | 1,088,001 B | 1,092,191 B | +4,190 B | +0.39% |
+
+User effect: direct geometry/alignment/rotation/flip editing and compact native radius, opacity, blend, gradient, border and outline controls replace the broad Appearance list. Gradient stops and opacity sliders preview locally and save once when accepted, avoiding a persisted revision for every pointer event; this is inspected behavior, not a measured latency or memory reduction. No load time, interaction latency, CPU, browser RAM, heap/RSS, GPU or FPS improvement was measured or claimed. The added controls increase artifact size. Verification used production compilation/package, strict unused-symbol compilation, bounded source review and read-only browser inspection at 336px/260px panel widths. Native picker dialogs and gradient/save/Undo gestures remain unexercised; no tests or user-design mutations were performed.

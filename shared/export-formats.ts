@@ -111,7 +111,11 @@ export function svgExportReason(project: DesignProject, target: ExportTarget): s
   const node = resolveNodeTokens(raw, project.designSystem);
   if (node.effects?.some(effect => effect.enabled !== false) || ADVANCED_STYLE_PROPERTIES.some(property => node.styles[property] !== undefined)) return 'This layer has effects or advanced styling that SVG source cannot preserve. Use HTML or React + CSS.';
   if (node.href || node.styles.paddingX !== undefined || node.styles.paddingY !== undefined) return 'This layer has links or inner padding that SVG source cannot preserve. Use HTML or React + CSS.';
-  if (node.hidden || (node.styles.opacity ?? 1) !== 1 || (node.styles.radius ?? 0) !== 0 || (node.styles.borderColor && (node.styles.borderWidth ?? 1) > 0) || (node.styles.fill && node.styles.fill !== 'transparent') || (node.styles.shadow && node.styles.shadow !== 'none')) return 'This layer has container styling that SVG source cannot preserve. Use HTML or React + CSS.';
+  const s = node.styles;
+  if ((s.fillMode === 'gradient' && s.gradient) || (s.blendMode && s.blendMode !== 'normal') || (s.outlineColor && (s.outlineWidth ?? 1) > 0)) return 'This layer has gradient, blend or outline styling that SVG source cannot preserve. Use HTML or React + CSS.';
+  const rounded = s.radiusMode === 'individual' && s.cornerRadii ? Object.values(s.cornerRadii).some(radius => radius > 0) : (s.radius ?? 0) !== 0;
+  const filled = s.fillMode !== 'none' && s.fillMode !== 'gradient' && (s.fillOpacity ?? 1) > 0 && s.fill && s.fill !== 'transparent';
+  if (node.hidden || (s.opacity ?? 1) !== 1 || rounded || (s.borderColor && (s.borderWidth ?? 1) > 0) || filled || (s.shadow && s.shadow !== 'none')) return 'This layer has container styling that SVG source cannot preserve. Use HTML or React + CSS.';
   return null;
 }
 

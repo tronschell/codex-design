@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlignCenter, AlignLeft, AlignRight, Bold, Check, ChevronDown, Radius, Italic, Link, List, MessageCirclePlus, MoreVertical, SquareDashed, Type, Underline, X } from 'lucide-react';
 import type { BindableStyleProperty, DesignNode, DesignProject, NodeStyle, Operation } from '../shared/types';
 import { safeColor } from '../shared/effects';
+import { gradientCss } from '../shared/appearance';
 import { isSafeLink } from '../shared/links';
 import { Field, ColorField } from './InspectorFields';
 import { Select } from './Select';
@@ -29,6 +30,7 @@ export default function SelectionToolbar({ project, pageId, node, effective, anc
   const [popupPosition, setPopupPosition] = useState<CSSProperties>({ visibility: 'hidden' });
   const locked = disabled || saving, blocked = locked || !editable, text = node.type === 'text', s = effective.styles;
   const colorProperty = text ? 'color' : 'fill', currentColor = s[colorProperty] ?? (text ? '#e8eaed' : 'transparent');
+  const currentPaint = !text && !['line','arrow'].includes(node.type) ? s.fillMode === 'none' ? 'transparent' : s.fillMode === 'gradient' && s.gradient ? gradientCss(s.gradient) : currentColor : currentColor;
   const typeToken = project.designSystem.tokens.find(token => token.id === node.tokenBindings?.fontSize);
   const themeTokens = useMemo(() => project.designSystem.tokens.filter(token => menu === 'color' ? token.kind === 'color' : typography.includes(token.kind as typeof typography[number])).filter(token => (token.name + ' ' + token.value).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [project.designSystem.tokens, menu, query]);
   const left = Math.max(8, Math.min(anchor.left + anchor.width / 2 - size.width / 2, viewport.width - size.width - 8));
@@ -63,11 +65,12 @@ export default function SelectionToolbar({ project, pageId, node, effective, anc
   };
   const style = (value: Partial<NodeStyle>, finish = false) => {
     if (!editable) return;
+    value = { ...value, ...(Object.hasOwn(value,'fill') ? { fillMode: 'solid' as const } : {}), ...(Object.hasOwn(value,'radius') ? { radiusMode: 'uniform' as const } : {}) };
     const tokenBindings = { ...node.tokenBindings }; let detached = false;
     for (const property of Object.keys(value) as BindableStyleProperty[]) if (tokenBindings[property]) { delete tokenBindings[property]; detached = true; }
     void save({ styles: value, ...(detached ? { tokenBindings } : {}) }, finish);
   };
-  const bind = (property: BindableStyleProperty, id: string, finish = true) => { if (editable) void save({ tokenBindings: { ...node.tokenBindings, [property]: id } }, finish); };
+  const bind = (property: BindableStyleProperty, id: string, finish = true) => { if (editable) void save({ tokenBindings: { ...node.tokenBindings, [property]: id }, ...(property === 'fill' ? { styles: { fillMode: 'solid' } } : property === 'radius' ? { styles: { radiusMode: 'uniform' } } : {}) }, finish); };
 
   useLayoutEffect(() => {
     if (!menu || !popup.current) return;
@@ -109,7 +112,7 @@ export default function SelectionToolbar({ project, pageId, node, effective, anc
   const Align = s.textAlign === 'center' ? AlignCenter : s.textAlign === 'right' ? AlignRight : AlignLeft;
   return <div ref={toolbar} className="selection-toolbar" role="toolbar" aria-label={text ? 'Text quick properties' : 'Object quick properties'} aria-busy={saving} tabIndex={-1} style={{ left, top, maxWidth: Math.max(0, viewport.width - 16), visibility: size.width ? 'visible' : 'hidden' }} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); close(); } }} onWheel={event => event.stopPropagation()}>
     {text && button('type', 'Typography styles', <><Type size={13}/><span>{typeToken?.name ?? (s.fontSize ?? 16) + ' px'}</span><ChevronDown size={12}/></>, 'quick-type')}
-    {button('color', text ? 'Text color' : 'Fill color', <span className="quick-swatch" aria-hidden="true"><span style={{ background: currentColor }}/></span>)}
+    {button('color', text ? 'Text color' : 'Fill color', <span className="quick-swatch" aria-hidden="true"><span style={{ background: currentPaint }}/></span>)}
     {text ? <>
       <button className={'quick-button' + ((s.fontWeight ?? 400) >= 600 ? ' active' : '')} aria-label="Bold" title="Bold" aria-pressed={(s.fontWeight ?? 400) >= 600} disabled={blocked} onClick={() => style({ fontWeight: (s.fontWeight ?? 400) >= 600 ? 400 : 700 })}><Bold size={16}/></button>
       <button className={'quick-button' + (s.fontStyle === 'italic' ? ' active' : '')} aria-label="Italic" title="Italic" aria-pressed={s.fontStyle === 'italic'} disabled={blocked} onClick={() => style({ fontStyle: s.fontStyle === 'italic' ? 'normal' : 'italic' })}><Italic size={16}/></button>

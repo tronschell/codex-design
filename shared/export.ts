@@ -3,6 +3,7 @@ import { shaderRuntimeOptions, shaderRuntimeSource } from './shaders.js';
 import { ADVANCED_STYLE_PROPERTIES, effectCss, nodeBoxSize, nodeInnerSize, nodePadding } from './effects.js';
 import { isSafeLink } from './links.js';
 import { compatibleTokenKinds, designSystemMarkdown, resolveNodeTokens, resolveNodesTokens, tokenCssVariableName, tokenCssVariables } from './design-system.js';
+import { gradientCss } from './appearance.js';
 
 export const textListStyle = { margin: 0, padding: 0, listStylePosition: 'inside' } as const;
 export const nodeLinkStyle = { position: 'absolute', inset: 0, display: 'block', borderRadius: 'inherit', pointerEvents: 'auto' } as const;
@@ -60,12 +61,16 @@ export function nodeCss(node: DesignNode, system?: DesignSystem, fallbackStyles 
     });
     if (s.fontStyle !== undefined) css.fontStyle = s.fontStyle;
   } else if (node.type === 'line' || node.type === 'arrow') {
-    const color = s.fill !== undefined ? cssValue('fill', '#777777') : cssValue('color', '#777777');
+    const color = s.fillMode === 'none' ? 'transparent' : s.fill !== undefined ? cssValue('fill', '#777777') : cssValue('color', '#777777');
     const width = cssValue('borderWidth', node.height);
     Object.assign(css, { color, borderTop: `${typeof width === 'number' ? `${Math.max(width, 1)}px` : `max(1px, ${width})`} solid ${color}` });
   } else {
-    css.background = cssValue('fill', 'transparent');
-    css.borderRadius = node.type === 'ellipse' ? '50%' : cssValue('radius', 0);
+    const fill = cssValue('fill', 'transparent'), fillOpacity = s.fillOpacity ?? 1;
+    css.background = s.fillMode === 'none' ? 'transparent' : s.fillMode === 'gradient' ? s.gradient ? gradientCss(s.gradient) : 'transparent'
+      : fillOpacity < 1 ? `color-mix(in srgb, ${fill} ${fillOpacity * 100}%, transparent)` : fill;
+    css.borderRadius = node.type === 'ellipse' ? '50%' : s.radiusMode === 'individual' && s.cornerRadii
+      ? [s.cornerRadii.topLeft, s.cornerRadii.topRight, s.cornerRadii.bottomRight, s.cornerRadii.bottomLeft].map(radius => `${radius}px`).join(' ')
+      : cssValue('radius', 0);
     if (['frame', 'code', 'image', 'video', 'shader'].includes(node.type)) css.overflow = 'hidden';
   }
   if (s.paddingX !== undefined || s.paddingY !== undefined) {
@@ -73,6 +78,9 @@ export function nodeCss(node: DesignNode, system?: DesignSystem, fallbackStyles 
     css.paddingTop = css.paddingBottom = s.paddingY ?? cssValue('padding', 0);
   }
   if (s.borderColor && node.type !== 'line' && node.type !== 'arrow') css.border = `${length(cssValue('borderWidth', 1))} solid ${cssValue('borderColor', s.borderColor)}`;
+  if (s.outlineColor) css.outline = `${s.outlineWidth ?? 1}px solid ${s.outlineColor}`;
+  if (s.outlineOffset !== undefined) css.outlineOffset = s.outlineOffset;
+  if (s.blendMode !== undefined) css.mixBlendMode = s.blendMode;
   if (s.shadow) css.boxShadow = cssValue('shadow', 'none');
   const effects = effectCss(node);
   if (effects.boxShadow && s.shadow && !['none', 'inherit', 'initial', 'unset', 'revert', 'revert-layer'].includes(s.shadow.trim().toLowerCase())) effects.boxShadow = `${cssValue('shadow', 'none')}, ${effects.boxShadow}`;
@@ -119,7 +127,7 @@ function renderNode(node: DesignNode, children: Map<string | null, DesignNode[]>
   const style = nodeCss(node, options.system, options.styleFallbacks.get(node.id));
   const shell = options.included && !options.included.has(node.id);
   if (options.staticMap) { style.animation = 'none'; style.transition = 'none'; }
-  if (shell) Object.assign(style, { background: 'transparent', borderColor: 'transparent', boxShadow: 'none', textShadow: 'none' });
+  if (shell) Object.assign(style, { background: 'transparent', borderColor: 'transparent', outline: 'none', mixBlendMode: 'normal', boxShadow: 'none', textShadow: 'none' });
   if (linkedAncestor && node.styles.pointerEvents === undefined) style.pointerEvents = 'none';
   const attributes = `${options.hasLinks ? `id="${escapeHtml(node.id)}" ` : ''}data-node-id="${escapeHtml(node.id)}" data-node-type="${node.type}" aria-label="${escapeHtml(node.name)}" style="${escapeHtml(inlineCss(style))}"`;
   const vector = node.type === 'code' ? vectorDataUrl(node.source ?? '') : null;
@@ -205,7 +213,7 @@ export function exportNodeCode(project: DesignProject, pageId: string, nodeId: s
   if (!node) throw new Error(`Node not found: ${nodeId}`);
   const renderOptions = { ...options, system: project.designSystem, styleFallbacks: new Map(page.nodes.map(node => [node.id, node.styles])), hasLinks: nodes.some(node => !!node.href && isSafeLink(node.href)) };
   const size = nodeBoxSize(node);
-  return htmlDocument(`${project.name} — ${pageLabel(project, page)} — ${node.name}`, `<main style="position:relative;width:${size.width}px;height:${size.height}px">${renderNode({ ...node, x: 0, y: 0 }, childIndex(nodes), renderOptions)}</main>`, node.styles.fill ?? '#171717', project.designSystem);
+  return htmlDocument(`${project.name} — ${pageLabel(project, page)} — ${node.name}`, `<main style="position:relative;width:${size.width}px;height:${size.height}px">${renderNode({ ...node, x: 0, y: 0 }, childIndex(nodes), renderOptions)}</main>`, 'transparent', project.designSystem);
 }
 
 function filename(value: string): string {

@@ -4,6 +4,7 @@ import { defaultTokens, type DesignProject, type Operation, type ProjectVersion 
 import { ASSET_MIME_TYPES, ASSET_REF_PATTERN, MAX_ASSET_BYTES, MAX_ASSET_CHUNK_BYTES } from './media.ts';
 import { BINDABLE_STYLE_PROPERTIES, DESIGN_TOKEN_KINDS, LEGACY_TOKEN_IDS, compatibleTokenKinds, defaultDesignSystem } from './design-system.ts';
 import { BOX_SIZING_VALUES, CURSOR_VALUES, OBJECT_FIT_VALUES, OVERFLOW_VALUES, POINTER_EVENTS_VALUES, TEXT_DECORATION_VALUES, TEXT_OVERFLOW_VALUES, WHITE_SPACE_VALUES, safeColor, safeCssText, safeEffectColor } from './effects.ts';
+import { BLEND_MODES } from './appearance.ts';
 
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024;
 export const idSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/, 'Use a safe ID containing letters, numbers, underscores or hyphens');
@@ -116,8 +117,26 @@ export const shaderSchema = z.object({
   seed: z.number().finite().min(0).max(10_000).optional(), animate: z.boolean().optional(), fragment: z.string().max(30_000).optional(),
 }).strict();
 
+const gradientSchema = z.object({
+  type: z.enum(['linear', 'radial']), angle: z.number().finite().min(-3600).max(3600), interpolation: z.enum(['srgb', 'oklab']),
+  stops: z.array(z.object({
+    id: idSchema, color: safeColorSchema.refine(safeEffectColor, 'Use a gradient color rather than a CSS-wide keyword'),
+    position: z.number().finite().min(0).max(100), opacity: z.number().finite().min(0).max(1),
+  }).strict()).min(2).max(12).superRefine((stops, ctx) => {
+    const ids = new Set<string>();
+    stops.forEach((stop, index) => {
+      if (ids.has(stop.id)) ctx.addIssue({ code: 'custom', message: `Duplicate gradient stop ID: ${stop.id}`, path: [index, 'id'] });
+      ids.add(stop.id);
+    });
+  }),
+}).strict().describe('Editable native CSS gradient with unique stable stop IDs. Stored stop order is preserved; rendering sorts by percentage position. Angle is in degrees and applies to linear gradients. Color interpolation requires a modern browser.');
+const cornerRadius = z.number().finite().min(0).max(100_000);
+
 export const nodeStyleSchema = z.object({
   fill: color.optional(), color: color.optional(),
+  fillMode: z.enum(['solid', 'gradient', 'none']).optional().describe('Absent means legacy solid fill. Gradient mode uses gradient; none hides fill without deleting saved colors or gradient settings.'),
+  fillOpacity: z.number().finite().min(0).max(1).optional().describe('Solid box-fill opacity factor, default 1. Multiplies the authored color alpha without changing the saved color or token binding. Text and line colors retain their existing behavior.'),
+  gradient: gradientSchema.optional(),
   fontSize: z.number().finite().min(1).max(1024).optional(),
   fontWeight: z.number().finite().min(1).max(1000).optional(),
   fontStyle: z.enum(['normal', 'italic']).optional(),
@@ -125,9 +144,13 @@ export const nodeStyleSchema = z.object({
   lineHeight: z.number().finite().min(0.1).max(10).optional(),
   letterSpacing: z.number().finite().min(-1000).max(1000).optional(),
   shadow: z.string().max(2000).refine(safeShadow, 'Use a safe CSS shadow without aliases, URLs or declarations').optional(),
-  radius: z.number().finite().min(0).max(100_000).optional(),
+  radius: cornerRadius.optional(),
+  radiusMode: z.enum(['uniform', 'individual']).optional(),
+  cornerRadii: z.object({ topLeft: cornerRadius, topRight: cornerRadius, bottomRight: cornerRadius, bottomLeft: cornerRadius }).strict().optional().describe('Individual corners in pixels, active only in individual radius mode. Ellipses retain their circular shape.'),
   opacity: z.number().finite().min(0).max(1).optional(),
+  blendMode: z.enum(BLEND_MODES).optional(),
   borderColor: color.optional(), borderWidth: z.number().finite().min(0).max(1000).optional(),
+  outlineColor: safeColorSchema.optional(), outlineWidth: z.number().finite().min(0).max(1000).optional(), outlineOffset: effectOffset.optional(),
   textAlign: z.enum(['left', 'center', 'right']).optional(),
   listStyleType: z.enum(['none', 'disc', 'decimal']).optional().describe('Text nodes render each plain-text line as a native list item without changing content.'),
   layout: z.enum(['free', 'vertical', 'horizontal']).optional(),

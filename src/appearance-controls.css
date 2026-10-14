@@ -1,0 +1,87 @@
+.appearance-controls { position: relative; min-width: 0; color: #d5d5d5; }
+.appearance-controls:focus { outline: none; }
+.appearance-controls:focus-visible { outline: 1px solid #7db8ff; outline-offset: -1px; }
+.appearance-controls .appearance-section { padding: 8px; }
+.appearance-controls .appearance-section > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; margin-bottom: 6px; }
+.inspector-content .appearance-section > header > h3, .appearance-controls .appearance-section > header > h3 { margin: 0; color: #d8d8d8; font-size: 12px; font-weight: 550; line-height: 18px; }
+.appearance-controls .appearance-section-content { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.appearance-controls .appearance-field { min-height: 28px; margin: 0; gap: 8px; }
+.appearance-controls .appearance-field > span, .appearance-controls .appearance-color-field > span, .appearance-controls .appearance-select-row > span, .appearance-controls .appearance-layer-opacity > span { flex: 0 0 52px; min-width: 0; color: #aaaaaa; font-size: 11px; line-height: 1.4; }
+.appearance-controls .field-input { height: 28px; background: #272727; border-color: #3c3c3c; border-radius: 6px; }
+.appearance-controls .field-input input { padding: 0 8px; color: #d8d8d8; font-size: 11px; }
+.appearance-controls .field-input > span { padding-right: 7px; color: #a6a6a6; font-size: 10px; }
+.appearance-controls .field-input:focus-within { border-color: #6d99cb; }
+.appearance-controls input:disabled { color: #858585; cursor: default; }
+.appearance-controls .rounded-select { height: 28px; min-height: 28px; color: #d8d8d8; background: #272727; border-color: #3c3c3c; border-radius: 6px; font-size: 11px; }
+.appearance-controls .rounded-select:hover:not(:disabled) { background: #303030; border-color: #505050; }
+.appearance-controls .appearance-select-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.appearance-controls .appearance-select-row > .rounded-select { flex: 1; min-width: 0; }
+.appearance-controls .appearance-segments { display: flex; align-items: stretch; gap: 2px; min-width: 0; padding: 2px; background: #252525; border: 1px solid #383838; border-radius: 6px; }
+.appearance-controls .appearance-segments > button { display: flex; flex: 1; align-items: center; justify-content: center; min-width: 0; height: 24px; padding: 0 8px; color: #b1b1b1; font-size: 11px; line-height: 1; background: transparent; border: 0; border-radius: 4px; }
+.appearance-controls .appearance-segments > button:hover:not(:disabled) { color: #e7e7e7; background: #303030; }
+.appearance-controls .appearance-segments > button[aria-pressed="true"] { color: #eeeeee; background: #414141; }
+.appearance-controls .appearance-radius-mode { padding: 1px; }
+.appearance-controls .appearance-radius-mode > button { flex: initial; height: 22px; padding: 0 7px; font-size: 10px; }
+.appearance-controls .appearance-linked-control { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.appearance-controls .appearance-linked-control > :first-child { flex: 1; min-width: 0; }
+.appearance-controls .appearance-token-link { display: flex; flex: 0 0 24px; align-self: flex-end; align-items: center; justify-content: center; height: 28px; }
+.appearance-controls .appearance-token-link .appearance-token-select { display: flex; align-items: center; justify-content: center; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; color: #9d9d9d; background: transparent; border-color: transparent; }
+.appearance-controls .appearance-token-link .appearance-token-select:hover:not(:disabled) { color: #e1e1e1; background: #363636; border-color: transparent; }
+.appearance-controls .appearance-token-link.is-linked .appearance-token-select { color: #9bc5ff; background: #2c3746; }
+.appearance-controls .appearance-color-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.appearance-controls .appearance-color-value { display: flex; flex: 1; align-items: center; gap: 0; min-width: 0; height: 28px; overflow: hidden; background: #272727; border: 1px solid #3c3c3c; border-radius: 6px; }
+.appearance-controls .appearance-color-value:focus-within { border-color: #6d99cb; outline: 1px solid #6d99cb; }
+.appearance-controls .appearance-swatch { position: relative; display: block; flex: 0 0 20px; width: 20px; height: 20px; margin: 0 0 0 3px; overflow: hidden; background-color: #414141; background-image: conic-gradient(#414141 25%, #777777 0 50%, #414141 0 75%, #777777 0); background-size: 8px 8px; border: 1px solid #777777; border-radius: 3px; }
+.appearance-controls .appearance-swatch > span { position: absolute; inset: 0; }
+.appearance-controls .appearance-swatch input { position: absolute; inset: -6px; width: 32px; height: 32px; padding: 0; opacity: 0; cursor: pointer; }
+.appearance-controls .appearance-swatch:focus-within { outline: 2px solid #7db8ff; outline-offset: -2px; }
+.appearance-controls .appearance-color-value > .appearance-field { flex: 1; min-width: 0; height: 26px; min-height: 26px; }
+.appearance-controls .appearance-color-value .field-input { height: 26px; background: transparent; border: 0; border-radius: 0; }
+.appearance-controls .appearance-color-value .field-input:focus-within { outline: none; }
+.appearance-controls .appearance-color-value .field-input input { padding: 0 6px; }
+.appearance-controls .appearance-field.appearance-hidden-label > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.appearance-controls .appearance-stacked { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.appearance-controls .appearance-stacked > span { flex: none; min-height: 14px; color: #ababab; font-size: 10px; line-height: 14px; }
+.appearance-controls .appearance-stacked > .field-input { flex: none; }
+.appearance-controls .appearance-corners { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.appearance-controls .appearance-corners .appearance-field > span { flex-basis: 18px; color: #b5b5b5; font-size: 10px; }
+.appearance-controls .appearance-layer-opacity { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.appearance-controls .appearance-layer-opacity > .appearance-field { flex: 0 0 62px; width: 62px; }
+.appearance-controls .appearance-layer-opacity > .appearance-token-link { margin-left: -4px; }
+.appearance-controls .appearance-opacity-range { flex: 1; width: 0; min-width: 24px; height: 16px; margin: 0; accent-color: #cccccc; appearance: none; background: transparent; cursor: ew-resize; }
+.appearance-controls .appearance-opacity-range::-webkit-slider-runnable-track { height: 3px; background: #555555; border-radius: 2px; }
+.appearance-controls .appearance-opacity-range::-webkit-slider-thumb { width: 10px; height: 10px; margin-top: -3.5px; appearance: none; background: #d6d6d6; border: 1px solid #202020; border-radius: 50%; }
+.appearance-controls .appearance-opacity-range::-moz-range-track { height: 3px; background: #555555; border-radius: 2px; }
+.appearance-controls .appearance-opacity-range::-moz-range-thumb { width: 8px; height: 8px; background: #d6d6d6; border: 1px solid #202020; border-radius: 50%; }
+.appearance-controls .appearance-opacity-range:disabled { opacity: .4; cursor: default; }
+.appearance-controls .appearance-fill-color-row, .appearance-controls .appearance-stop-color-row { display: grid; grid-template-columns: minmax(0, 1fr) 66px; align-items: end; gap: 8px; min-width: 0; }
+.appearance-controls .appearance-gradient-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.appearance-controls .appearance-gradient-kind { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 8px; }
+.appearance-controls .appearance-gradient-kind .appearance-field > span { flex: 0 0 auto; font-size: 10px; }
+.appearance-controls .appearance-gradient-kind .appearance-field { gap: 6px; }
+.appearance-controls .appearance-gradient-strip { position: relative; height: 43px; margin: 0 7px; }
+.appearance-controls .appearance-gradient-track { position: absolute; top: 0; left: 0; right: 0; height: 21px; overflow: hidden; background-color: #454545; background-image: conic-gradient(#454545 25%, #777777 0 50%, #454545 0 75%, #777777 0); background-size: 10px 10px; border: 1px solid #686868; border-radius: 4px; }
+.appearance-controls .appearance-gradient-track > div { width: 100%; height: 100%; }
+.appearance-controls .appearance-gradient-pins { position: absolute; top: 25px; left: 0; right: 0; height: 18px; }
+.appearance-controls .appearance-gradient-stop { position: absolute; z-index: 1; display: block; width: 14px; height: 17px; padding: 2px; transform: translateX(-50%); touch-action: none; background: #333333; border: 1px solid #949494; border-radius: 3px; cursor: ew-resize; }
+.appearance-controls .appearance-gradient-stop::before { position: absolute; top: -3px; left: 4px; width: 4px; height: 4px; content: ''; transform: rotate(45deg); background: inherit; border-top: 1px solid #949494; border-left: 1px solid #949494; }
+.appearance-controls .appearance-gradient-stop > span { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; background-color: #555555; background-image: conic-gradient(#555555 25%, #999999 0 50%, #555555 0 75%, #999999 0); background-size: 6px 6px; border-radius: 1px; }
+.appearance-controls .appearance-gradient-stop i { display: block; width: 100%; height: 100%; }
+.appearance-controls .appearance-gradient-stop:hover:not(:disabled) { z-index: 2; border-color: #dddddd; }
+.appearance-controls .appearance-gradient-stop.is-selected { z-index: 3; background: #4497ff; border-color: #9ac7ff; }
+.appearance-controls .appearance-gradient-stop.is-selected::before { border-color: #9ac7ff; }
+.appearance-controls .appearance-gradient-stop:focus-visible { z-index: 4; outline-offset: 2px; }
+.appearance-controls .appearance-stop-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; margin-top: -2px; }
+.appearance-controls .appearance-stop-heading > span { color: #c4c4c4; font-size: 11px; }
+.appearance-controls .appearance-stop-heading > span > span { margin-left: 4px; color: #a2a2a2; font-size: 10px; font-variant-numeric: tabular-nums; }
+.appearance-controls .appearance-stop-heading > div { display: flex; gap: 2px; }
+.appearance-controls .appearance-stop-heading .icon-button { width: 22px; height: 22px; color: #b4b4b4; }
+.appearance-controls .appearance-gradient-values { display: grid; grid-template-columns: minmax(0, 1fr) 78px; align-items: center; gap: 8px; }
+.appearance-controls .appearance-gradient-values .appearance-field { gap: 6px; }
+.appearance-controls .appearance-gradient-values .appearance-field > span { flex-basis: 42px; font-size: 10px; }
+.appearance-controls .appearance-outline-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 8px; }
+.appearance-controls .appearance-outline-values .appearance-field { gap: 5px; }
+.appearance-controls .appearance-outline-values .appearance-field > span { flex-basis: auto; font-size: 10px; }
+.appearance-controls .appearance-no-fill { margin: 0; padding: 5px 0; color: #a7a7a7; font-size: 11px; }
+.appearance-controls .appearance-save-status { padding: 5px 8px; color: #b8b8b8; font-size: 10px; line-height: 16px; border-bottom: 1px solid #353535; }
+.appearance-controls .appearance-error { margin: 0; padding: 7px 8px; color: #e9b8b1; font-size: 11px; line-height: 1.45; border-bottom: 1px solid #353535; }

@@ -54,8 +54,25 @@ export interface TransformEffect {
 
 export type NodeEffect = ShadowEffect | BlurEffect | TransformEffect;
 
+export interface GradientStop {
+  id: string;
+  color: string;
+  position: number;
+  opacity: number;
+}
+
+export interface GradientFill {
+  type: 'linear' | 'radial';
+  angle: number;
+  interpolation: 'srgb' | 'oklab';
+  stops: GradientStop[];
+}
+
 export interface NodeStyle {
   fill?: string;
+  fillMode?: 'solid' | 'gradient' | 'none';
+  fillOpacity?: number;
+  gradient?: GradientFill;
   color?: string;
   fontSize?: number;
   fontWeight?: number;
@@ -65,9 +82,15 @@ export interface NodeStyle {
   letterSpacing?: number;
   shadow?: string;
   radius?: number;
+  radiusMode?: 'uniform' | 'individual';
+  cornerRadii?: { topLeft: number; topRight: number; bottomRight: number; bottomLeft: number };
   opacity?: number;
+  blendMode?: 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten' | 'color-dodge' | 'color-burn' | 'hard-light' | 'soft-light' | 'difference' | 'exclusion' | 'hue' | 'saturation' | 'color' | 'luminosity' | 'plus-darker' | 'plus-lighter';
   borderColor?: string;
   borderWidth?: number;
+  outlineColor?: string;
+  outlineWidth?: number;
+  outlineOffset?: number;
   textAlign?: 'left' | 'center' | 'right';
   listStyleType?: 'none' | 'disc' | 'decimal';
   layout?: 'free' | 'vertical' | 'horizontal';
