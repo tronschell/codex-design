@@ -6,6 +6,8 @@ An infinite canvas for designing interfaces and slides with your coding agent. B
 
 `Codex plugin` · `MCP Apps` · `React` · `TypeScript` · `Design tools`
 
+![Codex Design with the Forma workspace board](docs/screenshots/forma-workspace.jpg)
+
 Projects contain boards, pages and frames. Each project shares one editable design system; each board keeps its own inspiration. Component conversations, media, source exports and version history stay with the document. Chats keep independent canvas selections. Generated screens appear progressively with a grey loading wipe.
 
 ## Run
