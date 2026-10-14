@@ -10,7 +10,7 @@ import HistoryPanel from './HistoryPanel';
 import ExportPanel from './ExportPanel';
 import ProjectLibrary from './ProjectLibrary';
 import { resolveProjectTokens } from '../shared/design-system';
-import { hasTransformedAncestor, parentLocalDelta, parentLocalPoint, visualBounds } from '../shared/effects';
+import { hasTransformedAncestor, parentLocalDelta, parentLocalPoint, visibleBounds, visualBounds } from '../shared/effects';
 import { createSnapScene, snapBox, type SnapBox, type SnapScene, type SnapGuide } from '../shared/snapping';
 import { importProjectFile } from './export-utils';
 import InsertMenu from './InsertMenu';
@@ -26,7 +26,8 @@ import { recordCanvasReady, recordCanvasView } from './canvas-profile';
 type Tool = 'select' | 'hand' | 'text' | 'frame' | 'note' | 'pen' | 'rectangle' | 'ellipse' | 'line' | 'arrow' | 'code' | 'comment';
 type Menu = 'project' | 'page' | 'shapes' | 'zoom' | 'frames' | 'insert' | 'comments' | null;
 type ObjectGesture = { kind: 'drag' | 'resize'; targets: DesignNode[]; selectionKey: string; box: SnapBox; nodes: DesignNode[]; scene: SnapScene | null; corner?: string; startX: number; startY: number; moved: boolean; pointer: { clientX: number; clientY: number } };
-type Gesture = { kind: 'pan'; startX: number; startY: number; view: Viewport } | ObjectGesture | { kind: 'draw'; tool: Tool; startX: number; startY: number; x: number; y: number; parentId: string | null; points: { x: number; y: number }[] };
+type MarqueeGesture = { kind: 'marquee'; startX: number; startY: number; clientX: number; clientY: number; additive: boolean; initial: string[]; nodes: DesignNode[]; candidates: { id: string; box: SnapBox }[]; moved: boolean };
+type Gesture = { kind: 'pan'; startX: number; startY: number; view: Viewport } | ObjectGesture | MarqueeGesture | { kind: 'draw'; tool: Tool; startX: number; startY: number; x: number; y: number; parentId: string | null; points: { x: number; y: number }[] };
 type HistoryEntry = { projectId: string; pageId: string; before: DesignPage; after: DesignPage; beforeThreads: CommentThread[]; afterThreads: CommentThread[] };
 type ChangeBox = { id: string; x: number; y: number; width: number; height: number; removed?: boolean };
 const clippedRootTypes = new Set<DesignNode['type']>(['frame', 'code', 'image', 'video', 'shader']);
@@ -94,7 +95,9 @@ export default function App() {
   const project = historyOpen && historyPreview?.id === liveProject?.id ? historyPreview : liveProject;
   const [boardId, setBoardId] = useState(initialBoardId);
   const [pageId, setPageId] = useState(() => embedded ? '' : new URLSearchParams(location.search).get('page') || '');
-  const [selectionIds, setSelectionIds] = useState<string[]>([]);
+  const [storedSelectionIds, setSelectionIds] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<{ box: SnapBox | null; ids: string[] } | null>(null);
+  const selectionIds = marquee?.ids ?? storedSelectionIds;
   const selection = selectionIds.at(-1) ?? null, selectionKey = JSON.stringify(selectionIds), multiple = selectionIds.length > 1;
   const setSelection = useCallback((id: string | null) => setSelectionIds(id ? [id] : []), []);
   const [tool, setTool] = useState<Tool>('select'), [menu, setMenu] = useState<Menu>(null), [inspector, setInspector] = useState(false);
@@ -177,7 +180,7 @@ export default function App() {
   }), [selectedNodes, nodeById]);
   const movableSelection = selectedRoots.length > 0 && selectedRoots.every(node => objectEditable(node,nodeById) && !['vertical','horizontal'].includes(nodeById.get(node.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(node,baseNodes,{x:0,y:0}) !== null);
   const roots = useMemo(() => nodes.filter(node => !node.parentId), [nodes]);
-  const cancelGesture = useCallback(() => { gesture.current = null; setPreviewPatch(null); setDrawing(null); setSnapGuides([]); }, []);
+  const cancelGesture = useCallback(() => { gesture.current = null; setMarquee(null); setPreviewPatch(null); setDrawing(null); setSnapGuides([]); }, []);
   useLayoutEffect(() => { cancelGesture(); }, [project?.id, project?.revision, page?.id, loading, historyOpen, library, tool, modal, previewId, cancelGesture]);
   useLayoutEffect(() => { const g=gesture.current; if(g&&(g.kind==='drag'||g.kind==='resize')&&selectionKey!==g.selectionKey)cancelGesture(); }, [selectionKey,cancelGesture]);
   useEffect(() => {
@@ -233,13 +236,13 @@ export default function App() {
     if (historyOpen) { closeHistory(); return; }
     flushView(); setLibrary(null);
     historyReturn.current = { boardId, pageId: page?.id || '', view: viewRef.current, inspector };
-    gesture.current = null; setDrawing(null); setPreviewPatch(null); setPreviewId(null); setCommentTarget(null); setMenu(null); setTool('select'); setInspector(false); setHistoryOpen(true);
+    cancelGesture(); setPreviewId(null); setCommentTarget(null); setMenu(null); setTool('select'); setInspector(false); setHistoryOpen(true);
   };
   const openLibrary = (mode: 'system' | 'inspiration') => {
     if (!project || historyOpen || loading) return;
     finishCanvasTextEdit(); flushView(); space.current = false;
     if (stageRef.current) stageRef.current.style.cursor = '';
-    gesture.current = null; setDrawing(null); setPreviewPatch(null); setPreviewId(null); setCommentTarget(null); setMenu(null); setModal(null); setTool('select'); setHovered(null); setDropActive(false);
+    cancelGesture(); setPreviewId(null); setCommentTarget(null); setMenu(null); setModal(null); setTool('select'); setHovered(null); setDropActive(false);
     setLibrary(current => current === mode ? null : mode);
   };
   const previewVersion = (snapshot: DesignProject, previous: DesignProject | null) => {
@@ -289,10 +292,10 @@ export default function App() {
   useEffect(() => { if (project && page && !historyOpen) viewCache.current.set(`${project.id}/${page.id}`, view); }, [view, project?.id, page?.id, historyOpen]);
   useEffect(() => { const ids = new Set(page?.nodes.map(node => node.id)); setSelectionIds(previous => { const next = previous.filter(id => ids.has(id)); return next.length === previous.length ? previous : next; }); }, [page?.nodes]);
   useEffect(() => {
-    if (!hydrated || loading || historyOpen || !liveProject || !board || !page || paneSelection?.projectId !== liveProject.id) return;
+    if (!hydrated || loading || historyOpen || marquee || !liveProject || !board || !page || paneSelection?.projectId !== liveProject.id) return;
     const selectedContext = selectedNodes.map(node => ({ id: node.id, name: node.name, type: node.type }));
     updateModelContext({ projectId: liveProject.id, projectName: liveProject.name, boardId: board.id, boardName: board.name, revision: liveProject.revision, pageId: page.id, libraryMode: library, selectedNode: selectedContext.length === 1 ? selectedContext[0] : null, selectedNodes: selectedContext, openThreadId: commentTarget?.threadId || null });
-  }, [hydrated, loading, liveProject?.id, liveProject?.revision, historyOpen, paneSelection?.projectId, board?.id, board?.name, page?.id, selectionKey, commentTarget?.threadId, library]);
+  }, [hydrated, loading, liveProject?.id, liveProject?.revision, historyOpen, !!marquee, paneSelection?.projectId, board?.id, board?.name, page?.id, selectionKey, commentTarget?.threadId, library]);
   useEffect(() => {
     if (!changeFlash || changeFlash.pageId !== page?.id) return;
     const box = stageRef.current;
@@ -309,6 +312,7 @@ export default function App() {
   useEffect(() => { const stage = stageRef.current; if (!stage) return; const wheel = (event: WheelEvent) => {
     if ((event.target as Element).closest('.comment-popover,.dropdown,.selection-toolbar')) return;
     event.preventDefault();
+    if (gesture.current?.kind === 'marquee') return;
     if (event.ctrlKey || event.metaKey) {
       const box = stage.getBoundingClientRect(), px = event.clientX - box.left, py = event.clientY - box.top;
       queueView(old => { const zoom = clampZoom(old.zoom * Math.exp(-event.deltaY * .008)); return { zoom, x: px - (px - old.x) * zoom / old.zoom, y: py - (py - old.y) * zoom / old.zoom }; });
@@ -459,6 +463,28 @@ export default function App() {
     gesture.current = { kind: 'draw', tool, startX: pos.x, startY: pos.y, x: pos.x, y: pos.y, parentId: tool === 'frame' ? null : parentId, points: [pos] };
     capture(e.pointerId);
   };
+  const beginMarquee = (e: ReactPointerEvent) => {
+    if (e.button !== 0 || !page || loading || library || modal || previewId) return;
+    const pos = point(e);
+    const candidates = baseNodes.flatMap(node => {
+      if (!objectEditable(node,nodeById)) return [];
+      const box = visibleBounds(node,baseNodes);
+      return box ? [{id:node.id,box}] : [];
+    });
+    gesture.current={kind:'marquee',startX:pos.x,startY:pos.y,clientX:e.clientX,clientY:e.clientY,additive:e.shiftKey,initial:storedSelectionIds,nodes:baseNodes,candidates,moved:false};
+    setMarquee({box:null,ids:e.shiftKey?storedSelectionIds:[]}); setCommentTarget(null);
+    e.preventDefault(); stageRef.current?.focus({preventScroll:true}); capture(e.pointerId);
+  };
+  const marqueePreview = (g: MarqueeGesture, e: {clientX:number;clientY:number}) => {
+    if (!g.moved && Math.hypot(e.clientX-g.clientX,e.clientY-g.clientY)<4) return {box:null,ids:g.additive?g.initial:[]};
+    g.moved=true;
+    const stage=stageRef.current!.getBoundingClientRect();
+    const pos=point({clientX:Math.max(stage.left,Math.min(stage.right,e.clientX)),clientY:Math.max(stage.top,Math.min(stage.bottom,e.clientY))});
+    const box={x:Math.min(g.startX,pos.x),y:Math.min(g.startY,pos.y),width:Math.abs(pos.x-g.startX),height:Math.abs(pos.y-g.startY)};
+    const hits=g.candidates.filter(({box:target})=>target.x>=box.x-1e-6&&target.y>=box.y-1e-6&&target.x+target.width<=box.x+box.width+1e-6&&target.y+target.height<=box.y+box.height+1e-6);
+    const ids=selectionRoots(hits.map(hit=>hit.id),g.nodes).map(node=>node.id);
+    return {box,ids:g.additive?[...new Set([...g.initial,...ids])]:ids};
+  };
   const canvasDown = (e: ReactPointerEvent) => {
     flushView();
     finishCanvasTextEdit();
@@ -467,7 +493,7 @@ export default function App() {
     if (historyOpen) return;
     if (tool === 'comment') { const pos = point(e); setCommentTarget({ nodeId: null, ...pos }); return; }
     if (tool !== 'select') { beginDraw(e); return; }
-    if (!e.shiftKey) setSelection(null); setCommentTarget(null);
+    beginMarquee(e);
   };
   const nodeDown = (id: string, e: ReactPointerEvent) => {
     flushView();
@@ -529,6 +555,10 @@ export default function App() {
     const g = gesture.current;
     if (!g) { if (tool === 'comment') { const el = (e.target as Element).closest('[data-node-id]'); setHovered(el?.getAttribute('data-node-id') || null); } return; }
     if (g.kind === 'pan') { queueView({ ...g.view, x: g.view.x + e.clientX - g.startX, y: g.view.y + e.clientY - g.startY }); return; }
+    if (g.kind === 'marquee') {
+      const next=marqueePreview(g,e);
+      setMarquee(previous=>({...next,ids:previous&&previous.ids.length===next.ids.length&&previous.ids.every((id,index)=>id===next.ids[index])?previous.ids:next.ids})); return;
+    }
     if (g.kind === 'drag' || g.kind === 'resize') {
       if (showObjectPreview(g,{clientX:e.clientX,clientY:e.clientY},e.altKey)) capture(e.pointerId);
       return;
@@ -542,6 +572,7 @@ export default function App() {
     const g = gesture.current; gesture.current = null; setSnapGuides([]);
     if (!g || !page) return;
     if (stageRef.current?.hasPointerCapture(e.pointerId)) stageRef.current.releasePointerCapture(e.pointerId);
+    if (g.kind === 'marquee') { setSelectionIds(marqueePreview(g,e).ids); setMarquee(null); return; }
     if (g.kind === 'drag' || g.kind === 'resize') {
       const result = objectPreview(g,{clientX:e.clientX,clientY:e.clientY},e.altKey);
       const operations: Operation[] = result ? g.targets.flatMap(node => { const patch = result.patches[node.id]; return Object.entries(patch).some(([key,value])=>node[key as keyof DesignNode]!==value) ? [{type:'update_node' as const,pageId:page.id,nodeId:node.id,patch}] : []; }) : [];
@@ -576,10 +607,11 @@ export default function App() {
 
   useEffect(() => {
     const keyDown = (e: KeyboardEvent) => {
+      if (gesture.current?.kind === 'marquee') { if (!['Shift','Control','Meta','Alt'].includes(e.key)) e.preventDefault(); if(e.key==='Escape'){flushView();cancelGesture();} return; }
       if ((e.target as HTMLElement).closest('input,textarea,select,[contenteditable="true"]')) return;
       const command = e.metaKey || e.ctrlKey;
       if (e.key==='Alt') { const g=gesture.current; if(g&&(g.kind==='drag'||g.kind==='resize'))showObjectPreview(g,g.pointer,true); return; }
-      if (e.key === 'Escape') { if (!gesture.current&&!menu&&!commentTarget&&!previewId&&!modal&&!library&&!historyOpen) setSelection(null); flushView(); setSnapGuides([]); gesture.current = null; setDrawing(null); setPreviewPatch(null); setMenu(null); setCommentTarget(null); setPreviewId(null); setModal(null); setTool('select'); setLibrary(null); if (historyOpen && !saving) closeHistory(); return; }
+      if (e.key === 'Escape') { if (!gesture.current&&!menu&&!commentTarget&&!previewId&&!modal&&!library&&!historyOpen) setSelection(null); flushView(); cancelGesture(); setMenu(null); setCommentTarget(null); setPreviewId(null); setModal(null); setTool('select'); setLibrary(null); if (historyOpen && !saving) closeHistory(); return; }
       if (modal || previewId) return;
       if (library) return;
       if (e.code === 'Space') { if ((e.target as HTMLElement).closest('button')) return; e.preventDefault(); space.current = true; if (stageRef.current) stageRef.current.style.cursor = 'grab'; return; }
@@ -659,12 +691,12 @@ export default function App() {
     <header className="titlebar"><ProjectMenu project={project} projects={projects} readOnly={historyOpen} boardId={board?.id} open={menu==='project'} onToggle={()=>{setMenu(menu==='project'?null:'project');void refreshProjects().catch(()=>{});}} onSelectProject={id=>{if(historyOpen)return;setBoardId('');setPageId('');void load(id);setMenu(null);}} onSelectBoard={selectBoard} onCreateProject={createProject} onCreateBoard={createBoard} onImport={()=>importRef.current?.click()}/>
     <span className="save-status">{mediaProgress?<><LoaderCircle size={12} className="spin"/><span className="media-progress-text">{mediaProgress}</span></>:historyOpen?<><History size={12}/>Preview · v{project?.revision}</>:saving?<><LoaderCircle size={12} className="spin"/>Saving…</>:project?<><Check size={12}/>All changes saved</>:null}</span><div className="titlebar-actions"><IconButton label="Project design system" active={library==='system'} disabled={!project||historyOpen||loading} onClick={()=>openLibrary('system')}><Palette size={17}/></IconButton><IconButton label="Board inspiration" active={library==='inspiration'} disabled={!project||historyOpen||loading} onClick={()=>openLibrary('inspiration')}><Images size={17}/></IconButton><IconButton label="Version history" active={historyOpen} disabled={!liveProject||!!saving} onClick={openHistory}><History size={17}/></IconButton><div className="comment-control"><IconButton label="Tag a component · C" disabled={!project||loading||historyOpen||!!library} active={tool==='comment'} onClick={()=>{setTool(tool==='comment'?'select':'comment');setCommentTarget(null);setMenu(null);}}><MessageCircle size={17}/>{project?.threads.some(t=>t.queued)&&<span className="notification-dot"/>}</IconButton><button ref={commentMore} className="comment-more" disabled={!project||loading||historyOpen||!!library} aria-label="All comments" aria-haspopup="dialog" aria-expanded={menu==='comments'} aria-controls={menu==='comments'?'all-comments':undefined} title="More comment options · All comments" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();setMenu(null);}}} onClick={()=>{finishCanvasTextEdit();cancelGesture();setCommentTarget(null);setMenu(menu==='comments'?null:'comments');}}><ChevronDown size={12}/></button>{menu==='comments'&&project&&!loading&&!historyOpen&&!library&&<CommentList key={project.id} project={project} showPins={showComments} onTogglePins={()=>setShowComments(value=>!value)} onOpen={openComment} onClose={()=>{setMenu(null);commentMore.current?.focus({preventScroll:true});}}/>}</div><button className="share-button" title="Export · ⌘⇧E" disabled={!project||historyOpen||!!library} onClick={()=>setModal('export')}><Download size={13}/>Export</button><IconButton label="Toggle fullscreen" onClick={()=>{void fullscreen().catch(()=>notify('Fullscreen is not available in this view.'));}}><Maximize2 size={17}/></IconButton></div></header>
     <div className="workspace">
-      <main ref={stageRef} className={`canvas-stage tool-${tool} ${grid?'show-grid':''} ${dropActive?'is-file-drop':''}`} aria-label="Infinite design canvas" aria-hidden={!!library} onPointerDown={canvasDown} onPointerMove={canvasMove} onPointerLeave={()=>setHovered(null)} onPointerUp={e=>{void canvasUp(e);}} onPointerCancel={()=>{flushView();cancelGesture();}} onLostPointerCapture={()=>{if(gesture.current)cancelGesture();}} onContextMenu={e=>e.preventDefault()} onDragOver={e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();e.dataTransfer.dropEffect=historyOpen?'none':'copy';if(!historyOpen&&!importingMedia.current)setDropActive(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDropActive(false);}} onDrop={e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();setDropActive(false);if(historyOpen){notify('Close History to add media.');return;}const target=(e.target as Element).closest('[data-node-id]')?.getAttribute('data-node-id')||null;void importMedia(Array.from(e.dataTransfer.files),point(e),nearestFrame(target));}} style={{...(grid?{backgroundPosition:`${view.x}px ${view.y}px`,backgroundSize:`${Math.max(8,40*view.zoom)}px ${Math.max(8,40*view.zoom)}px`}:{}),...(library?{display:'none'}:{})}}>
+      <main ref={stageRef} tabIndex={-1} className={`canvas-stage tool-${tool} ${grid?'show-grid':''} ${dropActive?'is-file-drop':''}`} aria-label="Infinite design canvas" aria-hidden={!!library} onPointerDown={canvasDown} onPointerMove={canvasMove} onPointerLeave={()=>setHovered(null)} onPointerUp={e=>{void canvasUp(e);}} onPointerCancel={()=>{flushView();cancelGesture();}} onLostPointerCapture={()=>{if(gesture.current)cancelGesture();}} onContextMenu={e=>e.preventDefault()} onDragOver={e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();e.dataTransfer.dropEffect=historyOpen?'none':'copy';if(!historyOpen&&!importingMedia.current)setDropActive(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDropActive(false);}} onDrop={e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();setDropActive(false);if(historyOpen){notify('Close History to add media.');return;}const target=(e.target as Element).closest('[data-node-id]')?.getAttribute('data-node-id')||null;void importMedia(Array.from(e.dataTransfer.files),point(e),nearestFrame(target));}} style={{...(grid?{backgroundPosition:`${view.x}px ${view.y}px`,backgroundSize:`${Math.max(8,40*view.zoom)}px ${Math.max(8,40*view.zoom)}px`}:{}),...(library?{display:'none'}:{})}}>
         <div className="canvas-world" style={{transform:`translate(${view.x}px,${view.y}px) scale(${view.zoom})`}}><CanvasNodes nodes={nodes} designSystem={project?.designSystem} visibleRootIds={visibleRootIds} interactive={!historyOpen&&!library} onSelect={selectNode} onTextEdit={historyOpen||library||tool==='comment'?undefined:editText}/></div>
         {frameLabels.map(({node,left,top,width,height})=><div key={node.id} className={`canvas-frame-label${width<100?' compact':''}`} style={{left:view.x+left,top:view.y+top,width,height,lineHeight:`${height}px`}} onPointerDown={e=>{e.stopPropagation();nodeDown(node.id,e);}}><button className="frame-name" title={node.name} onDoubleClick={e=>{if(!e.shiftKey){setSelection(node.id);setInspector(true);}}}>{!historyOpen && !library && node.generation?.status === 'building' ? `Building · ${node.name}` : node.name}</button><button className="frame-play" title={`Preview ${node.name}`} aria-label={`Preview ${node.name}`} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();setPreviewId(node.id);}}><Play size={10}/><span>PLAY</span></button></div>)}
         {multiple&&tool==='select'&&visibleSelection.map(node=>{const box=visualBounds(node,nodes);return <div key={node.id} className="selection-overlay selection-member" aria-hidden="true" style={{left:view.x+box.x*view.zoom,top:view.y+box.y*view.zoom,width:box.width*view.zoom,height:box.height*view.zoom}}/>;})}
         {selectedBox&&(tool!=='comment'||commentTarget?.nodeId===selected?.id)&&<div className={`selection-overlay${multiple?' selection-group':''}`} style={{left:view.x+selectedBox.x*view.zoom,top:view.y+selectedBox.y*view.zoom,width:selectedBox.width*view.zoom,height:selectedBox.height*view.zoom}}>
-          {tool==='select'&&!historyOpen&&!saving&&!loading&&resizableSelection&&['nw','ne','sw','se'].map(corner=><button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize selection ${corner}`} title={multiple?'Resize selected bounds; child contents retain their size':`Resize ${corner}`} onPointerDown={e=>{
+          {tool==='select'&&!marquee&&!historyOpen&&!saving&&!loading&&resizableSelection&&['nw','ne','sw','se'].map(corner=><button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize selection ${corner}`} title={multiple?'Resize selected bounds; child contents retain their size':`Resize ${corner}`} onPointerDown={e=>{
             e.stopPropagation(); if(e.button!==0)return;
             const box=selectionBounds(selectedRoots,baseNodes)!,node=selectedRoots[0],parent=nodeById.get(node.parentId??'');
             gesture.current={kind:'resize',targets:selectedRoots,selectionKey,box,nodes:baseNodes,scene:['vertical','horizontal'].includes(parent?.styles.layout??'')?null:createSnapScene(baseNodes,node,selectedRoots),corner,startX:e.clientX,startY:e.clientY,moved:false,pointer:{clientX:e.clientX,clientY:e.clientY}};capture(e.pointerId);
@@ -682,6 +714,7 @@ export default function App() {
         })}</svg>}
         {hoveredBox&&<div className="hover-outline" style={{left:view.x+hoveredBox.x*view.zoom,top:view.y+hoveredBox.y*view.zoom,width:hoveredBox.width*view.zoom,height:hoveredBox.height*view.zoom}}/>}
         {drawing&&<div className="drawing-preview" style={{left:view.x+drawing.x*view.zoom,top:view.y+drawing.y*view.zoom,width:drawing.width*view.zoom,height:drawing.height*view.zoom,borderRadius:tool==='ellipse'?'50%':0}}/>}
+        {marquee?.box&&<div className="marquee-selection" aria-hidden="true" style={{left:view.x+marquee.box.x*view.zoom,top:view.y+marquee.box.y*view.zoom,width:marquee.box.width*view.zoom,height:marquee.box.height*view.zoom}}/>}
         {changeFlash?.pageId===page?.id&&changeFlash?.boxes.map(box=><div key={`${changeFlash.key}/${box.id}`} className={`version-change-flash ${box.removed?'removed':''}`} style={{left:view.x+box.x*view.zoom,top:view.y+box.y*view.zoom,width:Math.max(3,box.width*view.zoom),height:Math.max(3,box.height*view.zoom)}}/>)}
         {historyOpen&&<div className="history-preview-banner"><History size={13}/><span>Version {project?.revision} · Preview only</span></div>}
         {!loading&&historyOpen&&!nodes.length&&<div className="canvas-empty history-empty"><Frame size={28}/><p>This page was empty in this version.</p></div>}
@@ -723,7 +756,7 @@ export default function App() {
     {(modal==='help'||modal==='auth')&&<div className="modal-backdrop" onPointerDown={()=>{if(modal!=='auth')setModal(null);}}>
       <section className="modal" role="dialog" aria-modal="true" aria-label={modal==='help'?'Keyboard shortcuts':'Connect to workspace'} onPointerDown={e=>e.stopPropagation()}>
         <div className="modal-header"><h2>{modal==='help'?'Keyboard shortcuts':'Connect to your workspace'}</h2>{modal!=='auth'&&<IconButton label="Close dialog" onClick={()=>setModal(null)}><X size={19}/></IconButton>}</div>
-        <div className="modal-body">{modal==='auth'?<form className="auth-form" onSubmit={e=>{e.preventDefault();configureToken(token);setToken('');setModal(null);}}><p>This editor requires the access token configured on its server. It stays in this browser session.</p><label>Access token<input autoFocus aria-label="Workspace access token" type="password" value={token} onChange={e=>setToken(e.target.value)}/></label><button className="primary-button" disabled={!token.trim()}>Connect</button></form>:<div className="shortcut-list">{[['Select','V'],['Add / remove selection','⇧ click'],['Hand / pan','H or Space'],['Text','T'],['Frame','F'],['Rectangle / oval','R / O'],['Line / arrow','L / ⇧L'],['Pencil / note','P / N'],['Tag a component','C'],['Import image / video','⌘I'],['Export','⌘⇧E'],['Duplicate selection','⌘D'],['Undo / redo','⌘Z / ⇧⌘Z'],['Nudge / larger nudge','Arrows / ⇧Arrows'],['Bypass snapping','Hold Option / Alt'],['Fit all / actual size','1 / 0'],['Zoom','⌘ + scroll'],['Cancel / close','Esc']].map(([label,key])=><div key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</div>}</div>
+        <div className="modal-body">{modal==='auth'?<form className="auth-form" onSubmit={e=>{e.preventDefault();configureToken(token);setToken('');setModal(null);}}><p>This editor requires the access token configured on its server. It stays in this browser session.</p><label>Access token<input autoFocus aria-label="Workspace access token" type="password" value={token} onChange={e=>setToken(e.target.value)}/></label><button className="primary-button" disabled={!token.trim()}>Connect</button></form>:<div className="shortcut-list">{[['Select','V'],['Add / remove selection','⇧ click'],['Box select / add','Drag / ⇧ drag'],['Hand / pan','H or Space'],['Text','T'],['Frame','F'],['Rectangle / oval','R / O'],['Line / arrow','L / ⇧L'],['Pencil / note','P / N'],['Tag a component','C'],['Import image / video','⌘I'],['Export','⌘⇧E'],['Duplicate selection','⌘D'],['Undo / redo','⌘Z / ⇧⌘Z'],['Nudge / larger nudge','Arrows / ⇧Arrows'],['Bypass snapping','Hold Option / Alt'],['Fit all / actual size','1 / 0'],['Zoom','⌘ + scroll'],['Cancel / close','Esc']].map(([label,key])=><div key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</div>}</div>
       </section>
     </div>}
     {currentPreview&&<div className="preview-backdrop" role="dialog" aria-modal="true" aria-label={`Preview ${currentPreview.name}`}><div className="preview-topbar"><button className="text-button" onClick={()=>setPreviewId(null)}><ArrowLeft size={17}/>Back to canvas</button><span>{currentPreview.name}</span><IconButton label="Close preview" onClick={()=>setPreviewId(null)}><X size={20}/></IconButton></div><div className="preview-screen" style={{width:currentPreview.width*previewZoom,height:currentPreview.height*previewZoom}}><div style={{position:'relative',width:currentPreview.width,height:currentPreview.height,transform:`scale(${previewZoom})`,transformOrigin:'0 0'}}><NodeView node={{...currentPreview,x:0,y:0}} nodes={nodes} designSystem={project?.designSystem} interactive={false} preview/></div></div><div className="preview-nav"><IconButton label="Previous frame" disabled={previewIndex<=0} onClick={()=>setPreviewId(screens[previewIndex-1].id)}><ChevronLeft size={18}/></IconButton><span>{previewIndex+1} / {screens.length}</span><IconButton label="Next frame" disabled={previewIndex>=screens.length-1} onClick={()=>setPreviewId(screens[previewIndex+1].id)}><ChevronRight size={18}/></IconButton><span className="preview-size">{currentPreview.width} × {currentPreview.height}</span></div></div>}

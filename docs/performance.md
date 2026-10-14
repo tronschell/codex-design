@@ -484,3 +484,16 @@ This is a usability feature, not a measured runtime optimization. Comparable art
 User effect: Shift-click accumulates or removes objects, and group moves/nudges/duplication/deletion save as one undoable change. Selection export and agent context include all selected IDs. Group snapping excludes the moving subtrees, and inverse parent transforms preserve world-space offsets. Group resizing applies only to untransformed free-positioned roots and retains descendant content sizes. No interaction-time, throughput, load-time, CPU, heap/RSS, GPU, browser-memory or FPS measurements were collected; no speed or memory improvement is claimed.
 
 Verification uses production build/package, strict unused-symbol compilation and bounded direct source review. The review corrected fractional-zoom resize edge drift and retained focus before disabling group action buttons. Connected MCP Apps automation does not support modified clicks/native gestures, so live Shift-click, dragging/resizing, keyboard actions and installed-host focus remain unexercised. Existing user designs were not mutated to verify the feature; the GaugeReel JSON retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.
+
+## Box-selection footprint — October 14, 2026
+
+This is a selection usability feature, not a measured runtime optimization. Method: Python Path.stat().st_size over the installed `23a59f8` production files and the current build, same machine and `npm run build`; workload is the self-contained canvas widget and MCP entry, excluding design/media data.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Canvas widget | 699,489 B | 702,937 B | +3,448 B | +0.49% |
+| MCP runtime | 1,030,383 B | 1,030,383 B | 0 B | 0.00% |
+
+User effect: a pointer drag from blank canvas selects enclosed visible objects together; Shift adds them to the existing selection. Geometry is captured at pointer-down, preview IDs remain local until release, and cancellation restores the accepted selection without design/history writes. Candidate bounds respect transformed rectangular overflow clips; the MCP runtime is byte-identical. No selection latency, load time, CPU, heap/RSS, GPU, browser RAM, throughput or FPS metrics were measured, and no runtime speed/memory savings are claimed.
+
+Production compilation/package and bounded source review are the verification method. Review corrected focused-input Escape handling and clipping beneath borders/rotated ancestors. Live native drag/modified-click input is unavailable in the connected MCP Apps browser, so actual gestures, zoomed interaction and installed-host focus remain unexercised. User designs were not mutated for verification; GaugeReel retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.

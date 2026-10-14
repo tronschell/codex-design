@@ -113,6 +113,43 @@ export function visualBounds(node: DesignNode, nodes: DesignNode[]): { x: number
   return { ...position, ...size };
 }
 
+export function visibleBounds(node: DesignNode, nodes: DesignNode[]): { x: number; y: number; width: number; height: number } | null {
+  const chain = ancestors(node,nodes), [a,b,c,d,e,f] = worldMatrix(node,nodes), size = nodeBoxSize(node);
+  if (chain.some(current=>current.hidden) || Math.abs(a*d-b*c)<1e-12) return null;
+  let points = [[0,0],[size.width,0],[size.width,size.height],[0,size.height]].map(([x,y])=>({x:a*x+c*y+e,y:b*x+d*y+f}));
+  if (points.some(point=>!Number.isFinite(point.x)||!Number.isFinite(point.y))) return null;
+  const clip = (distance: (point: {x:number;y:number}) => number) => {
+    const result: typeof points = [];
+    for (let index=0; index<points.length; index++) {
+      const start=points[(index+points.length-1)%points.length], end=points[index], from=distance(start), to=distance(end);
+      if ((from>=0)!==(to>=0)) { const t=from/(from-to); result.push({x:start.x+(end.x-start.x)*t,y:start.y+(end.y-start.y)*t}); }
+      if (to>=0) result.push(end);
+    }
+    points=result;
+  };
+  for (const parent of chain.slice(1)) {
+    const overflow=parent.styles.overflow??(['frame','code','image','video','shader'].includes(parent.type)?'hidden':'visible');
+    const x=parent.styles.overflowX??overflow, y=parent.styles.overflowY??overflow;
+    // CSS computes a visible axis to auto when the other axis scrolls or hides overflow.
+    const clipsX=x!=='visible'||!['visible','clip'].includes(y), clipsY=y!=='visible'||!['visible','clip'].includes(x);
+    if (!clipsX&&!clipsY) continue;
+    const [pa,pb,pc,pd,pe,pf]=worldMatrix(parent,nodes), determinant=pa*pd-pb*pc;
+    if (!Number.isFinite(determinant)||Math.abs(determinant)<1e-12) return null;
+    const inset=borderInsets(parent), inner=nodeInnerSize(parent);
+    const localX=(point:{x:number;y:number})=>(pd*(point.x-pe)-pc*(point.y-pf))/determinant-inset.x;
+    const localY=(point:{x:number;y:number})=>(pa*(point.y-pf)-pb*(point.x-pe))/determinant-inset.y;
+    if (clipsX) { clip(localX); clip(point=>inner.width-localX(point)); }
+    if (clipsY) { clip(localY); clip(point=>inner.height-localY(point)); }
+    if (points.length<3) return null;
+  }
+  const origin=points[0];
+  const area=points.reduce((sum,point,index)=>{const next=points[(index+1)%points.length];return sum+(point.x-origin.x)*(next.y-origin.y)-(point.y-origin.y)*(next.x-origin.x);},0);
+  if (!Number.isFinite(area)||Math.abs(area)<1e-12) return null;
+  const x=Math.min(...points.map(point=>point.x)), y=Math.min(...points.map(point=>point.y));
+  const width=Math.max(...points.map(point=>point.x))-x, height=Math.max(...points.map(point=>point.y))-y;
+  return width>0&&height>0?{x,y,width,height}:null;
+}
+
 function inverseVector(matrix: Matrix, delta: { x: number; y: number }): { x: number; y: number } | null {
   const [a, b, c, d] = matrix, determinant = a * d - b * c;
   if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) return null;
