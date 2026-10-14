@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.svg" />
-  <img src="assets/icon.svg" width="64" height="64" alt="Codex Design logo" />
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-color-dark.svg" />
+  <img src="assets/logo-color.svg" width="64" height="64" alt="Codex Design logo" />
 </picture>
 
 # Codex Design

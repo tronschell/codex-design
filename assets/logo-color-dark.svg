@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Codex Design — color</title>
+  <defs>
+    <clipPath id="top"><path d="M20 8h25a11 11 0 0 1 11 11v13H44V22a2 2 0 0 0-2-2H20Z"/></clipPath>
+    <linearGradient id="field" x1="20" y1="25" x2="56" y2="8" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#377dff"/><stop offset=".48" stop-color="#9161ff"/><stop offset="1" stop-color="#ff6ab3"/>
+    </linearGradient>
+    <filter id="blobs" x="-50%" y="-80%" width="200%" height="260%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency=".055" numOctaves="2" seed="9" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="7" xChannelSelector="R" yChannelSelector="G"/>
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+  </defs>
+  <g clip-path="url(#top)">
+    <path d="M20 8h25a11 11 0 0 1 11 11v13H44V22a2 2 0 0 0-2-2H20Z" fill="url(#field)"/>
+    <g filter="url(#blobs)">
+      <ellipse cx="24" cy="9" rx="11" ry="9" fill="#438aff"/>
+      <ellipse cx="34" cy="25" rx="11" ry="10" fill="#47e3d0"/>
+      <ellipse cx="43" cy="7" rx="10" ry="8" fill="#bd67ff"/>
+      <ellipse cx="55" cy="15" rx="9" ry="10" fill="#ff78bd"/>
+      <ellipse cx="57" cy="33" rx="11" ry="10" fill="#ffc87b"/>
+    </g>
+  </g>
+  <path d="M8 20h12v22a2 2 0 0 0 2 2h22v12H19A11 11 0 0 1 8 45Z" fill="#f5f5f5"/>
+</svg>
