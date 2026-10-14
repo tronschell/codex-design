@@ -39,8 +39,8 @@ The hierarchy is **Application project → Boards → Pages → Frames**. Boards
 | `canvas_set_selection` (app only) | `projectId`, `boardId`, optional `pageId` | `{ saved, selection }`; private conversation preference, no design/history mutation |
 | `canvas_get_pending_comments` | optional `projectId` | `{ comments }` with open queued threads and their anchors |
 | `canvas_reply_to_comment` | `projectId`, `expectedRevision`, `threadId`, `content`, optional `resolve` | `{ project }`; appends an assistant message and clears the queue flag |
-| `canvas_import_project` | `project` | `{ project }` saved with a fresh project ID |
-| `canvas_export_project` | `projectId`, optional `boardId`, `pageId`, `nodeIds`, `format: source / html / react / svg / svg-map`, optional `map` | `{ projectId, revision, boardId?, files, assets, assetPaths }`; scoped text files and binary references |
+| `canvas_import_project` | `project` JSON or version-1 library envelope | `{ project }` saved with a fresh project ID |
+| `canvas_export_project` | `projectId`, optional `boardId`, `pageId`, `nodeIds`, `format: source / html / react / svg / svg-map / library`, optional `map` or library-only `componentId` | `{ projectId, revision, boardId?, files, assets, assetPaths }`; scoped text files and binary references |
 | `canvas_begin_asset_upload` | `name`, `mimeType`, `byteLength` | `{ uploadId, offset, byteLength }` |
 | `canvas_import_generated_image` | `filePath` | Local stdio/model only: `{ asset }` for a completed native PNG/JPEG/WebP result within `CODEX_HOME/generated_images`; does not place it |
 | `canvas_upload_asset_chunk` | `uploadId`, `offset`, base64 `data` | `{ uploadId, offset, byteLength, asset? }`; final chunk includes `asset` metadata |
@@ -134,6 +134,10 @@ Apply checks `expectedRevision`, preserves all saved versions, and saves the sel
 The browser client uses `listVersions(id)`, `getVersion(id, revision)`, and `restoreVersion(id, expectedRevision, revision)` for both transports. Standalone REST routes are `GET /api/projects/:id/history`, `GET /api/projects/:id/history/:revision`, and `POST /api/projects/:id/history/restore` with `{ expectedRevision, revision }`.
 
 ## Export scope
+
+Use `canvas_export_project {projectId, format:"library"}` for the project-wide design system and reusable definitions, or add `componentId` for one definition with its shared tokens. Omit board/page/node scope for library exports. Files include DESIGN.md with token CSS, COMPONENTS.md, per-component Markdown/code, named React JSX, sibling props-interface .d.ts and .prompt.md files, scoped CSS, passive @dsCard specimen HTML, SKILL.md and a version-1 codex-design.library.json envelope. Save media with the returned assets/assetPaths. Source/React exports also carry these references without replacing their scoped design.json.
+
+The dedicated library ZIP imports through the project menu as a separate empty-canvas project. `canvas_import_project` accepts either its `project` field or the entire version-1 envelope; media references must exist in the destination asset store first. Unknown envelope versions are rejected. Current definitions and typed native extensions survive import, while source version journals and queued requests do not travel; components start a new local baseline. Markdown/code remains a readable implementation reference. No source code is executed by import and no compatibility with another host's compiler is claimed.
 
 Without scope IDs, `canvas_export_project` includes every board. `boardId` selects one board, `pageId` selects one page, and `pageId` plus `nodeIds` selects subtrees. A page must belong to the supplied board. Application identity, revision and shared tokens remain available. A scoped selection document retains ancestor shells with frozen positions so omitted siblings do not reflow it; `original-scope.json` retains the original scoped layout/source. Export never changes the saved design.
 

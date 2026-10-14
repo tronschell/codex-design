@@ -5,8 +5,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult, Icon } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { CanvasSelection, DesignProject, Operation } from '../shared/types.ts';
-import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadCancellationSchema, assetUploadSchema, beginAssetUploadSchema, cancelAssetUploadSchema, canvasSelectionSchema, canvasMapSettingsSchema, createProjectSchema, designSystemRequestSchema, designSystemSchema, designSystemTokenSchema, idSchema, inspirationItemSchema, libraryScopeSchema, libraryVersionSchema, messageSchema, nativeComponentDefinitionSchema, nodeSchema, nodeStyleSchema, operationsSchema, projectSchema, projectVersionSummarySchema, readAssetChunkSchema, revisionSchema, threadSchema, tokensSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
+import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadCancellationSchema, assetUploadSchema, beginAssetUploadSchema, cancelAssetUploadSchema, canvasSelectionSchema, canvasMapSettingsSchema, createProjectSchema, designSystemRequestSchema, designSystemSchema, designSystemTokenSchema, idSchema, inspirationItemSchema, libraryScopeSchema, libraryVersionSchema, messageSchema, nativeComponentDefinitionSchema, nodeSchema, nodeStyleSchema, operationsSchema, projectSchema, projectImportSchema, projectVersionSummarySchema, readAssetChunkSchema, revisionSchema, threadSchema, tokensSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
 import { exportProjectBundle } from '../shared/export.ts';
+import { exportLibrary, libraryProject, libraryReferenceFiles } from '../shared/library-export.ts';
 import { exportCanvasMap, exportTargetHtml, exportTargetProject, exportTargetReact, exportTargetSvg, type ExportTarget } from '../shared/export-formats.ts';
 import { assetFilename, isAssetRef, projectAssetRefs } from '../shared/media.ts';
 import { nodeContext } from '../shared/context.ts';
@@ -452,21 +453,31 @@ export function createMcpServer(store: ProjectStore, options: McpOptions = {}): 
   });
 
   server.registerTool('canvas_import_project', {
-    title: 'Import a design project', description: 'Import a complete Codex Design project JSON as a separate saved project, preserving boards, pages, nodes, source code, shared tokens, and anchored threads. Legacy documents without boards receive a Main board. The imported structure is validated before saving. Imports start a new history baseline; current component links are rebased, while outdated instances whose release history is absent are detached with their native appearance and conversations intact.',
-    inputSchema: { project: projectSchema }, outputSchema: projectOutput,
+    title: 'Import a design project', description: 'Import complete Codex Design project JSON or a version-1 codex-design-library envelope as a separate saved project, preserving boards, pages, nodes, source code, shared tokens, and anchored threads. Legacy documents without boards receive a Main board. The imported structure is validated before saving. Imports start a new history baseline; current component links are rebased, while outdated instances whose release history is absent are detached with their native appearance and conversations intact.',
+    inputSchema: { project: projectImportSchema }, outputSchema: projectOutput,
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false }, _meta: appMetadata,
   }, async ({ project: input }) => {
     try { const project = await store.importProject(input); return result({ project }, `Imported ${project.name} (${project.id}).`); } catch (error) { return toolError(error); }
   });
 
   server.registerTool('canvas_export_project', {
-    title: 'Export design and implementation handoff', description: 'Read scoped source files for a project, board, page or selected node subtree(s). Supply pageId with nodeIds for a selection; boardId, when supplied, must match the page. format supports source, html, react, passive svg or spatial svg-map. svg-map preserves page/selection canvas positions and embeds image assets; map controls background, scale, labels and margin. PNG capture, shaders and videos without a poster require the editor download surface. The default remains page HTML when pageId is supplied, otherwise the source bundle. Media bytes are not duplicated into this response: assets metadata and assetPaths tell the caller which authenticated canvas_read_asset_chunk references to save alongside the files. The caller chooses where to save files.',
-    inputSchema: { projectId: idSchema, boardId: idSchema.optional(), pageId: idSchema.optional(), nodeIds: z.array(idSchema).min(1).max(100).optional(), format: z.enum(['source', 'html', 'react', 'svg', 'svg-map', 'png']).optional(), map: canvasMapSettingsSchema.optional() },
+    title: 'Export design and implementation handoff', description: 'Read scoped source files for a project, board, page or selected node subtree(s). Supply pageId with nodeIds for a selection; boardId, when supplied, must match the page. format supports source, html, react, passive svg or spatial svg-map. Use format library without board/page/node scope for the project design system and reusable components, or componentId for one definition with its shared tokens. Library files follow the imported design-system reference: DESIGN.md, COMPONENTS.md, named JSX, sibling .d.ts/.prompt.md, CSS and passive @dsCard HTML, plus versioned editable JSON. Import its JSON with canvas_import_project to initialize a new project. Read assets/assetPaths and save the media bytes alongside these files. svg-map preserves page/selection canvas positions and embeds image assets; map controls background, scale, labels and margin. PNG capture, shaders and videos without a poster require the editor download surface. The default remains page HTML when pageId is supplied, otherwise the source bundle. Media bytes are not duplicated into this response: assets metadata and assetPaths tell the caller which authenticated canvas_read_asset_chunk references to save alongside the files. The caller chooses where to save files.',
+    inputSchema: { projectId: idSchema, boardId: idSchema.optional(), pageId: idSchema.optional(), nodeIds: z.array(idSchema).min(1).max(100).optional(), format: z.enum(['source', 'html', 'react', 'svg', 'svg-map', 'png', 'library']).optional(), componentId: idSchema.optional(), map: canvasMapSettingsSchema.optional() },
     outputSchema: { projectId: idSchema, revision: revisionSchema, boardId: idSchema.optional(), files: z.record(z.string()), assets: z.array(assetMetadataSchema), assetPaths: z.record(z.string()), map: z.object({ width: z.number(), height: z.number(), pixelWidth: z.number(), pixelHeight: z.number(), warnings: z.array(z.string()) }).optional() }, annotations: readOnly, _meta: appMetadata,
-  }, async ({ projectId, boardId, pageId, nodeIds, format, map }) => {
+  }, async ({ projectId, boardId, pageId, nodeIds, format, componentId, map }) => {
     try {
       if (nodeIds && !pageId) throw new StoreError(400, 'invalid_export_scope', 'Selection export requires pageId and nodeIds.');
       const project = await store.get(projectId);
+      if (format === 'library') {
+        if (boardId || pageId || nodeIds) throw new StoreError(400, 'invalid_export_scope', 'Library export is project-wide; use componentId for one reusable definition.');
+        const portable = libraryProject(project, componentId);
+        const assets = await Promise.all(projectAssetRefs(portable).map(ref => store.getAsset(ref)));
+        const assetUrls = Object.fromEntries(assets.map(asset => [asset.ref, `assets/${assetFilename(asset)}`]));
+        const files = exportLibrary(project, { assetUrls }, componentId).files;
+        files['manifest.json'] = JSON.stringify({ format: 'codex-design-archive', version: 1, kind: 'library', projectId, revision: project.revision, assets: assets.map(asset => ({ ...asset, path: assetUrls[asset.ref] })) }, null, 2);
+        return result({ projectId, revision: project.revision, files, assets, assetPaths: Object.fromEntries(Object.entries(assetUrls).map(([ref, path]) => [path, ref])) }, `Exported ${portable.designSystem.components.length} component definitions and the shared design system from ${project.name}. Import the library ZIP or versioned JSON to initialize a separate project.`);
+      }
+      if (componentId) throw new StoreError(400, 'invalid_export_scope', 'componentId is available with format library.');
       const target: ExportTarget = { scope: nodeIds ? 'selection' : pageId ? 'page' : boardId ? 'board' : 'project', boardId, pageId, nodeIds };
       const scoped = exportTargetProject(project, target);
       const selectedFormat = format || (pageId ? 'html' : 'source');
@@ -503,7 +514,7 @@ export function createMcpServer(store: ProjectStore, options: McpOptions = {}): 
         if (nodeIds) Object.assign(files, { 'selection.html': exportTargetHtml(project, target, { assetUrls }), 'original-scope.json': JSON.stringify(exportTargetProject(project, target, { originalSelectionLayout: true }), null, 2) }, exportTargetReact(project, target, { assetUrls }).files);
         files['manifest.json'] = JSON.stringify({ format: 'codex-design-archive', version: 1, kind: 'source', projectId, revision: project.revision, target, assets: assets.map(asset => ({ ...asset, path: assetUrls[asset.ref] })) }, null, 2);
       }
-      if (selectedFormat === 'react') Object.assign(files, { 'DESIGN.md': designSystemMarkdown(project.designSystem), 'tokens.css': tokenCssVariables(project.designSystem) });
+      if (selectedFormat === 'source' || selectedFormat === 'react') Object.assign(files, libraryReferenceFiles(project, { assetUrls }));
       return result({ projectId, revision: project.revision, ...(boardId ? { boardId } : {}), files, assets, assetPaths }, `Exported ${Object.keys(files).length} source file(s) and ${assets.length} media reference(s) from ${project.name}, revision ${project.revision}.`);
     } catch (error) { return toolError(error); }
   });

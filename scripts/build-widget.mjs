@@ -14,16 +14,17 @@ function localAsset(url) {
   return path;
 }
 
-for (const match of [...html.matchAll(/<script\b([^>]*?)\bsrc="([^"]+)"([^>]*)><\/script>/g)]) {
-  const code = await readFile(localAsset(match[2]), 'utf8');
-  html = html.replace(match[0], () => `<script type="module">${code.replace(/<\/script/gi, '<\\/script')}</script>`);
-}
+// Process document links before scripts, whose source can contain exported HTML strings.
 for (const match of [...html.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"[^>]*>/g)]) {
   const css = await readFile(localAsset(match[1]), 'utf8');
   html = html.replace(match[0], () => `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`);
 }
 html = html.replace(/<link\b[^>]*\brel="modulepreload"[^>]*>/g, '');
 html = html.replace(/<link\b[^>]*\brel="icon"[^>]*>/g, '');
+for (const match of [...html.matchAll(/<script\b([^>]*?)\bsrc="([^"]+)"([^>]*)><\/script>/g)]) {
+  const code = await readFile(localAsset(match[2]), 'utf8');
+  html = html.replace(match[0], () => `<script type="module">${code.replace(/<\/script/gi, '<\\/script')}</script>`);
+}
 html = html.replace('<head>', '<head><script>window.__CODEX_DESIGN_EMBEDDED__=true;</script>');
 if (/<(?:script|link)\b[^>]*(?:src|href)="\/?assets\//.test(html)) throw new Error('Widget still references build assets.');
 await writeFile(resolve(dist, 'widget.html'), html);

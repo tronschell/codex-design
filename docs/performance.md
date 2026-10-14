@@ -618,3 +618,11 @@ Reliable app-only browser heap/RSS, total desktop CPU, GPU usage, paint/FPS, dro
 Remaining scaling issues found by inspection: a cold library list still validates every project, and a changed revision still transfers a full project snapshot. The warm summary cache removes the repeated cost but does not solve cold-library scaling. A persisted summary index or revision deltas need their own integrity/recovery design and real larger workloads before implementation. Media/shader virtualization and bounded shader animation already exist; they are retained without inventing new savings.
 
 Raw local captures (ignored by Git): `application-performance-store.json`, `application-performance-browser.json`, `application-performance-observer.js`, `application-performance-bundles.json`, `effects-geometry-profile.json`, and `media-explicit-copy-profile.json` under `artifacts/`.
+
+## Portable library export feature cost — October 14, 2026
+
+This is an export/portability feature, not a performance optimization. Method: exact production widget/runtime bytes and Node zlib gzip level 9 from committed build 567d31e and the final feature build, on the same machine. No dependency was added. The widget remains self-contained; library generation and media reads run on explicit export.
+
+widget.html: 818,956→830,520 B (+11564 B, +1.41%); gzip 234,196→238,307 B (+4111 B, +1.76%). mcp.mjs: 1,102,033→1,115,149 B (+13116 B, +1.19%); gzip 232,405→236,452 B (+4047 B, +1.74%).
+
+The actual read-only browser export of Forma revision 33 was 42,871 B in 15 ZIP entries, containing 22 tokens, one seven-node component definition and zero page nodes/media references. Generated React compilation and production import-schema parsing passed. Source release 26 is retained in the archive; normal import rebases it to a new local baseline. These are artifact/structure measurements, not export latency, import latency, memory, CPU, load time or frame-rate improvements. No gain is claimed for those unmeasured metrics. Raw ignored captures: library-export-before.json, library-export-after.json, library-export-downloaded.zip and library-export-mcp.json.

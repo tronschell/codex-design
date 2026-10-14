@@ -395,6 +395,12 @@ const resolvedProjectSchema = z.object({
   });
 });
 export const projectSchema: z.ZodType<DesignProject, z.ZodTypeDef, unknown> = z.preprocess(normalizeLegacyProject, resolvedProjectSchema);
+export const designLibrarySchema = z.object({ format: z.literal('codex-design-library'), version: z.literal(1), project: projectSchema }).strict()
+  .refine(({ project }) => project.pages.every(page => page.nodes.length === 0) && project.threads.length === 0 && !project.designSystem.request && project.boards.every(board => !board.inspiration?.length), 'A library initializes an empty canvas without conversations, inspiration or queued requests');
+export const projectImportSchema = z.union([
+  designLibrarySchema.transform(({ project }) => project),
+  projectSchema,
+]);
 
 const nonempty = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict().partial().refine((value) => Object.values(value).some((field) => field !== undefined), 'Provide at least one field');
 

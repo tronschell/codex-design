@@ -16,6 +16,7 @@ import { ColorField } from './InspectorFields';
 import ComponentEditor from './ComponentLibrary';
 import ComponentPreview from './ComponentPreview';
 import LibraryVersions from './LibraryVersions';
+import { downloadExport, exportLibraryFile } from './export-utils';
 
 export interface ProjectLibraryProps {
   project: DesignProject;
@@ -186,10 +187,13 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   const [busy, setBusy] = useState(''), [stopping, setStopping] = useState(false), [error, setError] = useState('');
   const root = useRef<HTMLElement>(null), stage = useRef<HTMLElement>(null), fileInput = useRef<HTMLInputElement>(null), tokenName = useRef<HTMLInputElement>(null), queuedPrompt = useRef<HTMLTextAreaElement>(null);
   const viewRef = useRef(view), mounted = useRef(true), busyRef = useRef(false), focusName = useRef(false), suppressClick = useRef(false);
+  const libraryExport = useRef<{ controller: AbortController; revision: number } | null>(null);
   const gesture = useRef<{ pointerId: number; x: number; y: number; view: Viewport; moved: boolean } | null>(null), upload = useRef<AbortController | null>(null);
   const context = useRef({ key: scopeKey, readOnly, project, onChange });
   context.current = { key: scopeKey, readOnly, project, onChange };
   const working = !!busy, disabled = readOnly || working;
+  useLayoutEffect(() => () => libraryExport.current?.controller.abort(), [scopeKey, readOnly]);
+  useLayoutEffect(() => { if (libraryExport.current && libraryExport.current.revision !== project.revision) libraryExport.current.controller.abort(); }, [project.revision]);
   const importDisabled = disabled || inspiration.length >= 100 || !board;
   const field = tokenFields[tokenDraft.kind], numeric = !stringKinds.has(tokenDraft.kind);
   const numericInput = numeric && (!tokenDraft.value.trim() || Number.isFinite(Number(tokenDraft.value)));
@@ -300,7 +304,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable. Select and copy the reference below, or download DESIGN.md.');
     await navigator.clipboard.writeText(text);
   };
-  const close = () => { upload.current?.abort(); onClose(); };
+  const close = () => { upload.current?.abort(); libraryExport.current?.controller.abort(); onClose(); };
   const addToken = () => {
     if (disabled) return;
     focusName.current = true; setSelectedTokenId(''); tokenState.reset(emptyToken()); setTab('tokens'); setPanelOpen(true);
@@ -330,6 +334,17 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
       anchor.href = url; anchor.download = 'DESIGN.md'; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       onNotify('DESIGN.md downloaded.');
     } else { await copy(text); if (current()) onNotify(action === 'css' ? 'Token CSS copied.' : 'DESIGN.md copied.'); }
+  });
+  const exportBundle = (componentId?: string) => void run('Preparing library…', async current => {
+    const latest = documentChanged && !readOnly ? await saveDocument(current) : context.current.project;
+    if (!latest || !current()) return;
+    const controller = new AbortController(); libraryExport.current = { controller, revision: latest.revision };
+    try {
+      const file = await exportLibraryFile(latest, componentId, controller.signal);
+      if (!current()) return;
+      if (controller.signal.aborted || context.current.project.revision !== latest.revision) throw new Error('The library changed. Export again for the current revision.');
+      downloadExport(file); onNotify(componentId ? 'Component library downloaded.' : 'Design system library downloaded.');
+    } finally { libraryExport.current = null; }
   });
   const saveReference = () => void run('Saving reference…', async current => {
     if (!editableReference) return;
@@ -496,7 +511,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
               <label className="library-document-label">Project document<textarea aria-label="Project DESIGN.md" className="library-documentation library-document-editor" maxLength={2_097_152} rows={26} spellCheck={false} readOnly={disabled} value={documentState.value.markdown} onChange={event => documentState.setValue({markdown:event.target.value})}/></label>
               <div className="library-button-row"><button type="submit" className="library-button library-primary" disabled={disabled || !documentChanged || !!documentState.conflicts.length}><Check size={13}/>Save DESIGN.md</button>{documentChanged && <button type="button" className="library-button" disabled={working} onClick={() => documentState.reset({markdown})}>{documentState.conflicts.length ? 'Use latest' : 'Discard draft'}</button>}</div>
             </form>
-            <section className="library-section"><h3>Export reference</h3><p className="library-field-note">Exports use current tokens and guidance. A writable Markdown draft is saved first.</p><div className="library-button-row"><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('copy')}><Copy size={13}/>Copy</button><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('download')}><Download size={13}/>Download DESIGN.md</button></div><details className="library-details"><summary>CSS variables</summary><textarea readOnly rows={8} spellCheck={false} aria-label="Generated CSS variables" value={tokenCssVariables(system)}/><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('css')}><Copy size={12}/>Copy CSS</button></details></section>
+            <section className="library-section"><h3>Export reference</h3><p className="library-field-note">Exports use current tokens and guidance. A writable Markdown draft is saved first.</p><div className="library-button-row"><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('copy')}><Copy size={13}/>Copy</button><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('download')}><Download size={13}/>Download DESIGN.md</button><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportBundle()}><Download size={13}/>Download library</button></div><p className="library-field-note">Markdown, component code and editable JSON. Import the ZIP from the project menu to start another project.</p><details className="library-details"><summary>CSS variables</summary><textarea readOnly rows={8} spellCheck={false} aria-label="Generated CSS variables" value={tokenCssVariables(system)}/><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('css')}><Copy size={12}/>Copy CSS</button></details></section>
             {!!system.sources.length && <details className="library-section library-sources"><summary>Evidence sources <span>{system.sources.length}</span></summary><ul>{system.sources.map((source, index) => <li key={`${source.path}/${index}`}><div><code>{source.path}</code><small>{source.confidence}</small></div><span>{source.kind}</span>{source.notes && <p>{source.notes}</p>}</li>)}</ul></details>}
           </>}
           {tab === 'requests' && <>
@@ -504,7 +519,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
             {system.request && <section className="library-section library-request-status"><h3><span><Clock3 size={13}/>{system.request.queued ? 'Queued request' : 'Saved request'}</span><button type="button" className="library-icon library-delete" disabled={disabled} title="Remove saved request" aria-label="Remove saved design system request" onClick={() => void run('Removing request…', async current => { if (await persist([{ type: 'set_design_system_request', request: null }], current)) onNotify('Saved request removed.'); })}><Trash2 size={13}/></button></h3><p className="library-request-meta">{system.request.mode === 'find' ? 'Find existing' : 'Generate'} · {new Date(system.request.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p><p className="library-field-note" role="status">{delivery || 'Codex updates this project when it handles the request. A queued request does not mean work has started.'}</p><div className="library-button-row"><button type="button" className="library-button" disabled={working} onClick={() => void run('Copying request…', async current => { setShowRequest(true); try { await copy(savedPrompt); if (current()) onNotify('Design system request copied.'); } catch (failure) { if (current()) requestAnimationFrame(() => { queuedPrompt.current?.focus(); queuedPrompt.current?.select(); }); throw failure; } })}><Copy size={13}/>Copy request</button><button type="button" className="library-button" aria-expanded={showRequest} onClick={() => setShowRequest(!showRequest)}>{showRequest ? 'Hide prompt' : 'View prompt'}</button></div>{showRequest && <textarea ref={queuedPrompt} className="library-queued-prompt" rows={10} readOnly spellCheck={false} aria-label="Saved design system request prompt" value={savedPrompt}/>}</section>}
           </>}
         </div>
-      </> : mode === 'components' ? <ComponentEditor key={`${project.id}/${boardId}`} project={project} pageId={pageId} selectedNodeId={selectedNodeId} componentId={selectedComponentId} disabled={disabled} position={insertionPosition} onSelect={setSelectedComponentId} onChange={onChange} onApply={onApply} onNotify={onNotify} onReturn={close} onInserted={onInserted}/> : <div className="library-panel-scroll">
+      </> : mode === 'components' ? <ComponentEditor key={`${project.id}/${boardId}`} project={project} pageId={pageId} selectedNodeId={selectedNodeId} componentId={selectedComponentId} disabled={disabled} position={insertionPosition} onSelect={setSelectedComponentId} onExport={exportBundle} exportDisabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onChange={onChange} onApply={onApply} onNotify={onNotify} onReturn={close} onInserted={onInserted}/> : <div className="library-panel-scroll">
         <section className="library-section">
           <div className={`library-image-dropzone${dropTarget === 'panel' ? ' is-file-drop' : ''}`} onDragOver={event => imageDragOver(event, 'panel')} onDragLeave={imageDragLeave} onDrop={imageDrop}>
             <button type="button" disabled={importDisabled} aria-label="Browse inspiration images" title={inspiration.length >= 100 ? 'Board full · 100 images' : undefined} onClick={() => fileInput.current?.click()}>

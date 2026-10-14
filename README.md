@@ -15,7 +15,7 @@ An infinite canvas for designing interfaces and slides with your coding agent. B
 
 [![Codex Design: mobile and desktop canvas, shared design tokens, DESIGN.md and Properties](docs/screenshots/codex-design-promo.png)](docs/screenshots/codex-design-promo.png)
 
-Projects contain boards, pages and frames. Each project shares one editable design system; each board keeps its own inspiration. Component conversations, media, source exports and version history stay with the document. Chats keep independent canvas selections. Generated screens appear progressively with a grey loading wipe.
+Projects contain boards, pages and frames. Each project shares one editable design system; each board keeps its own inspiration. Component conversations, media, source exports and version history stay with the document. Chats keep independent canvas selections. Generated screens appear progressively with a grey loading wipe. Export design systems and components as Markdown, React/CSS and portable libraries for another project.
 
 ## Paste this into ChatGPT to install
 

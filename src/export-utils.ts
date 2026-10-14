@@ -6,7 +6,8 @@ import { createShaderRenderer, shaderRuntimeOptions } from '../shared/shaders';
 import { designSystemMarkdown, tokenCssVariables } from '../shared/design-system';
 import { canvasMapLayout, canvasMapPngReason, exportCanvasMap, exportFilename, exportHandoffPrompt, exportTargetHtml, exportTargetProject, exportTargetReact, exportTargetSvg, type CanvasMapSettings, type ExportFormat, type ExportTarget } from '../shared/export-formats';
 import { ASSET_MIME_TYPES, MAX_ASSET_BYTES, assetFilename, isAssetRef, projectAssetRefs, type AssetMetadata } from '../shared/media';
-import { MAX_INPUT_BYTES, projectSchema } from '../shared/validation';
+import { MAX_INPUT_BYTES, projectSchema, projectImportSchema, designLibrarySchema } from '../shared/validation';
+import { exportLibrary, libraryProject, libraryReferenceFiles } from '../shared/library-export';
 import { MAX_ARCHIVE_BYTES, unzipFiles, zipFiles, type ArchiveFiles } from '../shared/zip';
 import { client } from './client';
 
@@ -230,6 +231,7 @@ export async function exportFile(project: DesignProject, target: ExportTarget, f
   }
   files['DESIGN.md'] = designSystemMarkdown(project.designSystem);
   files['tokens.css'] = tokenCssVariables(project.designSystem);
+  if (format === 'source' || format === 'react') Object.assign(files, libraryReferenceFiles(project, { assetUrls }));
   files['manifest.json'] = JSON.stringify({ format: 'codex-design-archive', version: 1, kind: format, projectId: project.id, revision: project.revision, target, assets: manifestAssets }, null, 2);
   files['BUILD_WITH_CODEX.md'] = `${exportHandoffPrompt(project, target)}\n`;
   const notes = `\n\n## Portable media and editable source\n\nMedia bytes are included in assets/ and described in manifest.json. Import this unmodified ZIP through the project menu to restore its design.json and media as a new project. React files use the included design.css; import Design.jsx into an existing React app. Their fixed canvas coordinates preserve the approved visual design; application behavior still needs implementation. HTML code layers remain script-free, network-blocked sandboxed iframes. Shader layers run only the included controlled WebGL renderer. Video playback is subject to browser codec support and autoplay policy.\n\nExport scope: ${target.scope}. Revision: ${project.revision}. ${target.scope === 'selection' ? 'The editable document includes ancestor shells with frozen layout positions so omitted siblings do not reflow the selection. original-scope.json retains the original scoped node coordinates, layout settings and source context. selection.html and Design.jsx contain only the selected subtree.' : ''}\n`;
@@ -244,6 +246,22 @@ export function downloadExport(file: ExportFile) {
   setTimeout(() => URL.revokeObjectURL(url), 3000);
 }
 
+export async function exportLibraryFile(project: DesignProject, componentId?: string, signal?: AbortSignal): Promise<ExportFile> {
+  signal?.throwIfAborted();
+  const portable = libraryProject(project, componentId), assets = await loadAssets(portable, false, signal);
+  signal?.throwIfAborted();
+  const files: ArchiveFiles = {}, assetUrls: Record<string, string> = {};
+  const manifestAssets = assets.map(({ asset, bytes }) => {
+    const path = `assets/${assetFilename(asset)}`;
+    assetUrls[asset.ref] = path; files[path] = bytes;
+    return { ...asset, path };
+  });
+  Object.assign(files, exportLibrary(project, { assetUrls }, componentId).files);
+  files['manifest.json'] = JSON.stringify({ format: 'codex-design-archive', version: 1, kind: 'library', projectId: project.id, revision: project.revision, assets: manifestAssets }, null, 2);
+  signal?.throwIfAborted();
+  return { name: `${exportFilename(project.designSystem.name)}-${componentId ? 'component' : 'library'}.zip`, data: zipFiles(files), mimeType: 'application/zip' };
+}
+
 const archiveManifest = z.object({
   format: z.literal('codex-design-archive'), version: z.literal(1),
   assets: z.array(z.object({ ref: z.string().refine(isAssetRef), mimeType: z.enum(ASSET_MIME_TYPES), byteLength: z.number().int().min(1).max(MAX_ASSET_BYTES), name: z.string().max(500), path: z.string().min(1).max(256) }).strict()).max(10_000),
@@ -255,7 +273,7 @@ export async function importProjectFile(file: File): Promise<DesignProject> {
   if (!isZip) {
     let input: unknown;
     try { input = JSON.parse(await file.text()); } catch { throw new Error('The project JSON is unreadable. Choose a Codex Design project file.'); }
-    const parsed = projectSchema.safeParse(input);
+    const parsed = projectImportSchema.safeParse(input);
     if (!parsed.success) throw new Error(`Invalid project document: ${parsed.error.issues[0]?.message ?? 'Unknown structure'}`);
     return client.importProject(parsed.data);
   }
@@ -267,6 +285,16 @@ export async function importProjectFile(file: File): Promise<DesignProject> {
   catch { throw new Error('The archive contains an unreadable document or manifest. Export the project again.'); }
   const parsed = projectSchema.safeParse(input);
   if (!parsed.success) throw new Error(`Invalid project document: ${parsed.error.issues[0]?.message ?? 'Unknown structure'}`);
+  if (manifestInput && typeof manifestInput === 'object' && 'kind' in manifestInput && manifestInput.kind === 'library') {
+    const manifest = archiveManifest.safeParse(manifestInput), libraryBytes = files['codex-design.library.json'];
+    if (!manifest.success || !libraryBytes || libraryBytes.byteLength > MAX_INPUT_BYTES) throw new Error('This library needs its original version-1 manifest and editable JSON.');
+    let libraryInput: unknown;
+    try { libraryInput = JSON.parse(utf8.decode(libraryBytes)); }
+    catch { throw new Error('The library JSON is unreadable. Export the library again.'); }
+    const library = designLibrarySchema.safeParse(libraryInput);
+    if (!library.success) throw new Error('This library format is unsupported or invalid. Use a version-1 Codex Design library.');
+    if (JSON.stringify(library.data.project) !== JSON.stringify(parsed.data)) throw new Error('The library JSON and editable document disagree. Import an original library ZIP.');
+  }
   if (new TextEncoder().encode(JSON.stringify(parsed.data)).byteLength > MAX_INPUT_BYTES) throw new Error('The normalized project document exceeds 2 MiB. Import a smaller scope.');
   const refs = projectAssetRefs(parsed.data);
   if (!refs.length) return client.importProject(parsed.data);

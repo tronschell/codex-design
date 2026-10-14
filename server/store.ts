@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { createDemoProject } from '../shared/seed.ts';
 import { defaultTokens, type BindableStyleProperty, type CanvasSelection, type DesignNode, type DesignProject, type LibraryScope, type LibraryVersion, type NativeComponentDefinition, type Operation, type ProjectSummary, type ProjectVersion, type ProjectVersionSummary } from '../shared/types.ts';
-import { canvasSelectionSchema, createProjectSchema, idSchema, libraryVersionRequestSchema, MAX_INPUT_BYTES, operationsSchema, projectSchema, revisionSchema } from '../shared/validation.ts';
+import { canvasSelectionSchema, createProjectSchema, idSchema, libraryVersionRequestSchema, MAX_INPUT_BYTES, operationsSchema, projectSchema, projectImportSchema, revisionSchema } from '../shared/validation.ts';
 import { ProjectHistory, StoreError } from './history.ts';
 import { AssetStore } from './assets.ts';
 import { resolvedNodes } from '../shared/export.ts';
@@ -355,7 +355,7 @@ export class ProjectStore {
 
   async importProject(input: unknown): Promise<DesignProject> {
     serialize(input);
-    const imported = parse(projectSchema, input, 'invalid_project');
+    const imported = parse(projectImportSchema, input, 'invalid_project');
     await this.init();
     return this.withWriteLock(async () => {
       const now = new Date().toISOString();

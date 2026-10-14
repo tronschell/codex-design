@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, Component, Plus, RefreshCw, Unlink } from 'lucide-react';
+import { ArrowLeft, Check, Component, Download, Plus, RefreshCw, Unlink } from 'lucide-react';
 import type { DesignProject, LibraryScope, Operation } from '../shared/types';
 import { uid } from './editor-utils';
 import LibraryVersions from './LibraryVersions';
@@ -13,6 +13,8 @@ interface ComponentEditorProps {
   disabled: boolean;
   position: { x: number; y: number };
   onSelect: (id: string) => void;
+  onExport: (componentId?: string) => void;
+  exportDisabled: boolean;
   onChange: (operations: Operation[]) => Promise<DesignProject | null>;
   onApply: (revision: number, scope: LibraryScope, componentId?: string) => Promise<DesignProject | null>;
   onNotify: (message: string) => void;
@@ -20,7 +22,7 @@ interface ComponentEditorProps {
   onInserted: (nodeId: string) => void;
 }
 
-export default function ComponentEditor({ project, pageId, selectedNodeId, componentId, disabled, position, onSelect, onChange, onApply, onNotify, onReturn, onInserted }: ComponentEditorProps) {
+export default function ComponentEditor({ project, pageId, selectedNodeId, componentId, disabled, position, onSelect, onExport, exportDisabled, onChange, onApply, onNotify, onReturn, onInserted }: ComponentEditorProps) {
   const page = project.pages.find(item => item.id === pageId), selected = page?.nodes.find(node => node.id === selectedNodeId);
   const instance = page?.nodes.find(node => node.componentInstance && Object.values(node.componentInstance.nodeMap).includes(selectedNodeId ?? ''));
   const definition = project.designSystem.components.find(item => item.id === componentId);
@@ -46,6 +48,7 @@ export default function ComponentEditor({ project, pageId, selectedNodeId, compo
   const instances = definition ? project.pages.flatMap(item => item.nodes.filter(node => node.componentInstance?.componentId === definition.id).map(node => ({ page: item, node }))) : [];
 
   return <div className="library-panel-scroll" aria-busy={busy}>
+    <section className="library-section"><h3>Export library</h3><p className="library-field-note">Markdown, React, CSS and editable definitions.</p><div className="library-button-row"><button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport()}><Download size={13}/>Download library</button>{definition && <button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport(definition.id)}><Download size={13}/>Download component</button>}</div></section>
     <section className="library-section library-editor-form">
       <h3>Create a component</h3>
       {selected && !instance ? <form onSubmit={event => {
