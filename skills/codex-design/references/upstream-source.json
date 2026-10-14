@@ -1,0 +1,333 @@
+{
+  "repository": "https://github.com/asgeirtj/system_prompts_leaks",
+  "commit": "3c4deaae9bbd6259e3d972f3bdb208ef6fd942f9",
+  "sourceDirectory": "Anthropic/claude-design",
+  "requestedRename": {
+    "from": "claude-design",
+    "to": "codex-design"
+  },
+  "method": "Only exact byte-string and relative-path replacement of claude-design with codex-design; no other content edits. Upstream code is bundled as authoring material and was not executed.",
+  "licensePath": "references/upstream-LICENSE",
+  "files": [
+    {
+      "sourcePath": "Anthropic/claude-design/claude-design.md",
+      "path": "codex-design.md",
+      "upstreamGitBlob": "cd8fbeb0b58aec5c04de4b301cdb9c46fb491d2e",
+      "upstreamSha256": "bb23d089ef029ee80cd6c59500f2129a9119ec11de247b7d96bc0de299cd483e",
+      "sha256": "bb23d089ef029ee80cd6c59500f2129a9119ec11de247b7d96bc0de299cd483e",
+      "sourceBytes": 143284,
+      "bytes": 143284,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/3d-object/SKILL.md",
+      "path": "skills/3d-object/SKILL.md",
+      "upstreamGitBlob": "9d80c800fdd70de092fffa674ee7c2e01c6fa930",
+      "upstreamSha256": "b2fca2c7f0ca6f6384d35ce8ec28b250a61e70e0633bfdf8271f3b2daf29edfd",
+      "sha256": "b2fca2c7f0ca6f6384d35ce8ec28b250a61e70e0633bfdf8271f3b2daf29edfd",
+      "sourceBytes": 4304,
+      "bytes": 4304,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/animated-video/SKILL.md",
+      "path": "skills/animated-video/SKILL.md",
+      "upstreamGitBlob": "f6fa104296a70ef8891b2ba83d82dc2c6f3e68b2",
+      "upstreamSha256": "e0ef2f9fce4fc6d6e4a8edb2ab4ad0ee985597281d0dbb550e5136c37df9eec4",
+      "sha256": "e0ef2f9fce4fc6d6e4a8edb2ab4ad0ee985597281d0dbb550e5136c37df9eec4",
+      "sourceBytes": 10177,
+      "bytes": 10177,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/claude-api-in-prototypes/SKILL.md",
+      "path": "skills/claude-api-in-prototypes/SKILL.md",
+      "upstreamGitBlob": "d82d6d0c8d610f1517408350d6d9b7cd45ff707f",
+      "upstreamSha256": "7875558b123c1e2bb90946f5e7687f4b6faa17fe611a2257b7752c599654b26a",
+      "sha256": "7875558b123c1e2bb90946f5e7687f4b6faa17fe611a2257b7752c599654b26a",
+      "sourceBytes": 1123,
+      "bytes": 1123,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/create-design-system/SKILL.md",
+      "path": "skills/create-design-system/SKILL.md",
+      "upstreamGitBlob": "837597b6aafa64cc55d1413b3046412041e0706f",
+      "upstreamSha256": "2abed78e508cb19fa0f2ccdf203e9ce5ce3ebec91ef2c5708c3a738c16832811",
+      "sha256": "2abed78e508cb19fa0f2ccdf203e9ce5ce3ebec91ef2c5708c3a738c16832811",
+      "sourceBytes": 19052,
+      "bytes": 19052,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/export-as-pptx-editable/SKILL.md",
+      "path": "skills/export-as-pptx-editable/SKILL.md",
+      "upstreamGitBlob": "41cf231341be8f9fadcacae4f6f9a09efb59c7e4",
+      "upstreamSha256": "e0d2bf96c6a8703e2d9adffe12a47169d949d0f31913161a1dec9610ee40bddb",
+      "sha256": "e0d2bf96c6a8703e2d9adffe12a47169d949d0f31913161a1dec9610ee40bddb",
+      "sourceBytes": 6114,
+      "bytes": 6114,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/export-as-pptx-screenshots/SKILL.md",
+      "path": "skills/export-as-pptx-screenshots/SKILL.md",
+      "upstreamGitBlob": "bed28c48d81447a88844f60ce2920cb9c686ce22",
+      "upstreamSha256": "71d96ec6be6a0dec9735dccc3a15efed48a6f7ff61722203d275200db749a05e",
+      "sha256": "71d96ec6be6a0dec9735dccc3a15efed48a6f7ff61722203d275200db749a05e",
+      "sourceBytes": 1886,
+      "bytes": 1886,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/flier/SKILL.md",
+      "path": "skills/flier/SKILL.md",
+      "upstreamGitBlob": "6f0da972a18137e74838237fbaf2fe4d1431d0fc",
+      "upstreamSha256": "e009c6a029775ecd4bbbb850d7994efe4ec8d323854e4139e0a7f846d90fe599",
+      "sha256": "e009c6a029775ecd4bbbb850d7994efe4ec8d323854e4139e0a7f846d90fe599",
+      "sourceBytes": 2135,
+      "bytes": 2135,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/frontend-design/SKILL.md",
+      "path": "skills/frontend-design/SKILL.md",
+      "upstreamGitBlob": "1062770d2cd3f56b8b6176e9b5601d82f17a8faf",
+      "upstreamSha256": "2207fc53ca72dc728bf010d2e17f8847fa57bcd5b678a881d17da8338ea144f3",
+      "sha256": "2207fc53ca72dc728bf010d2e17f8847fa57bcd5b678a881d17da8338ea144f3",
+      "sourceBytes": 2496,
+      "bytes": 2496,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/handoff-to-claude-code/SKILL.md",
+      "path": "skills/handoff-to-claude-code/SKILL.md",
+      "upstreamGitBlob": "da2103380c500d39be80648b38f009c9e3fbece1",
+      "upstreamSha256": "96032b8aab2b3643fde88e63089e9747eb0c66dbbecc3dcf24296874eb2b8196",
+      "sha256": "96032b8aab2b3643fde88e63089e9747eb0c66dbbecc3dcf24296874eb2b8196",
+      "sourceBytes": 4102,
+      "bytes": 4102,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/hi-fi-design/SKILL.md",
+      "path": "skills/hi-fi-design/SKILL.md",
+      "upstreamGitBlob": "1fa4e84a45ccf09b003d741f7cf8908b4767562c",
+      "upstreamSha256": "cbc66c2deb7cc8eeb4e9a4941e0dfe83f8a92270ff7bf47a489a7a86dd28c431",
+      "sha256": "cbc66c2deb7cc8eeb4e9a4941e0dfe83f8a92270ff7bf47a489a7a86dd28c431",
+      "sourceBytes": 6425,
+      "bytes": 6425,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/html-email/SKILL.md",
+      "path": "skills/html-email/SKILL.md",
+      "upstreamGitBlob": "44af06ac78c56a05dd87a1296607c849e900ea8a",
+      "upstreamSha256": "9bf6423a7647a5151c2b8b3aa9b0edbecb1e652d5924f7dab41c81c43f2e2a53",
+      "sha256": "9bf6423a7647a5151c2b8b3aa9b0edbecb1e652d5924f7dab41c81c43f2e2a53",
+      "sourceBytes": 2652,
+      "bytes": 2652,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/interactive-prototype/SKILL.md",
+      "path": "skills/interactive-prototype/SKILL.md",
+      "upstreamGitBlob": "d798c33bf38c784bc4c09a9887ecdd8a74bc24d3",
+      "upstreamSha256": "d42bae684ccba802a94ce0316aa9d9c749d85c969f6c74ce889ccfa4b1e9528f",
+      "sha256": "d42bae684ccba802a94ce0316aa9d9c749d85c969f6c74ce889ccfa4b1e9528f",
+      "sourceBytes": 445,
+      "bytes": 445,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/make-a-deck/SKILL.md",
+      "path": "skills/make-a-deck/SKILL.md",
+      "upstreamGitBlob": "15b401c7a05fd7c2d56fbf8daa58cf888925c8d3",
+      "upstreamSha256": "dfe2cbca5e5f04b78f6a9e19d1c0ee639a10cb10e438bc07dfe30fcc76af999c",
+      "sha256": "dfe2cbca5e5f04b78f6a9e19d1c0ee639a10cb10e438bc07dfe30fcc76af999c",
+      "sourceBytes": 9705,
+      "bytes": 9705,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/make-a-doc/SKILL.md",
+      "path": "skills/make-a-doc/SKILL.md",
+      "upstreamGitBlob": "8bae8a24b23a307b24a034eb874bf1b2fcbab317",
+      "upstreamSha256": "967825a87932c8c5e4deb85422f224b5ce1b52dc366c9e1d7c1ac92bb1ba30d2",
+      "sha256": "967825a87932c8c5e4deb85422f224b5ce1b52dc366c9e1d7c1ac92bb1ba30d2",
+      "sourceBytes": 2657,
+      "bytes": 2657,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/make-tweakable/SKILL.md",
+      "path": "skills/make-tweakable/SKILL.md",
+      "upstreamGitBlob": "0cc4442ff9d7661591cbc5aaf2d983cde9741724",
+      "upstreamSha256": "c82b113b5a7116dbf97f196323df3396613f9b1e8f3d757ea87d365bfac6935d",
+      "sha256": "c82b113b5a7116dbf97f196323df3396613f9b1e8f3d757ea87d365bfac6935d",
+      "sourceBytes": 391,
+      "bytes": 391,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/maps-geography/SKILL.md",
+      "path": "skills/maps-geography/SKILL.md",
+      "upstreamGitBlob": "67219c8a2b0b92bb87657d7c56fd6aa2d0bbcd11",
+      "upstreamSha256": "18e35f5715c507a40087f695a4b4d1d7b1aed068c217bfc7b92ce68934291b05",
+      "sha256": "18e35f5715c507a40087f695a4b4d1d7b1aed068c217bfc7b92ce68934291b05",
+      "sourceBytes": 2892,
+      "bytes": 2892,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/options/SKILL.md",
+      "path": "skills/options/SKILL.md",
+      "upstreamGitBlob": "5dc603f688b15aa423d5da59d7746755c747220e",
+      "upstreamSha256": "9fa7490047f6c728fe5f0b61dfcd1664314bf2e0e9424698703c000c69007409",
+      "sha256": "9fa7490047f6c728fe5f0b61dfcd1664314bf2e0e9424698703c000c69007409",
+      "sourceBytes": 3706,
+      "bytes": 3706,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/save-as-pdf/SKILL.md",
+      "path": "skills/save-as-pdf/SKILL.md",
+      "upstreamGitBlob": "e37c2cedab29c0571d4d15deac3c9fbc658b72f4",
+      "upstreamSha256": "2ee629104dc838f7f3223a383c56548f79a67d6c8bff2377272f29c712a89ab8",
+      "sha256": "2ee629104dc838f7f3223a383c56548f79a67d6c8bff2377272f29c712a89ab8",
+      "sourceBytes": 9174,
+      "bytes": 9174,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/save-as-standalone-html/SKILL.md",
+      "path": "skills/save-as-standalone-html/SKILL.md",
+      "upstreamGitBlob": "08e46cdf6115e1d651e8b94fea79059dc3186cd5",
+      "upstreamSha256": "b9d46bb1bd5764b1191a57dc6174b95ae110de9cdaa79554bd0c7a00062dbf18",
+      "sha256": "b9d46bb1bd5764b1191a57dc6174b95ae110de9cdaa79554bd0c7a00062dbf18",
+      "sourceBytes": 5818,
+      "bytes": 5818,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/web-research/SKILL.md",
+      "path": "skills/web-research/SKILL.md",
+      "upstreamGitBlob": "30c6b01be87876cc4312e3567973710e726eab06",
+      "upstreamSha256": "e6f22adcd5f5612b22cbb7cf40870d6fb9540a76f147908dc5cabe2f00a99ad9",
+      "sha256": "e6f22adcd5f5612b22cbb7cf40870d6fb9540a76f147908dc5cabe2f00a99ad9",
+      "sourceBytes": 2022,
+      "bytes": 2022,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/skills/wireframe/SKILL.md",
+      "path": "skills/wireframe/SKILL.md",
+      "upstreamGitBlob": "aa39303121f2f9ec548a47f35124130b0c357ad6",
+      "upstreamSha256": "866417c5d026fcca552bc5ec9cdd87c2fec1c6dffce17fc075d3976b94ce4e6a",
+      "sha256": "866417c5d026fcca552bc5ec9cdd87c2fec1c6dffce17fc075d3976b94ce4e6a",
+      "sourceBytes": 4183,
+      "bytes": 4183,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/android-frame.jsx",
+      "path": "starter-components/android-frame.jsx",
+      "upstreamGitBlob": "84c0ccee1ae944341f7359c9b1dee1f7fc27a217",
+      "upstreamSha256": "cbf1bf9e56aa62bd2bd592cb76391524b21b938e49d98ead5c70a64358fb3335",
+      "sha256": "cbf1bf9e56aa62bd2bd592cb76391524b21b938e49d98ead5c70a64358fb3335",
+      "sourceBytes": 10316,
+      "bytes": 10316,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/animations-v3.jsx",
+      "path": "starter-components/animations-v3.jsx",
+      "upstreamGitBlob": "6a289046f7323741e940cda5e326f924aeeb5816",
+      "upstreamSha256": "64c814191ebc738ece070a2b1d7113fdb4f053a8ac95bcc2ae23ce9cec91cefa",
+      "sha256": "64c814191ebc738ece070a2b1d7113fdb4f053a8ac95bcc2ae23ce9cec91cefa",
+      "sourceBytes": 55475,
+      "bytes": 55475,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/browser-window.jsx",
+      "path": "starter-components/browser-window.jsx",
+      "upstreamGitBlob": "c18f11badf9a962e1fb5c7320bcb0aa2b088a107",
+      "upstreamSha256": "ffeb1267e10b57886f44f32b5e73a09dd8acc2002880d4820b99783a113c549b",
+      "sha256": "ffeb1267e10b57886f44f32b5e73a09dd8acc2002880d4820b99783a113c549b",
+      "sourceBytes": 4734,
+      "bytes": 4734,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/deck-stage.js",
+      "path": "starter-components/deck-stage.js",
+      "upstreamGitBlob": "8b493fcc6c772c11a7f15be6261f5eca6245a939",
+      "upstreamSha256": "f3d3d0a662c08eefb5a8757a6da3139572485f4be32ac33785c5047061926a8a",
+      "sha256": "f3d3d0a662c08eefb5a8757a6da3139572485f4be32ac33785c5047061926a8a",
+      "sourceBytes": 136293,
+      "bytes": 136293,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/doc-page.js",
+      "path": "starter-components/doc-page.js",
+      "upstreamGitBlob": "6b7a2abec7e5a0c1dac0984eefbc74bdae40c710",
+      "upstreamSha256": "f52ae9c02fca7ab44c37f3ff363194fdf81caa20ae63e2fe1f518ed21133185e",
+      "sha256": "f52ae9c02fca7ab44c37f3ff363194fdf81caa20ae63e2fe1f518ed21133185e",
+      "sourceBytes": 38579,
+      "bytes": 38579,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/image-slot.js",
+      "path": "starter-components/image-slot.js",
+      "upstreamGitBlob": "e30189ba5b84fb5b9578f15081b5ce6ccf393ce4",
+      "upstreamSha256": "fff26d081c8d9d60870f86c7539a5d179b9cdab15e67f2b205508a068e7c7ff6",
+      "sha256": "fff26d081c8d9d60870f86c7539a5d179b9cdab15e67f2b205508a068e7c7ff6",
+      "sourceBytes": 65350,
+      "bytes": 65350,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/ios-frame.jsx",
+      "path": "starter-components/ios-frame.jsx",
+      "upstreamGitBlob": "d6f56861fd1d79f5c256efd755a3367c48dcce90",
+      "upstreamSha256": "24642b887be3d26ab5d1ff445ad98c363cffd33746c539a117da570ac7b6eb54",
+      "sha256": "24642b887be3d26ab5d1ff445ad98c363cffd33746c539a117da570ac7b6eb54",
+      "sourceBytes": 16507,
+      "bytes": 16507,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/macos-window.jsx",
+      "path": "starter-components/macos-window.jsx",
+      "upstreamGitBlob": "67781ff9e2f643677c6da8dbc6ef895b1fefc633",
+      "upstreamSha256": "d7346db5cca8c2a74fcd4d9701248a59aac49a839bd8517ad96ab6b60e224cb2",
+      "sha256": "d7346db5cca8c2a74fcd4d9701248a59aac49a839bd8517ad96ab6b60e224cb2",
+      "sourceBytes": 8811,
+      "bytes": 8811,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/three-d-stage.js",
+      "path": "starter-components/three-d-stage.js",
+      "upstreamGitBlob": "7c6e65da3d38de26b6f4f3765f952829d0c5be68",
+      "upstreamSha256": "072cca1bb58d363504e415af8b20f694476b206498c07169de31829880649ef5",
+      "sha256": "072cca1bb58d363504e415af8b20f694476b206498c07169de31829880649ef5",
+      "sourceBytes": 16612,
+      "bytes": 16612,
+      "slugReplacements": 0
+    },
+    {
+      "sourcePath": "Anthropic/claude-design/starter-components/tweaks-panel.jsx",
+      "path": "starter-components/tweaks-panel.jsx",
+      "upstreamGitBlob": "e983473f6ade338d95bd5b3b1bacccfe97158fc6",
+      "upstreamSha256": "d259e3a86f7300c808daa21baa358688b54665a3978816cfa028757a7f41f04d",
+      "sha256": "d259e3a86f7300c808daa21baa358688b54665a3978816cfa028757a7f41f04d",
+      "sourceBytes": 25439,
+      "bytes": 25439,
+      "slugReplacements": 0
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+.selection-toolbar { position: absolute; z-index: 35; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; width: max-content; min-height: 32px; padding: 3px 5px; color: #d7d7d7; background: #242424; border: 1px solid #414141; border-radius: 10px; box-shadow: 0 6px 18px #0000004d; }
+.quick-button, .quick-select.rounded-select { display: inline-flex; flex: 0 0 24px; align-items: center; justify-content: center; gap: 4px; width: 24px; min-width: 24px; height: 24px; padding: 0; color: #c8c8c8; background: none; border: 0; border-radius: 5px; }
+.quick-button:hover:not(:disabled), .quick-select.rounded-select:hover:not(:disabled) { color: #f2f2f2; background: #3c3c3c; }
+.quick-button.active, .quick-button.has-value, .quick-select.rounded-select[aria-expanded="true"] { color: #a4ceff; background: #254362; }
+.quick-button:focus-visible, .quick-select.rounded-select:focus-visible { outline: 1px solid #7db8ff; outline-offset: 1px; }
+.quick-type.quick-button { flex: 0 1 106px; justify-content: flex-start; width: 106px; min-width: 78px; padding: 0 5px; background: #333333; }
+.quick-type > span { flex: 1; min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.quick-type > svg:first-child { color: #999999; }
+.quick-divider { flex: 0 0 1px; height: 18px; margin: 0 2px; background: #454545; }
+.quick-swatch { position: relative; display: inline-block; flex: 0 0 16px; width: 16px; height: 16px; overflow: hidden; vertical-align: middle; background: repeating-conic-gradient(#777777 0% 25%, #333333 0% 50%) 0 0 / 6px 6px; border: 1px solid #7a7a7a; border-radius: 4px; }
+.quick-swatch > span { position: absolute; inset: 0; }
+.quick-saving { color: #aaaaaa; font-size: 10px; }
+.quick-error { flex-basis: 100%; max-width: 280px; padding: 2px 4px; color: #e1b8b3; font-size: 10px; line-height: 1.4; }
+.selection-properties-popup { z-index: 280; overflow: auto; overscroll-behavior: contain; padding: 5px; color: #d5d5d5; background: #252525; border: 1px solid #474747; border-radius: 9px; box-shadow: 0 8px 24px #00000055; }
+.selection-properties-popup > header { display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding-left: 3px; }
+.selection-properties-popup > header > strong { font-size: 12px; font-weight: 550; }
+.quick-tabs { display: flex; gap: 3px; padding: 2px 1px 5px; }
+.quick-tabs > button { min-height: 24px; padding: 2px 7px; color: #a5a5a5; background: none; border: 0; border-radius: 5px; }
+.quick-tabs > button[aria-selected="true"] { color: #eeeeee; background: #3b3b3b; }
+.quick-search, .quick-link-label > input { width: 100%; height: 24px; padding: 2px 6px; color: #dddddd; font-size: 12px; background: #202020; border: 1px solid #444444; border-radius: 6px; }
+.quick-search { margin-bottom: 5px; }
+.quick-token-list { display: flex; flex-direction: column; gap: 1px; }
+.quick-token { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 4px 6px; color: #d4d4d4; text-align: left; background: none; border: 0; border-radius: 5px; }
+.quick-token:hover:not(:disabled) { background: #3b3b3b; }
+.quick-token > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.quick-token strong { display: block; font-size: 12px; font-weight: 500; }
+.quick-token small { display: block; margin-top: 1px; color: #999999; font-size: 10px; }
+.quick-fields { display: flex; flex-direction: column; gap: 4px; padding: 4px 3px; }
+.quick-fields > strong { margin-top: 2px; color: #aaaaaa; font-size: 11px; font-weight: 500; }
+.quick-fields .property-field { width: 100%; }
+.quick-fields .property-field > span { flex-basis: 58px; font-size: 11px; }
+.quick-fields .two-fields { gap: 5px; }
+.quick-fields .two-fields .property-field > span { flex: 0 0 12px; }
+.quick-fields .color-field > .property-field > span { display: none; }
+.quick-fields .secondary-button { align-self: flex-end; }
+.quick-link-label { display: flex; flex-direction: column; gap: 4px; color: #aaaaaa; font-size: 11px; }
+.quick-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.quick-popup-error { margin: 5px 3px 3px; color: #e1b8b3; font-size: 11px; line-height: 1.4; }
+.canvas-stage:has(.is-editing[contenteditable="true"]) .selection-toolbar { display: none; }

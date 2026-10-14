@@ -1,0 +1,17 @@
+import type { CommentThread, DesignProject } from './types.js';
+
+export function commentPrompt(project: DesignProject, thread: CommentThread) {
+  const page = project.pages.find(p => p.id === thread.pageId), node = page?.nodes.find(n => n.id === thread.nodeId), board = project.boards.find(b => b.id === page?.boardId);
+  const request = thread.messages.filter(message => message.role === 'user').at(-1);
+  const generateImage = request?.intent === 'generate_image';
+  const context = node ? `canvas_get_node_context with projectId ${project.id}, pageId ${thread.pageId} and nodeId ${node.id}${generateImage ? ', includeSource:true and includeImagePlacement:true' : ''}` : `canvas_get_project with projectId ${project.id}`;
+  const dimensions = node ? `\nSelected dimensions: ${node.width} × ${node.height} px${node.height > 0 ? ` (aspect ratio ${Number((node.width / node.height).toFixed(4))})` : ''}; confirm against the current read.` : '';
+  const instructions = generateImage
+    ? `Use ${context} to read the current target, source, image-placement context and conversation before generating. Read a relevant ancestor or broader context when needed. Choose a suitable image box, aspect ratio, crop and fit from that layout and the user's request; candidate names and bounds alone do not determine semantic placement. Replace an existing image while preserving its geometry and styles, or use an appropriate explicit child image box without covering text or controls. Preserve source-backed components and their source; add an image child only where its box is appropriate. Never guess a whole-frame fill.
+
+Use the native built-in image-generation tool to generate the requested image asset only, not a screenshot of the UI. Do not require API keys or provider configuration, substitute SVG artwork, or claim generation succeeded without an actual tool result. Import its real local output with canvas_import_generated_image({filePath}) when available; this returns {asset} and does not place it. Otherwise use canvas_begin_asset_upload and canvas_upload_asset_chunk for the real output (32 MiB file limit, at most 1 MiB raw bytes per chunk). Persist the returned asset.ref in the image node's media.src, never a local path or binary data.
+
+After generation and import, reread the current focused context and revision before canvas_edit_project. Recheck the placement against current nodes, use focused operations with expectedRevision from that read, and preserve siblings, text, source, layout and conversations. On a revision conflict, reread and rebase. Only after the design is actually saved, record the result with canvas_reply_to_comment using the saved revision. If generation, import or placement cannot be completed, report the actual limitation without claiming a saved image.`
+    : `Use ${context} to read the current design, source and conversation. Read broader project context if needed. Apply the requested changes with canvas_edit_project using the returned revision, then preserve your response in this thread with canvas_reply_to_comment.`;
+  return `Please work on this Codex Design component comment.\nProject: ${project.name}\nProject ID: ${project.id}\nBoard: ${board?.name} (${board?.id})\nPage: ${page?.name} (${thread.pageId})\nComponent: ${node?.name || 'Canvas'} (${thread.nodeId || 'canvas'})${dimensions}\nThread ID: ${thread.id}${generateImage ? '\nIntent: generate_image' : ''}\n\n${request?.content || ''}\n\n${instructions}`;
+}

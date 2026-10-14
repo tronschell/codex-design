@@ -1,0 +1,44 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-design",
+  "version": "0.1.0",
+  "description": "Create interfaces or slides beside your conversation, with a shared project design system, board inspiration, anchored discussions and design-to-code handoff.",
+  "keywords": [
+    "design",
+    "canvas",
+    "interfaces",
+    "slides",
+    "design-system",
+    "tokens",
+    "inspiration",
+    "components",
+    "handoff",
+    "mcp"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Codex Design",
+        "shortDescription": "Design interfaces with Codex",
+        "longDescription": "Ask for interface designs, slide layouts or a project design system to start a shared canvas beside your conversation. Create desktop, laptop, tablet and mobile interfaces with arbitrary-size frames, generate or discover reusable design tokens and rules, collect annotated board inspiration, discuss components in anchored threads, and give your agent the complete design and source for implementation.",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Open my Codex Design canvas.",
+          "Design an interface or slide deck on the canvas.",
+          "Review design comments and update the current board.",
+          "Find the design system in my app and reuse it across boards."
+        ],
+        "brandColor": "#3c78ce",
+        "brandColorDark": "#80b5ff",
+        "composerIcon": "./assets/icon.png",
+        "composerIconDark": "./assets/icon.png",
+        "logo": "./assets/icon.png",
+        "logoDark": "./assets/icon.png"
+      }
+    }
+  }
+}

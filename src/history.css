@@ -1,0 +1,55 @@
+.history-panel { position: relative; z-index: 45; display: flex; flex: 0 0 336px; flex-direction: column; width: 336px; min-height: 0; overflow: hidden; color: #d6d6d6; font-size: 13px; background: #202020; border-left: 1px solid #393939; }
+.history-header { display: flex; flex: 0 0 32px; align-items: center; gap: 4px; min-height: 32px; padding: 3px 4px 3px 8px; border-bottom: 1px solid #353535; }
+.history-header h2 { flex: 1; min-width: 0; margin: 0; color: #e1e1e1; font-size: 13px; font-weight: 550; line-height: 20px; }
+.history-icon-button { display: inline-flex; flex: 0 0 24px; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; color: #a8a8a8; background: transparent; border: 0; border-radius: 4px; }
+.history-icon-button:hover:not(:disabled) { color: #f0f0f0; background: #343434; }
+.history-icon-button:disabled { opacity: .4; }
+.history-scope { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; min-height: 28px; padding: 4px 8px; color: #aaa; border-bottom: 1px solid #353535; }
+.history-scope > span { flex-shrink: 0; color: #bdbdbd; font-size: 12px; }
+.history-scope > small { min-width: 0; overflow: hidden; margin-left: auto; color: #999; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.history-status { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; min-height: 28px; padding: 4px 8px; color: #aaa; font-size: 11px; line-height: 1.5; border-bottom: 1px solid #353535; }
+.history-status > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.history-error { align-items: flex-start; color: #efb5ad; background: #302624; }
+.history-error > button { flex: 0 0 auto; min-height: 24px; margin: -2px 0; padding: 1px 5px; color: #efc7c1; font-size: 11px; background: transparent; border: 1px solid #72534e; border-radius: 4px; }
+.history-error > button:hover:not(:disabled) { background: #47312d; }
+.history-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.history-list { margin: 0; padding: 0; list-style: none; }
+.history-version { position: relative; display: flex; align-items: stretch; flex-direction: column; gap: 4px; width: 100%; min-height: 45px; padding: 6px 8px; color: #c7c7c7; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #303030; border-radius: 0; }
+.history-version:hover:not(:disabled) { background: #292929; }
+.history-version.is-selected, .history-version.is-selected:hover:not(:disabled) { color: #d9e9fc; background: #25374b; }
+.history-version.is-selected::before { position: absolute; inset: 0; border: 1px solid #4497ff; content: ""; pointer-events: none; }
+.history-version:disabled { cursor: default; opacity: .65; }
+.history-version-top { display: flex; align-items: center; gap: 6px; min-width: 0; line-height: 17px; }
+.history-revision { flex: 0 0 auto; color: #a0a0a0; font-size: 11px; font-variant-numeric: tabular-nums; }
+.history-version-label { flex: 1; min-width: 0; overflow: hidden; color: #d1d1d1; font-size: 13px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }
+.history-current { flex-shrink: 0; padding: 0 4px; color: #bbb; font-size: 10px; line-height: 16px; background: #373737; border-radius: 3px; }
+.history-version-meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: #9b9b9b; font-size: 10px; line-height: 14px; font-variant-numeric: tabular-nums; }
+.history-version-meta > time { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-version-meta > span { flex: 0 0 auto; margin-left: auto; color: #aaa; }
+.history-version.is-selected .history-revision, .history-version.is-selected .history-version-meta { color: #b1c5dd; }
+.history-version.is-selected .history-version-label { color: #e3efff; }
+.history-version.is-selected .history-current { color: #c7d6e9; background: #3a4c61; }
+.history-selection-flash { position: absolute; inset: 0; z-index: 1; background: #f3cf5b15; border: 1px solid #f3cf5b; animation: history-selection-flash 600ms cubic-bezier(.16, 1, .3, 1) forwards; pointer-events: none; }
+@keyframes history-selection-flash { from { opacity: 1; } to { opacity: 0; } }
+.history-empty { margin: 0; padding: 16px 8px; color: #999; font-size: 12px; line-height: 1.6; }
+.history-load-more { display: flex; align-items: center; justify-content: center; gap: 6px; width: calc(100% - 16px); min-height: 24px; margin: 6px 8px; padding: 2px 6px; color: #c6c6c6; font-size: 12px; background: #292929; border: 1px solid #414141; border-radius: 4px; }
+.history-load-more > small { color: #999; font-size: 10px; }
+.history-load-more:hover:not(:disabled) { color: #f0f0f0; background: #343434; }
+.history-footer { flex: 0 0 auto; padding: 6px 8px 8px; background: #202020; border-top: 1px solid #393939; }
+.history-preview-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #c7c7c7; font-size: 12px; line-height: 20px; }
+.history-preview-label > span { color: #999; font-size: 10px; }
+.history-footer > p { margin: 4px 0 8px; color: #a1a1a1; font-size: 12px; line-height: 1.5; }
+.history-apply { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 24px; padding: 2px 6px; color: #202020; font-size: 13px; font-weight: 550; background: #dcdcdc; border: 1px solid transparent; border-radius: 4px; }
+.history-apply:hover:not(:disabled) { background: #fff; }
+.history-apply:disabled { cursor: default; color: #8d8d8d; background: #343434; opacity: .7; }
+.history-panel button:focus-visible { outline: 2px solid #7db8ff; outline-offset: -2px; }
+.history-spinner { animation: history-spin 1s linear infinite; }
+@keyframes history-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1100px) { .history-panel { flex-basis: 306px; width: 306px; } }
+@media (max-width: 900px) { .history-panel { flex-basis: 280px; width: 280px; } }
+@media (max-width: 600px) { .history-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 280px; box-shadow: -12px 0 35px #00000040; } }
+@media (prefers-reduced-motion: reduce) {
+  .history-spinner { animation: none !important; }
+  .history-selection-flash { animation: none !important; opacity: 1; }
+}

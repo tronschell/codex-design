@@ -1,0 +1,12 @@
+{
+  "name": "codex-design-local",
+  "interface": { "displayName": "Codex Design" },
+  "plugins": [
+    {
+      "name": "codex-design",
+      "source": { "source": "local", "path": "./" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}
