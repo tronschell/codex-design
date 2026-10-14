@@ -626,3 +626,16 @@ This is an export/portability feature, not a performance optimization. Method: e
 widget.html: 818,956→830,520 B (+11564 B, +1.41%); gzip 234,196→238,307 B (+4111 B, +1.76%). mcp.mjs: 1,102,033→1,115,149 B (+13116 B, +1.19%); gzip 232,405→236,452 B (+4047 B, +1.74%).
 
 The actual read-only browser export of Forma revision 33 was 42,871 B in 15 ZIP entries, containing 22 tokens, one seven-node component definition and zero page nodes/media references. Generated React compilation and production import-schema parsing passed. Source release 26 is retained in the archive; normal import rebases it to a new local baseline. These are artifact/structure measurements, not export latency, import latency, memory, CPU, load time or frame-rate improvements. No gain is claimed for those unmeasured metrics. Raw ignored captures: library-export-before.json, library-export-after.json, library-export-downloaded.zip and library-export-mcp.json.
+
+## Selection-title usability fix — October 14, 2026
+
+This is a hit-target/spacing correction, not a runtime optimization. Method: read-only browser DOM rectangle and elementFromPoint inspection before/after, using the same 1,280 × 720 viewport, Forma's unchanged 397-node page, and exact camera `translate(-40.1422px, 723.934px) scale(0.601896)`. Select the three mobile frames in Layers and Fit selection; inspect that selection, then select the middle frame alone through Layers without moving the camera. No design write is needed.
+
+| Measured vertical title overlap | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| One selected frame | 16 CSS px | 0 CSS px | −16 CSS px | −100% |
+| Three selected frames | 18 CSS px | 0 CSS px | −18 CSS px | −100% |
+
+User effect: the middle frame-title center no longer hits Delete selection; it hits the frame-name button. Both bars move below when the title leaves too little room above the fixed toolbar. Their final lower positions clear the dimension badge by 5 CSS px and the viewport bottom by 8 CSS px. These are measured layout/hit-target outcomes, not lower accidental-deletion rates or latency measurements.
+
+Exact production artifact sizes on the same machine: widget.html 830,520→830,726 B (+206 B, +0.0248%); Python gzip level 9 with fixed mtime 237,623→237,764 B (+141 B, +0.0593%). The MCP runtime is byte-identical at 1,115,149 B (235,665 B gzip). No dependency was added. Loading, interaction latency, CPU, RAM and FPS were not measured for this UI change. Raw read-only layout and bundle captures are in /private/tmp/codex-toolbar-{before,after}-{single,multi}.json and codex-toolbar-bundles-{before,after}.json.
