@@ -13,7 +13,7 @@ An infinite canvas for designing interfaces and slides with your coding agent. B
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-417e38?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP Apps](assets/badges/mcp-apps.svg)](docs/mcp.md)
 
-[![Codex Design: mobile and desktop canvas, shared design tokens, DESIGN.md and Properties](docs/screenshots/codex-design-promo.png)](docs/screenshots/codex-design-promo.png)
+[![Codex Design in four views: mobile screens, desktop workspace, design system with DESIGN.md, and Properties](docs/screenshots/codex-design-promo.png)](docs/screenshots/codex-design-promo.png)
 
 Projects contain boards, pages and frames. Each project shares one editable design system; each board keeps its own inspiration. Component conversations, media, source exports and version history stay with the document. Chats keep independent canvas selections. Generated screens appear progressively with a grey loading wipe. Export design systems and components as Markdown, React/CSS and portable libraries for another project.
 
