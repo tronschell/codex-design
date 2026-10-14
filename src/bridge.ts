@@ -15,7 +15,6 @@ declare global {
     openai?: {
       callTool?: (name: string, args: DataRecord) => Promise<ToolResult>;
       sendFollowUpMessage?: (args: { prompt: string }) => Promise<void>;
-      requestDisplayMode?: (args: { mode: DisplayMode }) => Promise<unknown>;
       setWidgetState?: (state: unknown) => void;
       toolOutput?: DataRecord;
       toolResponseMetadata?: DataRecord;
@@ -277,17 +276,4 @@ export function updateModelContext(context: DataRecord) {
     }
     if (standardBridge) await request('ui/update-model-context', { structuredContent: paneContext });
   }).catch(() => { /* The explicit follow-up still includes the project and anchor. */ });
-}
-
-export async function fullscreen() {
-  if (embedded) {
-    await initializeBridge();
-    if (standardBridge) {
-      if (hostContext.availableDisplayModes && !hostContext.availableDisplayModes.includes('fullscreen')) throw new Error('This host does not offer fullscreen mode.');
-      const result = await request('ui/request-display-mode', { mode: 'fullscreen' });
-      hostContext.displayMode = result?.mode;
-    } else if (window.openai?.requestDisplayMode) await window.openai.requestDisplayMode({ mode: 'fullscreen' });
-    else throw new Error('This host does not offer fullscreen mode.');
-  } else if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
-  else await document.exitFullscreen();
 }
