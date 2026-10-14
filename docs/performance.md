@@ -497,3 +497,16 @@ This is a selection usability feature, not a measured runtime optimization. Meth
 User effect: a pointer drag from blank canvas selects enclosed visible objects together; Shift adds them to the existing selection. Geometry is captured at pointer-down, preview IDs remain local until release, and cancellation restores the accepted selection without design/history writes. Candidate bounds respect transformed rectangular overflow clips; the MCP runtime is byte-identical. No selection latency, load time, CPU, heap/RSS, GPU, browser RAM, throughput or FPS metrics were measured, and no runtime speed/memory savings are claimed.
 
 Production compilation/package and bounded source review are the verification method. Review corrected focused-input Escape handling and clipping beneath borders/rotated ancestors. Live native drag/modified-click input is unavailable in the connected MCP Apps browser, so actual gestures, zoomed interaction and installed-host focus remain unexercised. User designs were not mutated for verification; GaugeReel retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.
+
+## Cross-platform keyboard and clipboard footprint — October 14, 2026
+
+Usability/correctness feature, not a measured runtime optimization. Method: Python Path.stat().st_size over installed `8864a07` production files and the current `npm run build`, same machine; workload is the self-contained canvas widget and MCP entry, excluding user designs/media.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Canvas widget | 702,937 B | 712,919 B | +9,982 B | +1.42% |
+| MCP runtime | 1,030,383 B | 1,030,383 B | 0 B | 0.00% |
+
+User effect: primary keyboard commands work with Command/Ctrl from the canvas and toolbar/closed-select focus, while native text editing remains separate. Selection copy/cut/paste preserves scoped content and conversations through validated atomic saves. Clipboard input/transactions stay within the existing 2 MiB and 2,000-operation limits; geometry metadata is bounded during collection. These are inspected limits, not measured latency or RAM savings. No keyboard latency, clipboard throughput, CPU, heap/RSS, GPU, browser-memory, load-time or FPS measurements were collected; no runtime savings are claimed. The MCP runtime is byte-identical.
+
+Verification uses production build/package, strict unused-symbol TypeScript compilation and bounded source review. Actual native Mac/Windows shortcut delivery, host clipboard support and cut/paste/undo interactions remain unexercised; the connected MCP Apps browser exposes no native keyboard/clipboard gestures. Existing designs were not mutated for verification; GaugeReel retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run. Cross-page transformed-parent paste requires the original unchanged parent or copying its frame; opaque authored source dependencies are retained rather than rewritten.

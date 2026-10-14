@@ -404,7 +404,7 @@ export default function ProjectLibrary({ project, boardId, mode, readOnly, onCha
       moveView({ ...active.view, x: active.view.x + dx, y: active.view.y + dy });
     }} onPointerUp={finishPan} onPointerCancel={finishPan} onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }} onKeyDown={event => {
       if ((event.target as Element).closest('input, textarea, select, button, summary')) return;
-      if (event.code === 'Space') { event.preventDefault(); setSpacePan(true); }
+      if (event.code === 'Space' && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); setSpacePan(true); }
       else if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomAt(viewRef.current.zoom * 1.2); }
       else if (event.key === '-') { event.preventDefault(); zoomAt(viewRef.current.zoom / 1.2); }
       else if (event.key === '1') { event.preventDefault(); fit(); }
