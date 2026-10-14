@@ -13,12 +13,12 @@ export interface ExportFile { name: string; data: string | Uint8Array; mimeType:
 type LoadedAsset = { asset: AssetMetadata; bytes: Uint8Array };
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
-async function loadAssets(project: DesignProject, includeInspiration = true): Promise<LoadedAsset[]> {
+async function loadAssets(project: DesignProject, includeInspiration = true, signal?: AbortSignal): Promise<LoadedAsset[]> {
   const assets: LoadedAsset[] = [];
   let total = 0;
   const document = includeInspiration ? project : { ...project, boards: project.boards.map(board => ({ ...board, inspiration: undefined })) };
   for (const ref of projectAssetRefs(document)) {
-    const item = await client.readAsset(ref);
+    const item = await client.readAsset(ref, signal);
     total += item.bytes.byteLength;
     if (total > MAX_ARCHIVE_BYTES - MAX_INPUT_BYTES) throw new Error('This scope contains more than 254 MiB of media. Export a smaller scope.');
     assets.push(item);
@@ -26,39 +26,50 @@ async function loadAssets(project: DesignProject, includeInspiration = true): Pr
   return assets;
 }
 
-function dataUrl({ asset, bytes }: LoadedAsset): Promise<string> {
+function dataUrl({ asset, bytes }: LoadedAsset, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`Could not prepare media ${asset.name} for export.`));
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: asset.mimeType }));
+    const abort = () => reader.abort();
+    const cleanup = () => signal?.removeEventListener('abort', abort);
+    reader.onabort = () => { cleanup(); reject(signal?.reason ?? new DOMException('Export cancelled.', 'AbortError')); };
+    reader.onerror = () => { cleanup(); reject(new Error(`Could not prepare media ${asset.name} for export.`)); };
+    reader.onload = () => { cleanup(); resolve(String(reader.result)); };
+    signal?.addEventListener('abort', abort, { once: true });
+    try { reader.readAsDataURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: asset.mimeType })); }
+    catch (error) { cleanup(); reject(error); }
   });
 }
 
-async function embeddedAssetUrls(project: DesignProject) {
+async function embeddedAssetUrls(project: DesignProject, signal?: AbortSignal) {
   const urls: Record<string, string> = {};
-  for (const item of await loadAssets(project, false)) urls[item.asset.ref] = await dataUrl(item);
+  for (const item of await loadAssets(project, false, signal)) urls[item.asset.ref] = await dataUrl(item, signal);
   return urls;
 }
 
-export async function exportTexts(project: DesignProject, target: ExportTarget, format: ExportFormat): Promise<ExportText[]> {
+export async function exportTexts(project: DesignProject, target: ExportTarget, format: ExportFormat, signal?: AbortSignal): Promise<ExportText[]> {
+  signal?.throwIfAborted();
   if (format === 'svg') return [{ label: 'SVG', text: exportTargetSvg(project, target) }];
   if (format !== 'react' && format !== 'html') throw new Error('This format is available as a file download.');
-  const scoped = exportTargetProject(project, target), options = { assetUrls: await embeddedAssetUrls(scoped) };
+  const scoped = exportTargetProject(project, target), options = { assetUrls: await embeddedAssetUrls(scoped, signal) };
+  signal?.throwIfAborted();
   if (format === 'html') return [{ label: 'HTML', text: exportTargetHtml(project, target, options) }];
   const generated = exportTargetReact(project, target, options);
   return [{ label: 'React', text: generated.jsx }, { label: 'CSS', text: generated.css }];
 }
 
-export async function exportFile(project: DesignProject, target: ExportTarget, format: ExportFormat): Promise<ExportFile> {
+export async function exportFile(project: DesignProject, target: ExportTarget, format: ExportFormat, signal?: AbortSignal): Promise<ExportFile> {
+  signal?.throwIfAborted();
   const scoped = exportTargetProject(project, target), scopeName = target.scope === 'selection' ? scoped.pages[0]?.nodes.find(node => node.id === target.nodeIds?.[0])?.name : target.scope === 'page' ? scoped.pages[0]?.name : target.scope === 'board' ? scoped.boards[0]?.name : 'project';
   const name = exportFilename(`${project.name}-${scopeName ?? target.scope}`);
   if (format === 'html' || format === 'svg') {
-    const [source] = await exportTexts(project, target, format);
+    const [source] = await exportTexts(project, target, format, signal);
     return { name: `${name}.${format}`, data: source.text, mimeType: format === 'svg' ? 'image/svg+xml' : 'text/html' };
   }
   if (format === 'png') throw new Error('PNG capture is not available. Choose a source format.');
-  const assets = await loadAssets(scoped, format !== 'react'), assetUrls: Record<string, string> = {}, files: ArchiveFiles = {};
+  const assets = await loadAssets(scoped, format !== 'react', signal);
+  signal?.throwIfAborted();
+  const assetUrls: Record<string, string> = {}, files: ArchiveFiles = {};
   const manifestAssets = assets.map(({ asset, bytes }) => {
     const path = `assets/${assetFilename(asset)}`;
     assetUrls[asset.ref] = path; files[path] = bytes;

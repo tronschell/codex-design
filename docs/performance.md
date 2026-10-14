@@ -445,3 +445,16 @@ This batch adds visible loading state and removes confirmed dead code; it is not
 Practical effect: explicitly generating frames show grey with a subtle wipe while real saved batches arrive, then return to their authored background when marked ready. After two idle minutes, the wipe stops and says Waiting for Codex; Properties can stop it without deleting content. Animation uses CSS transforms, no React animation loop; hidden/offscreen views and reduced motion suppress movement. Generation timestamps are excluded from yellow visual-diff highlights. Source and preview/export appearance remain independent of editor loading chrome.
 
 Production build/package, strict unused-symbol compilation and bounded source review passed. All 32 imported reference hashes still match the provenance manifest. No CPU, RAM, load-time, input-latency, FPS, compositor/GPU cost or generation-duration metric was measured; no gains are claimed. Actual live loading transitions and sidebar rendering require the refreshed host. No tests, assertions, fixtures, test scripts or dependencies were added or run.
+
+## Export cancellation lifecycle — October 14, 2026
+
+This is a correctness/quality-of-life change, not a measured runtime optimization. Comparable artifact method: Python byte counts of the installed `36e5d88` production files and the new build, same machine/build command, widget and MCP entry only; no designs or media are included.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Canvas widget | 692,711 B | 693,740 B | +1,029 B | +0.15% |
+| MCP runtime | 1,030,019 B | 1,030,019 B | 0 B | 0.00% |
+
+User effect: closing Export stops pending preparation instead of allowing a surprise later download or clipboard write. Revision/target changes cancel the old action and request a current export. Abort signals reach chunked media reads and FileReader conversion; completion/error notices are bounded to the active action. The MCP runtime is byte-identical, and shared source generators and persistence are unchanged.
+
+Verification uses production compilation/package and direct source inspection of every export caller and asynchronous boundary, without tests, assertions, fixtures or scripts for testing. Actual cancellation latency, bytes avoided, CPU, heap/RSS, browser RAM, load time, input latency and FPS were not measured; no improvement percentages are claimed. Real installed-host close-during-media/clipboard/download behavior was not exercised. A host RPC already in flight may complete, already dispatched side effects cannot be undone, and synchronous ZIP construction cannot yield to a close event mid-operation. No user designs were mutated.
