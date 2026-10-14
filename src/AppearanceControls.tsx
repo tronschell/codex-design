@@ -6,6 +6,7 @@ import { compatibleTokenKinds } from '../shared/design-system';
 import { safeCssText, safeEffectColor } from '../shared/effects';
 import { Select } from './Select';
 import { colorParts, withOpacity } from './color-picker';
+import AngleDial from './AngleDial';
 import './appearance-controls.css';
 
 type Props = {
@@ -148,7 +149,11 @@ export default function AppearanceControls({ node, effective, system, disabled, 
     operation.current++; pending.current = false; gesture.current = null; fallbackGradient.current = null;
     setCurrent(effective.styles); setSaving(false); setError(''); setReset(value => value + 1); setSelectedStopId(node.styles.gradient?.stops[0]?.id ?? null);
   }, [node.id]);
-  useLayoutEffect(() => { if (!pending.current && !gesture.current) setCurrent(effective.styles); }, [effective.styles]);
+  useLayoutEffect(() => {
+    if (pending.current) return;
+    if (gesture.current) { gesture.current = null; setReset(value => value + 1); }
+    setCurrent(effective.styles);
+  }, [effective.styles]);
   useLayoutEffect(() => { if (disabled) { cancelGesture(); setReset(value => value + 1); } }, [disabled]);
   useLayoutEffect(() => { const cancel = () => cancelGesture(); window.addEventListener('blur', cancel); return () => window.removeEventListener('blur', cancel); }, []);
 
@@ -184,6 +189,14 @@ export default function AppearanceControls({ node, effective, system, disabled, 
   };
   const linked = (property: BindableStyleProperty, label: string, field: ReactNode) => <div className="appearance-linked-control">{field}{tokenControl(property, label)}</div>;
   const patchGradient = (patch: Partial<GradientFill>) => change({ gradient: { ...(latest.current.gradient ?? gradient), ...patch } });
+  const beginAngle = () => {
+    if (locked || pending.current || gesture.current) return false;
+    gesture.current = { id: 'angle', nodeId: node.id, moved: false, base: latest.current }; return true;
+  };
+  const previewAngle = (angle: number) => {
+    if (!gesture.current || gesture.current.id !== 'angle' || pending.current || context.current.disabled) return;
+    setCurrent({ ...latest.current, gradient: { ...(latest.current.gradient ?? gradient), angle } }); gesture.current.moved = true;
+  };
   const patchStop = (patch: Partial<Omit<GradientStop, 'id'>>) => {
     const current = latest.current.gradient ?? gradient;
     patchGradient({ stops: current.stops.map(item => item.id === stop.id ? { ...item, ...patch } : item).sort((a, b) => a.position - b.position) });
@@ -266,7 +279,7 @@ export default function AppearanceControls({ node, effective, system, disabled, 
         {number('Fill opacity', (styles.fillOpacity ?? 1) * 100, value => change({ fillOpacity: value / 100 }), { min: 0, max: 100, suffix: '%', stacked: true, shortLabel: 'Opacity', title: 'Fill opacity combines with the color’s own opacity.' })}
       </div>}
       {fillMode === 'gradient' && <div className="appearance-gradient-editor">
-        <div className="appearance-gradient-kind"><Select label="Gradient type" value={gradient.type} disabled={locked} options={[{ value: 'linear', label: 'Linear' }, { value: 'radial', label: 'Radial' }]} onChange={value => patchGradient({ type: value as GradientFill['type'] })}/>{gradient.type === 'linear' && number('Gradient angle', gradient.angle, value => patchGradient({ angle: value }), { min: -3600, max: 3600, suffix: '°', shortLabel: 'Angle' })}</div>
+        <div className="appearance-gradient-kind"><Select label="Gradient type" value={gradient.type} disabled={locked} options={[{ value: 'linear', label: 'Linear' }, { value: 'radial', label: 'Radial' }]} onChange={value => patchGradient({ type: value as GradientFill['type'] })}/>{gradient.type === 'linear' && <div className="appearance-angle-control"><AngleDial value={gradient.angle} disabled={locked} identity={node.id} reset={reset} onBegin={beginAngle} onPreview={previewAngle} onCommit={finishGesture} onCancel={cancelGesture}/>{number('Gradient angle', gradient.angle, value => patchGradient({ angle: value }), { min: -3600, max: 3600, suffix: '°', hiddenLabel: true, title: 'Angle in degrees · decimals allowed' })}</div>}</div>
         <div className="appearance-gradient-strip">
           <div ref={track} className="appearance-gradient-track" title="Double-click to add a color stop" onDoubleClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); addStop(compact((event.clientX - bounds.left) / bounds.width * 100)); }}><div style={{ background: gradientCss({ ...gradient, type: 'linear', angle: 90 }) }}/></div>
           <div className="appearance-gradient-pins">{gradient.stops.map((item, index) => <button key={item.id} type="button" role="slider" className={`appearance-gradient-stop${item.id === stop.id ? ' is-selected' : ''}`} style={{ left: `${item.position}%` }} disabled={locked} aria-label={`Gradient stop ${index + 1} position`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.position} aria-valuetext={`${item.position} percent, ${item.color}`} title={`${item.color} · ${item.position}%. Drag or use arrow keys to move.`} onClick={() => setSelectedStopId(item.id)} onFocus={() => setSelectedStopId(item.id)} onPointerDown={event => stopPointerDown(event, item.id)} onPointerMove={stopPointerMove} onPointerUp={event => { if (gesture.current?.pointer === event.pointerId) finishGesture(); }} onPointerCancel={cancelGesture} onLostPointerCapture={() => { if (gesture.current?.pointer !== undefined) cancelGesture(); }} onKeyDown={event => stopKeyDown(event, item)} onKeyUp={event => { event.stopPropagation(); if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) finishGesture(); }} onBlur={finishGesture}><span><i style={{ backgroundColor: item.color, opacity: item.opacity }}/></span></button>)}</div>
