@@ -11,6 +11,7 @@ import MediaNode from './MediaNode';
 import './project-library.css';
 import { usePanelResize } from './usePanelResize';
 import { Select } from './Select';
+import { FontPicker } from './FontPicker';
 import ComponentEditor from './ComponentLibrary';
 import ComponentPreview from './ComponentPreview';
 import LibraryVersions from './LibraryVersions';
@@ -100,7 +101,7 @@ function useLibraryDraft<T extends Record<string, string>>(key: string, saved: T
   return { ...state, setValue, reset };
 }
 
-const draftFieldLabels: Record<string, string> = { name: 'name', description: 'description', documentation: 'documentation', kind: 'type', value: 'value', notes: 'what you like', usage: 'intended use', sourceUrl: 'source link' };
+const draftFieldLabels: Record<string, string> = { name: 'name', description: 'description', documentation: 'documentation', markdown: 'DESIGN.md', kind: 'type', value: 'value', notes: 'what you like', usage: 'intended use', sourceUrl: 'source link' };
 function DraftConflicts({ fields, saved }: { fields: string[]; saved: Record<string, string> }) {
   if (!fields.length) return null;
   return <details className="library-draft-warning"><summary>Changed elsewhere: {fields.map(field => draftFieldLabels[field] ?? field).join(', ')}. Your edits are kept.</summary><p className="library-field-note">Review the saved values below; Save keeps your edited fields and the latest untouched fields.</p>{fields.map(field => <label key={field}>Saved {draftFieldLabels[field] ?? field}<textarea readOnly rows={3} value={saved[field]}/></label>)}</details>;
@@ -168,15 +169,18 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   const selectedToken = system.tokens.find(token => token.id === selectedTokenId), selectedReference = inspiration.find(item => item.id === selectedReferenceId);
   const tokenState = useLibraryDraft(`${project.id}/token/${selectedTokenId}`, selectedToken ? { id: selectedToken.id, name: selectedToken.name, kind: selectedToken.kind, value: String(selectedToken.value), description: selectedToken.description ?? '' } : null, emptyToken);
   const referenceState = useLibraryDraft(`${project.id}/${boardId}/reference/${selectedReferenceId}`, selectedReference ? { name: selectedReference.name, notes: selectedReference.notes, usage: selectedReference.usage, sourceUrl: selectedReference.sourceUrl ?? '' } : null, emptyReference);
-  const metadataState = useLibraryDraft(`${project.id}/metadata`, { name: system.name, description: system.description, documentation: system.documentation }, () => ({ name: '', description: '', documentation: '' }));
-  const { value: tokenDraft, setValue: setTokenDraft } = tokenState, { value: referenceDraft, setValue: setReferenceDraft } = referenceState, { value: metadata, setValue: setMetadata } = metadataState;
+  const markdown = useMemo(() => designSystemMarkdown(system), [system]);
+  const documentState = useLibraryDraft(`${project.id}/document`, { markdown }, () => ({ markdown: '' }));
+  const { value: tokenDraft, setValue: setTokenDraft } = tokenState, { value: referenceDraft, setValue: setReferenceDraft } = referenceState;
+  const fontTokens = useMemo(() => system.tokens.filter(token => token.kind === 'fontFamily'), [system.tokens]);
+  const fontFamilies = useMemo(() => fontTokens.map(token => String(token.value)), [fontTokens]);
   const retainedReference = useRef<{ key: string; item: InspirationItem | null }>({ key: referenceState.key, item: selectedReference ?? null });
   if (retainedReference.current.key !== `${project.id}/${boardId}/reference/${selectedReferenceId}`) retainedReference.current = { key: `${project.id}/${boardId}/reference/${selectedReferenceId}`, item: selectedReference ?? null };
   else if (selectedReference) retainedReference.current.item = selectedReference;
   const editableReference = selectedReference ?? (referenceState.deleted ? retainedReference.current.item : null);
   const [requestMode, setRequestMode] = useState<'generate' | 'find'>(system.request?.mode ?? 'generate');
   const [brief, setBrief] = useState(system.request?.brief ?? project.description), [repository, setRepository] = useState(system.request?.repository ?? '');
-  const [delivery, setDelivery] = useState(''), [showRequest, setShowRequest] = useState(false), [preview, setPreview] = useState<'markdown' | 'css'>('markdown');
+  const [delivery, setDelivery] = useState(''), [showRequest, setShowRequest] = useState(false);
   const [hand, setHand] = useState(false), [spacePan, setSpacePan] = useState(false), [panning, setPanning] = useState(false), [dropActive, setDropActive] = useState(false);
   const [busy, setBusy] = useState(''), [stopping, setStopping] = useState(false), [error, setError] = useState('');
   const root = useRef<HTMLElement>(null), stage = useRef<HTMLElement>(null), fileInput = useRef<HTMLInputElement>(null), tokenName = useRef<HTMLInputElement>(null), queuedPrompt = useRef<HTMLTextAreaElement>(null);
@@ -188,7 +192,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   const field = tokenFields[tokenDraft.kind], numeric = !stringKinds.has(tokenDraft.kind);
   const numericInput = numeric && (!tokenDraft.value.trim() || Number.isFinite(Number(tokenDraft.value)));
   const compatibilityToken = Object.values(LEGACY_TOKEN_IDS).some(id => id === tokenDraft.id);
-  const metadataChanged = metadata.name !== system.name || metadata.description !== system.description || metadata.documentation !== system.documentation;
+  const documentChanged = documentState.value.markdown !== markdown;
 
   const tokenLayout = useMemo(() => {
     const columns = [0, 0, 0];
@@ -308,18 +312,15 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
     const next = await persist([{ type: 'upsert_design_token', token }], current);
     if (next) { tokenState.reset({ ...token, value: String(token.value), description: token.description ?? '' }); setSelectedTokenId(token.id); onNotify('Design token saved.'); }
   });
-  const saveMetadata = async (current: Current) => {
-    if (!metadata.name.trim()) throw new Error('Give the design system a name.');
-    const patch: { name?: string; description?: string; documentation?: string } = {};
-    for (const field of ['name', 'description', 'documentation'] as const) if (metadata[field] !== metadataState.base[field]) patch[field] = field === 'name' ? metadata[field].trim() : metadata[field];
-    if (!Object.keys(patch).length) return context.current.project;
-    const next = await persist([{ type: 'update_design_system', patch }], current);
-    if (next) metadataState.reset({ name: next.designSystem.name, description: next.designSystem.description, documentation: next.designSystem.documentation });
+  const saveDocument = async (current: Current) => {
+    if (!documentChanged) return context.current.project;
+    if (documentState.conflicts.length) throw new Error('DESIGN.md changed elsewhere. Review the saved document and use the latest version before applying your edits.');
+    const next = await persist([{ type: 'apply_design_system_document', markdown: documentState.value.markdown }], current);
+    if (next) documentState.reset({ markdown: designSystemMarkdown(next.designSystem) });
     return next;
   };
   const exportSystem = (action: 'copy' | 'download' | 'css') => void run(action === 'download' ? 'Preparing DESIGN.md…' : 'Copying…', async current => {
-    if (action !== 'css' && metadataChanged && metadataState.conflicts.length && !readOnly) throw new Error('Review the changed documentation fields and save your edits before exporting DESIGN.md.');
-    const latest = action !== 'css' && metadataChanged && !readOnly ? await saveMetadata(current) : context.current.project;
+    const latest = documentChanged && !readOnly ? await saveDocument(current) : context.current.project;
     if (!latest || !current()) return;
     const text = action === 'css' ? tokenCssVariables(latest.designSystem) : designSystemMarkdown(latest.designSystem);
     if (action === 'download') {
@@ -457,27 +458,37 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
       <header className="library-panel-header"><h2>{mode === 'system' ? system.name : mode === 'components' ? 'Components' : 'Board inspiration'}</h2>{readOnly && <span>Read only</span>}<button type="button" className="library-icon" aria-label="Collapse library panel" title="Collapse library panel" onClick={() => setPanelOpen(false)}><X size={15}/></button></header>
       <div className="library-scope" title={mode !== 'inspiration' ? project.name : board?.name}>{mode !== 'inspiration' ? <><span>Project</span><strong>{project.name}</strong><small>All boards</small></> : <><span>Board</span><strong>{board?.name || 'Unavailable'}</strong><small>{inspiration.length}/100</small></>}</div>
       {mode === 'system' ? <>
-        <div className="library-panel-tabs" role="tablist" aria-label="Design system sections">{([{ id: 'tokens', label: 'Tokens' }, { id: 'docs', label: 'Documentation' }, { id: 'requests', label: 'Codex' }, { id: 'versions', label: 'Versions' }] as const).map(item => <button type="button" role="tab" id={`library-tab-${item.id}`} aria-controls={`library-section-${item.id}`} aria-selected={tab === item.id} key={item.id} onClick={() => setTab(item.id)}>{item.label}{item.id === 'requests' && system.request?.queued && <span className="library-queued-dot"/>}</button>)}</div>
+        <div className="library-panel-tabs" role="tablist" aria-label="Design system sections">{([{ id: 'tokens', label: 'Tokens' }, { id: 'docs', label: 'DESIGN.md' }, { id: 'requests', label: 'Codex' }, { id: 'versions', label: 'Versions' }] as const).map(item => <button type="button" role="tab" id={`library-tab-${item.id}`} aria-controls={`library-section-${item.id}`} aria-selected={tab === item.id} key={item.id} onClick={() => setTab(item.id)}>{item.label}{item.id === 'requests' && system.request?.queued && <span className="library-queued-dot"/>}</button>)}</div>
         <div className="library-panel-scroll" role="tabpanel" id={`library-section-${tab}`} aria-labelledby={`library-tab-${tab}`}>
           {tab === 'versions' && <LibraryVersions project={project} scope="system" disabled={disabled} onChange={onChange} onApply={onApply} onNotify={onNotify}/>}
           {tab === 'tokens' && <>
-            <div className="library-token-picker"><Select label="Select design token" value={selectedToken || tokenState.deleted ? selectedTokenId : ''} onChange={setSelectedTokenId} options={[{value:'',label:'New token'},...(tokenState.deleted?[{value:selectedTokenId,label:`Deleted · ${tokenDraft.name}`}]:[]),...groups.flatMap(group=>system.tokens.filter(token=>group.kinds.includes(token.kind)).map(token=>({value:token.id,label:`${group.name} · ${token.name}${token.kind==='color'?` · ${token.value}`:''}`,...(token.kind==='color'?{color:String(token.value)}:{})})))]}/><button type="button" className="library-icon" aria-label="Add design token" title="Add design token" disabled={disabled} onClick={addToken}><Plus size={16}/></button></div>
+            <div className="library-token-picker"><Select label="Select design token" value={selectedToken || tokenState.deleted ? selectedTokenId : ''} onChange={setSelectedTokenId} options={[{value:'',label:'New token'},...(tokenState.deleted?[{value:selectedTokenId,label:`Deleted · ${tokenDraft.name}`}]:[]),...groups.flatMap(group=>system.tokens.filter(token=>group.kinds.includes(token.kind)).map(token=>({value:token.id,label:`${group.name} · ${token.name}${token.kind==='color'?` · ${token.value}`:''}`,...(token.kind==='color'?{color:String(token.value)}:token.kind==='fontFamily'?{fontFamily:String(token.value)}:token.kind==='fontWeight'?{fontWeight:Number(token.value)}:{})})))]}/><button type="button" className="library-icon" aria-label="Add design token" title="Add design token" disabled={disabled} onClick={addToken}><Plus size={16}/></button></div>
             <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); saveToken(); }}>
               <h3>{tokenState.deleted ? 'Deleted token draft' : selectedToken ? 'Edit token' : 'New token'}{selectedToken && <button type="button" className="library-icon library-delete" aria-label="Delete selected token" title="Delete token; saved versions retain it" disabled={disabled} onClick={() => void run('Deleting token…', async current => { if (await persist([{ type: 'delete_design_token', tokenId: selectedToken.id }], current)) { setSelectedTokenId(''); onNotify('Design token deleted. Earlier versions retain it.'); } })}><Trash2 size={13}/></button>}</h3>
               <DraftConflicts fields={tokenState.conflicts} saved={tokenState.base}/>{tokenState.deleted && <p className="library-draft-warning">Deleted elsewhere. Your draft is retained. Restore token adds it back; old layer bindings remain detached. Changing selection discards this draft.</p>}
               <label>Name<input ref={tokenName} required maxLength={160} readOnly={disabled} value={tokenDraft.name} placeholder="color.action.primary" onChange={event => setTokenDraft({ ...tokenDraft, name: event.target.value })}/></label>
               <label title={compatibilityToken ? 'Compatibility tokens keep their original type.' : undefined}>Type<Select label="Token type" disabled={disabled || compatibilityToken} value={tokenDraft.kind} onChange={kind=>setTokenDraft({...tokenDraft,kind:kind as DesignSystemTokenKind,value:''})} options={groups.flatMap(group=>group.kinds.map(kind=>({value:kind,label:`${group.name} · ${tokenFields[kind].label.split(' · ')[0]}`})))}/></label>
-              <label>{field.label}<input required type={numericInput ? 'number' : 'text'} step={field.step ?? 'any'} min={field.min} max={field.max} maxLength={2000} readOnly={disabled} value={tokenDraft.value} placeholder={field.placeholder} onChange={event => setTokenDraft({ ...tokenDraft, value: event.target.value })}/></label>
+              {tokenDraft.kind === 'fontFamily' ? <FontPicker label="Font family" value={tokenDraft.value} families={fontFamilies} disabled={disabled} onChange={value => setTokenDraft({ ...tokenDraft, value })}/> : <label>{field.label}<input required type={numericInput ? 'number' : 'text'} step={field.step ?? 'any'} min={field.min} max={field.max} maxLength={2000} readOnly={disabled} value={tokenDraft.value} placeholder={field.placeholder} onChange={event => setTokenDraft({ ...tokenDraft, value: event.target.value })}/></label>}
+              {tokenDraft.kind === 'fontFamily' && <p className="library-font-specimen" style={{fontFamily:tokenDraft.value || undefined}}>Aa Bb Cc · 0123456789</p>}
               <label>Description<textarea maxLength={5000} rows={3} readOnly={disabled} value={tokenDraft.description} placeholder="Where and why to use this token" onChange={event => setTokenDraft({ ...tokenDraft, description: event.target.value })}/></label>
               <button type="submit" className="library-button library-primary" disabled={disabled || !tokenDraft.name.trim() || !tokenDraft.value.trim()}><Check size={13}/>{tokenState.deleted ? 'Restore token' : 'Save token'}</button>
             </form>
             <p className="library-note">Named tokens are shared by every board in this project.</p>
           </>}
           {tab === 'docs' && <>
-            <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); void run('Saving documentation…', async current => { if (await saveMetadata(current)) onNotify('Design system documentation saved.'); }); }}>
-              <h3>System details</h3><DraftConflicts fields={metadataState.conflicts} saved={metadataState.base}/><label>Name<input maxLength={160} required readOnly={disabled} value={metadata.name} onChange={event => setMetadata({ ...metadata, name: event.target.value })}/></label><label>Description<textarea maxLength={5000} rows={2} readOnly={disabled} value={metadata.description} onChange={event => setMetadata({ ...metadata, description: event.target.value })}/></label><label>Documentation · Markdown<textarea className="library-documentation" maxLength={100000} rows={10} spellCheck={false} readOnly={disabled} value={metadata.documentation} placeholder="Usage guidance, principles and component conventions" onChange={event => setMetadata({ ...metadata, documentation: event.target.value })}/></label><p className="library-field-note">Token values are edited in Tokens. This documentation adds guidance to the generated reference.</p><button type="submit" className="library-button library-primary" disabled={disabled || !metadataChanged}><Check size={13}/>Save documentation</button>
+            {!!fontTokens.length && <section className="library-section">
+              <h3>Project fonts</h3><p className="library-field-note">Font choices save immediately and update linked text across every board. Previews use available fonts and CSS fallbacks.</p>
+              {documentChanged && <p className="library-field-note">Save or discard the Markdown draft before changing fonts here.</p>}
+              {fontTokens.map(token => <div className="library-typography-row" key={token.id}><FontPicker label={token.name} value={String(token.value)} families={fontFamilies} disabled={disabled || documentChanged} onChange={value => void run('Saving project font…', async current => { if (await persist([{type:'upsert_design_token',token:{...token,value}}], current)) onNotify(`${token.name} updated across linked styles.`); })}/><p className="library-font-specimen" style={{fontFamily:String(token.value)}}>Aa Bb Cc · 0123456789</p></div>)}
+            </section>}
+            <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); void run('Saving DESIGN.md…', async current => { if (await saveDocument(current)) onNotify('DESIGN.md saved. Linked styles updated across the project.'); }); }}>
+              <h3>DESIGN.md{documentChanged && <span>Unsaved</span>}</h3>
+              <p className="library-field-note">Edit guidance and token rows here. Keep stable CSS variable IDs and section comments; component and source catalogs are generated. Custom layer styles stay independent.</p>
+              {!!documentState.conflicts.length && <details className="library-draft-warning"><summary>DESIGN.md changed elsewhere. Your draft is kept.</summary><p className="library-field-note">Review the latest saved document below. Use latest to replace your draft, then reapply your edits before saving.</p><textarea readOnly rows={8} aria-label="Latest saved DESIGN.md" value={documentState.base.markdown}/></details>}
+              <label className="library-document-label">Project document<textarea aria-label="Project DESIGN.md" className="library-documentation library-document-editor" maxLength={2_097_152} rows={26} spellCheck={false} readOnly={disabled} value={documentState.value.markdown} onChange={event => documentState.setValue({markdown:event.target.value})}/></label>
+              <div className="library-button-row"><button type="submit" className="library-button library-primary" disabled={disabled || !documentChanged || !!documentState.conflicts.length}><Check size={13}/>Save DESIGN.md</button>{documentChanged && <button type="button" className="library-button" disabled={working} onClick={() => documentState.reset({markdown})}>{documentState.conflicts.length ? 'Use latest' : 'Discard draft'}</button>}</div>
             </form>
-            <section className="library-section"><h3>DESIGN.md</h3><p className="library-field-note">Export includes current structured tokens, sources and documentation. Unsaved documentation is saved first.</p><div className="library-button-row"><button type="button" className="library-button" disabled={working || !readOnly && metadataChanged && !!metadataState.conflicts.length} onClick={() => exportSystem('copy')}><Copy size={13}/>Copy</button><button type="button" className="library-button" disabled={working || !readOnly && metadataChanged && !!metadataState.conflicts.length} onClick={() => exportSystem('download')}><Download size={13}/>Download DESIGN.md</button></div><details className="library-details"><summary>Generated reference</summary><div className="library-reference-tabs"><button type="button" aria-pressed={preview === 'markdown'} onClick={() => setPreview('markdown')}>DESIGN.md</button><button type="button" aria-pressed={preview === 'css'} onClick={() => setPreview('css')}>CSS variables</button></div><textarea readOnly rows={8} spellCheck={false} aria-label={preview === 'markdown' ? 'Generated DESIGN.md reference' : 'Generated CSS variables'} value={preview === 'markdown' ? designSystemMarkdown(system) : tokenCssVariables(system)}/>{preview === 'css' && <button type="button" className="library-button" disabled={working} onClick={() => exportSystem('css')}><Copy size={12}/>Copy CSS</button>}</details></section>
+            <section className="library-section"><h3>Export reference</h3><p className="library-field-note">Exports use current tokens and guidance. A writable Markdown draft is saved first.</p><div className="library-button-row"><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('copy')}><Copy size={13}/>Copy</button><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('download')}><Download size={13}/>Download DESIGN.md</button></div><details className="library-details"><summary>CSS variables</summary><textarea readOnly rows={8} spellCheck={false} aria-label="Generated CSS variables" value={tokenCssVariables(system)}/><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('css')}><Copy size={12}/>Copy CSS</button></details></section>
             {!!system.sources.length && <details className="library-section library-sources"><summary>Evidence sources <span>{system.sources.length}</span></summary><ul>{system.sources.map((source, index) => <li key={`${source.path}/${index}`}><div><code>{source.path}</code><small>{source.confidence}</small></div><span>{source.kind}</span>{source.notes && <p>{source.notes}</p>}</li>)}</ul></details>}
           </>}
           {tab === 'requests' && <>

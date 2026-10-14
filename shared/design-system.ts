@@ -73,11 +73,11 @@ export function tokenCssVariables(system: DesignSystem): string {
 
 const markdownText = (value: string) => value.replace(/[\\`*_{}[\]()#|<>]/g, '\\$&');
 const markdownCell = (value: string | number) => markdownText(String(value)).replace(/\r?\n/g, '<br>');
+export const DESIGN_DOCUMENT_SECTIONS = { documentation: '<!-- codex-design:documentation -->', tokens: '<!-- codex-design:tokens -->', catalog: '<!-- codex-design:catalog -->' } as const;
 
 export function designSystemMarkdown(system: DesignSystem): string {
-  const parts = [`# ${markdownText(system.name).replace(/\r?\n/g, ' ')}`, markdownText(system.description), system.documentation];
-  if (system.tokens.length) parts.push(`## Tokens\n\n| Name | Kind | Value | CSS variable | Description |\n| --- | --- | --- | --- | --- |\n${system.tokens.map(token => `| ${markdownCell(token.name)} | ${token.kind} | ${markdownCell(tokenCssValue(token))} | ${tokenCssVariableName(token)} | ${markdownCell(token.description ?? '')} |`).join('\n')}`);
+  const parts: string[] = [];
   if (system.components.length) parts.push(`## Reusable native components\n\n| Component | Definition ID | Released revision | Nodes | Description |\n| --- | --- | --- | --- | --- |\n${system.components.map(component => `| ${markdownCell(component.name)} | ${component.id} | ${component.version}${component.releaseLabel ? ` (${markdownCell(component.releaseLabel)})` : ''} | ${component.nodes.length} | ${markdownCell(component.description)} |`).join('\n')}\n\nDefinitions live in the project document. Linked instances retain their released revision and explicit local overrides; applying a newer release is deliberate. Source-backed code remains passive source. Prior releases are immutable project-history snapshots; portable project backups start a new history baseline when imported.`);
   if (system.sources.length) parts.push(`## Sources\n\n${system.sources.map(source => `- ${markdownText(source.path)} (${source.kind}; ${source.confidence})${source.notes ? `: ${markdownText(source.notes).replace(/\r?\n/g, ' ')}` : ''}`).join('\n')}`);
-  return `${parts.filter(part => part.trim()).join('\n\n')}\n`;
+  return `# ${markdownCell(system.name)}\n\n${markdownText(system.description)}\n\n${DESIGN_DOCUMENT_SECTIONS.documentation}\n\n${system.documentation}\n\n${DESIGN_DOCUMENT_SECTIONS.tokens}\n\n## Tokens\n\n| Name | Kind | Value | CSS variable | Description |\n| --- | --- | --- | --- | --- |\n${system.tokens.map(token => `| ${markdownCell(token.name)} | ${token.kind} | ${markdownCell(tokenCssValue(token))} | ${tokenCssVariableName(token)} | ${markdownCell(token.description ?? '')} |`).join('\n')}\n\n${DESIGN_DOCUMENT_SECTIONS.catalog}\n\n${parts.join('\n\n')}\n`;
 }

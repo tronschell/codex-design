@@ -15,6 +15,7 @@ import { createSnapScene, snapBox } from '../shared/snapping.ts';
 import type { AssetChunk, AssetMetadata, AssetUpload, AssetUploadCancellation } from '../shared/media.ts';
 import { LEGACY_TOKEN_IDS, compatibleTokenKinds, defaultDesignSystem, resolveNodeTokens } from '../shared/design-system.ts';
 import { applyComponentOverride, componentInstanceRoot, componentSubtree, materializeComponent, recordComponentOverrides } from '../shared/components.ts';
+import { parseDesignSystemDocument } from '../shared/design-system-document.ts';
 export { StoreError } from './history.ts';
 
 function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, any>, input: unknown, code = 'invalid_input'): T {
@@ -76,6 +77,7 @@ function changeLabel(project: DesignProject, operation: Operation): string {
     case 'update_thread': return `${operation.patch.status === 'resolved' ? 'Resolved conversation' : operation.patch.queued ? 'Queued conversation' : 'Updated conversation'} on “${anchor}”`;
     case 'set_tokens': return 'Updated project styles';
     case 'update_design_system': return 'Updated project design system';
+    case 'apply_design_system_document': return 'Applied project DESIGN.md';
     case 'upsert_design_token': return `Updated design token “${operation.token.name}”`;
     case 'delete_design_token': return `Deleted design token “${project.designSystem.tokens.find(token => token.id === operation.tokenId)?.name ?? operation.tokenId}”`;
     case 'set_design_system_request': return operation.request ? `Requested design system ${operation.request.mode === 'find' ? 'discovery' : 'generation'}` : 'Cleared design system request';
@@ -731,6 +733,16 @@ export class ProjectStore {
         break;
       }
       case 'update_design_system': Object.assign(project.designSystem, operation.patch); break;
+      case 'apply_design_system_document': {
+        let next: ReturnType<typeof parseDesignSystemDocument>;
+        try { next = parseDesignSystemDocument(operation.markdown, project.designSystem); }
+        catch (error) { throw new StoreError(400, 'invalid_design_system_document', error instanceof Error ? error.message : 'Invalid DESIGN.md document.'); }
+        const available = new Set(next.tokens.map(token => token.id));
+        for (const token of project.designSystem.tokens) if (!available.has(token.id)) this.apply(project, { type: 'delete_design_token', tokenId: token.id }, now, touchedBoards);
+        for (const token of next.tokens) this.apply(project, { type: 'upsert_design_token', token }, now, touchedBoards);
+        Object.assign(project.designSystem, next);
+        break;
+      }
       case 'upsert_design_token': {
         for (const nodes of [...project.pages.map(page => page.nodes), ...project.designSystem.components.map(component => component.nodes)]) for (const node of nodes) for (const [property, tokenId] of Object.entries(node.tokenBindings ?? {})) if (tokenId === operation.token.id && !compatibleTokenKinds(property as BindableStyleProperty).includes(operation.token.kind)) throw new StoreError(400, 'incompatible_token_kind', `Design token ${operation.token.id} is bound to ${property}. Detach its bindings before changing its kind.`);
         const index = project.designSystem.tokens.findIndex(token => token.id === operation.token.id);

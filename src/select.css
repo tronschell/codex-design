@@ -11,3 +11,9 @@
 .select-option.is-active { color: #eeeeee; background: #414141; }
 .select-option.is-disabled { color: #777777; cursor: default; }
 .select-check { display: flex; flex: 0 0 12px; align-items: center; justify-content: center; width: 12px; color: #c8c8c8; }
+.select-popup.is-searchable { display: flex; flex-direction: column; overflow: hidden; }
+.select-search { flex: 0 0 24px; width: 100%; min-width: 0; height: 24px; margin: 1px 0 4px; padding: 2px 6px; color: #dddddd; font: inherit; background: #222222; border: 1px solid #4a4a4a; border-radius: 4px; }
+.select-search:focus-visible { border-color: #6d99cb; outline: 1px solid #6d99cb; outline-offset: -1px; }
+.select-search::placeholder { color: #a5a5a5; }
+.is-searchable > .select-options { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.select-empty { padding: 6px; color: #b0b0b0; font-size: 11px; }

@@ -1,0 +1,5 @@
+.font-picker { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.font-picker > .property-field { flex: 1; flex-direction: row; gap: 6px; min-width: 0; margin: 2px 0; }
+.font-picker .field-input input { min-height: 0; height: 100%; padding: 0 6px; font-family: var(--font-picker-family, inherit); background: transparent; border: 0; border-radius: 0; }
+.font-picker > .font-picker-select { flex: 0 0 22px; justify-content: center; width: 22px; height: 22px; padding: 0; }
+.token-field-value .font-picker > .property-field { margin: 0; }

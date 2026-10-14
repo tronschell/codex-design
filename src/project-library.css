@@ -130,11 +130,17 @@
 .library-draft-warning textarea { max-height: 180px; }
 .library-field-note { margin: 5px 0; color: #969696; font-size: 10px; line-height: 1.6; }
 .project-library-panel .library-documentation, .project-library-panel .library-queued-prompt, .library-details > textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; line-height: 1.6; }
+.library-typography-row { padding: 5px 0; border-bottom: 1px solid #353535; }
+.library-typography-row:last-child { border-bottom: 0; }
+.library-typography-row .font-picker { align-items: flex-end; }
+.library-typography-row .font-picker > .property-field { flex-direction: column; align-items: stretch; gap: 3px; }
+.library-typography-row .property-field > span { flex-basis: auto; font-size: 11px; line-height: 15px; }
+.library-typography-row .font-picker-select { margin-bottom: 2px; }
+.library-font-specimen { margin: 5px 0 3px; overflow: hidden; color: #d5d5d5; font-size: 20px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.project-library-panel .library-document-editor { min-height: 360px; max-height: none; }
+.project-library-panel .library-document-label { margin-top: 8px; }
 .library-details { margin-top: 8px; }
 .library-details > summary, .library-sources > summary { min-height: 22px; color: #aaa; font-size: 11px; line-height: 22px; cursor: pointer; }
-.library-reference-tabs { display: flex; gap: 4px; padding: 4px 0; }
-.library-reference-tabs > button { min-height: 22px; padding: 2px 5px; color: #929292; font-size: 10px; background: transparent; border: 0; border-radius: 3px; }
-.library-reference-tabs > button[aria-pressed="true"] { color: #ddd; background: #3a3a3a; }
 .library-details > textarea { margin-bottom: 5px; }
 .library-sources > summary > span { margin-left: 4px; color: #808080; font-size: 10px; }
 .library-sources > ul { margin: 3px 0 0; padding: 0; list-style: none; }

@@ -206,6 +206,7 @@ export type Operation =
   | { type: 'add_message'; threadId: string; message: CommentMessage; queued?: boolean }
   | { type: 'update_thread'; threadId: string; patch: Partial<Pick<CommentThread, 'status' | 'queued'>> }
   | { type: 'update_design_system'; patch: Partial<Pick<DesignSystem, 'name' | 'description' | 'documentation' | 'sources'>> }
+  | { type: 'apply_design_system_document'; markdown: string }
   | { type: 'upsert_design_token'; token: DesignSystemToken }
   | { type: 'delete_design_token'; tokenId: string }
   | { type: 'set_design_system_request'; request: DesignSystemRequest | null }

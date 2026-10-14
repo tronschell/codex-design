@@ -536,3 +536,14 @@ This adds editing capabilities, not a measured runtime optimization. Method: Nod
 | MCP runtime | 1,088,001 B | 1,092,191 B | +4,190 B | +0.39% |
 
 User effect: direct geometry/alignment/rotation/flip editing and compact native radius, opacity, blend, gradient, border and outline controls replace the broad Appearance list. Gradient stops and opacity sliders preview locally and save once when accepted, avoiding a persisted revision for every pointer event; this is inspected behavior, not a measured latency or memory reduction. No load time, interaction latency, CPU, browser RAM, heap/RSS, GPU or FPS improvement was measured or claimed. The added controls increase artifact size. Verification used production compilation/package, strict unused-symbol compilation, bounded source review and read-only browser inspection at 336px/260px panel widths. Native picker dialogs and gradient/save/Undo gestures remain unexercised; no tests or user-design mutations were performed.
+
+## Font picker and DESIGN.md footprint — October 14, 2026
+
+Functionality and consistency work, with no claimed runtime speed improvement. Method: Node `fs.stat().size` over the `7faf993` production artifacts before edits and the final `npm run package:plugin` build, same machine and unchanged dependencies. Workload: the self-contained widget and bundled MCP runtime, excluding user designs and media.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Canvas widget | 803,102 B | 810,683 B | +7,581 B | +0.94% |
+| MCP runtime | 1,092,191 B | 1,100,756 B | +8,565 B | +0.78% |
+
+User effect: fonts can be chosen visually and searched, while DESIGN.md token edits update linked styles through one atomic save instead of leaving a separate stale documentation table. Current source variables follow authored same-specificity declarations. These added capabilities increase artifact bytes; no load-time, interaction latency, memory, heap/RSS, CPU, GPU or FPS savings were measured or claimed. Direct inspection covered actual typography, filtering/focus and narrow panel layout without modifying existing designs. No tests, assertions, fixtures or dependencies were added or run.

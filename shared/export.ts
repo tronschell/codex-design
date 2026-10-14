@@ -95,7 +95,8 @@ const styleText = (css: string) => css.replaceAll('<', '\\3c ');
 export function safeCodeDocument(source: string, system?: DesignSystem): string {
   // This policy is prepended so source cannot relax it with another CSP declaration.
   const passiveSource = source.replace(/<meta\b[^>]*>/gi, '').replace(/<base\b[^>]*>/gi, '');
-  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'"><style>${system ? styleText(tokenCssVariables(system)) : ''}html,body{margin:0;width:100%;height:100%;overflow:hidden}*{box-sizing:border-box}body>svg:only-child{display:block;width:100%;height:100%}</style>${passiveSource}`;
+  // Apply current project variables after copied source token blocks, without rewriting the source.
+  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}*{box-sizing:border-box}body>svg:only-child{display:block;width:100%;height:100%}</style>${passiveSource}${system ? `<style>${styleText(tokenCssVariables(system))}</style>` : ''}`;
 }
 
 export function vectorDataUrl(source: string): string | null {

@@ -416,6 +416,7 @@ export const operationSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('update_thread'), threadId: idSchema, patch: nonempty({ status: z.enum(['open', 'resolved']), queued: z.boolean() }) }).strict(),
   z.object({ type: z.literal('set_tokens'), tokens: nonempty(tokensSchema.shape) }).strict(),
   z.object({ type: z.literal('update_design_system'), patch: nonempty({ name: nameSchema, description: z.string().max(5000), documentation: z.string().max(100_000), sources: z.array(designSystemSourceSchema).max(1000) }) }).strict(),
+  z.object({ type: z.literal('apply_design_system_document'), markdown: z.string().min(1).max(MAX_INPUT_BYTES) }).strict(),
   z.object({ type: z.literal('upsert_design_token'), token: designSystemTokenSchema }).strict(),
   z.object({ type: z.literal('delete_design_token'), tokenId: idSchema }).strict(),
   z.object({ type: z.literal('set_design_system_request'), request: designSystemRequestSchema.nullable() }).strict(),
