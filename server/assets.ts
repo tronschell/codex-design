@@ -255,7 +255,7 @@ export class AssetStore {
       if (!assets.has(ref)) assets.set(ref, await this.get(ref));
       return assets.get(ref)!;
     };
-    for (const page of project.pages) for (const node of page.nodes) {
+    for (const nodes of [...project.pages.map(page => page.nodes), ...project.designSystem.components.map(component => component.nodes)]) for (const node of nodes) {
       if (!node.media) continue;
       const source = await asset(node.media.src);
       if ((node.type === 'image' && !source.mimeType.startsWith('image/')) || (node.type === 'video' && !source.mimeType.startsWith('video/'))) throw new StoreError(400, 'invalid_asset_type', `Media for “${node.name}” must be a ${node.type} file.`);

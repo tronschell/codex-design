@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpRight, Check, Code2, Copy, Download, FileArchive, FileCode2, FileJson2, Image, Layers, LoaderCircle, X } from 'lucide-react';
 import type { DesignProject } from '../shared/types';
-import { exportFormatReason, exportHandoffPrompt, exportTargetProject, type ExportFormat, type ExportScope, type ExportTarget } from '../shared/export-formats';
+import { canvasMapLayout, canvasMapPngReason, exportFormatReason, exportHandoffPrompt, exportTargetProject, type CanvasMapSettings, type ExportFormat, type ExportScope, type ExportTarget } from '../shared/export-formats';
 import { embedded, sendFollowUp } from './bridge';
 import { downloadExport, exportFile, exportTexts, type ExportText } from './export-utils';
 import { Select } from './Select';
@@ -17,17 +17,20 @@ export interface ExportPanelProps {
 }
 
 const formats: { id: ExportFormat; name: string; detail: string; description: string; Icon: typeof Code2 }[] = [
+  { id: 'png', name: 'PNG canvas map', detail: 'Spatial overview · 1×–4×', description: 'One image of the whole canvas, with frames at their original positions. Independent pages are arranged in labeled groups for sharing.', Icon: Image },
+  { id: 'svg-map', name: 'SVG canvas map', detail: 'Scalable browser document', description: 'The complete spatial canvas in a self-contained SVG. Native text and CSS stay scalable; HTML source, shaders and videos use embedded stills.', Icon: Layers },
   { id: 'react', name: 'React + CSS', detail: 'JSX and stylesheet', description: 'Editable React markup and plain CSS at the original design dimensions. Source layers stay sandboxed; media and controlled shader code are included.', Icon: Code2 },
   { id: 'html', name: 'HTML', detail: 'Standalone page', description: 'A browser preview with embedded media, original dimensions and isolated source layers. No build step is required.', Icon: FileCode2 },
-  { id: 'svg', name: 'SVG', detail: 'Vector source layer', description: 'The original passive SVG source, sized to the selected layer. Select a single SVG source layer without container styling.', Icon: Image },
+  { id: 'svg', name: 'SVG source', detail: 'Original vector layer', description: 'The original passive SVG source, sized to the selected layer. Select a single SVG source layer without container styling.', Icon: Image },
   { id: 'source', name: 'Source ZIP', detail: 'Code, media and context', description: 'HTML previews, React and CSS, original media, editable design.json, shared tokens and component conversations for this scope.', Icon: FileArchive },
   { id: 'project', name: 'Editable backup', detail: 'Project ZIP with media', description: 'The editable document, source, media, tokens and conversations. Import this ZIP through the project menu to create a new saved copy.', Icon: FileJson2 },
-  { id: 'png', name: 'PNG', detail: 'Capture unavailable', description: '', Icon: Image },
 ];
 
 export default function ExportPanel({ project, boardId, pageId, selectedIds, onClose, onNotify }: ExportPanelProps) {
   const [scope, setScope] = useState<ExportScope>(selectedIds.length ? 'selection' : 'board');
-  const [format, setFormat] = useState<ExportFormat>(selectedIds.length ? 'react' : 'source');
+  const [format, setFormat] = useState<ExportFormat>(selectedIds.length ? 'react' : 'png');
+  const [background, setBackground] = useState('dark'), [customColor, setCustomColor] = useState('#171717');
+  const [scale, setScale] = useState<1 | 2 | 3 | 4>(2), [labels, setLabels] = useState(true), [margin, setMargin] = useState(80);
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [copied, setCopied] = useState('');
   const [sources, setSources] = useState<ExportText[]>([]), [sourceIndex, setSourceIndex] = useState(0);
   const panel = useRef<HTMLElement>(null), busyRef = useRef(false), mounted = useRef(true), activeRequest = useRef<AbortController | null>(null);
@@ -38,7 +41,10 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
   const details = formats.find(item => item.id === format)!;
   const scoped = useMemo(() => exportTargetProject(project, target), [project, target]);
   const layerCount = scoped.pages.reduce((count, page) => count + page.nodes.length, 0);
-  const reason = exportFormatReason(project, target, format), textFormat = ['react', 'html', 'svg'].includes(format);
+  const map = useMemo<CanvasMapSettings>(() => ({ background: (background === 'custom' ? customColor : background) as CanvasMapSettings['background'], scale, labels, margin }), [background, customColor, scale, labels, margin]);
+  const isMap = format === 'png' || format === 'svg-map';
+  const mapDetails = useMemo(() => { if (!isMap) return null; try { return { layout: canvasMapLayout(project, target, map), error: '' }; } catch (error) { return { layout: null, error: error instanceof Error ? error.message : 'This scope cannot be exported.' }; } }, [project, target, map, isMap]);
+  const reason = exportFormatReason(project, target, format) ?? (mapDetails?.error || (format === 'png' && mapDetails?.layout ? canvasMapPngReason(mapDetails.layout) : null)), textFormat = ['react', 'html', 'svg', 'svg-map'].includes(format);
   const source = sources[sourceIndex];
   const handoff = exportHandoffPrompt(project, target);
 
@@ -53,7 +59,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
     activeRequest.current?.abort();
     setSources([]); setSourceIndex(0); setCopied('');
     setError(interrupted ? 'The design or export scope changed. Export again for the current revision.' : '');
-  }, [project.revision, target, format]);
+  }, [project.revision, target, format, map]);
 
   const close = () => { activeRequest.current?.abort(); onClose(); };
   const run = async (label: string, action: (signal: AbortSignal) => Promise<void>) => {
@@ -68,7 +74,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
   const prepare = async (signal: AbortSignal) => {
     signal.throwIfAborted();
     if (sources.length) return sources;
-    const generated = await exportTexts(project, target, format, signal);
+    const generated = await exportTexts(project, target, format, signal, map);
     signal.throwIfAborted();
     if (mounted.current) { setSources(generated); setSourceIndex(0); }
     return generated;
@@ -93,7 +99,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
     <section ref={panel} className="export-panel" role="dialog" aria-modal="true" aria-labelledby="export-heading" aria-busy={!!busy} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
       if (event.key === 'Tab') {
-        const controls = panel.current?.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled]), textarea');
+        const controls = panel.current?.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea');
         if (!controls?.length) return;
         const first = controls[0], last = controls[controls.length - 1];
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
@@ -114,11 +120,22 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
           return <button type="button" key={item.id} className={format === item.id ? 'selected' : ''} disabled={!!busy || !!disabledReason} aria-pressed={format === item.id} title={disabledReason ?? item.detail} onClick={() => setFormat(item.id)}><item.Icon size={15}/><span><strong>{item.name}</strong><small>{disabledReason && item.id !== 'png' ? item.id === 'svg' ? 'Single SVG layer only' : 'Selection or page only' : item.detail}</small></span>{format === item.id && <Check size={12}/>}</button>;
         })}</nav>
         <div className="export-format-detail"><h3>{details.name}</h3><p>{details.description}</p>{reason && <p className="export-format-note">{reason}</p>}
+          {isMap && <div className="export-map-options">
+            <label className="export-map-field"><span>Background</span><Select label="Canvas map background" value={background} disabled={!!busy} onChange={setBackground} options={[
+              { value: 'transparent', label: 'Transparent · no color', color: 'transparent' }, { value: 'white', label: 'White', color: '#ffffff' }, { value: 'dark', label: 'Neutral dark', color: '#171717' }, { value: 'custom', label: 'Custom color', color: customColor },
+            ]}/></label>
+            {background === 'custom' && <label className="export-map-field"><span>Color</span><span className="export-map-color"><input type="color" aria-label="Choose canvas map color" value={/^#[\da-f]{6}$/i.test(customColor) ? customColor : '#171717'} disabled={!!busy} onChange={event => setCustomColor(event.target.value)}/><input type="text" aria-label="Canvas map hexadecimal color" spellCheck={false} value={customColor} disabled={!!busy} onChange={event => setCustomColor(event.target.value)} placeholder="#171717" maxLength={9}/></span></label>}
+            <label className="export-map-field"><span>{format === 'png' ? 'Scale' : 'Still quality'}</span><Select label="Canvas map export scale" value={String(scale)} disabled={!!busy} onChange={value => setScale(Number(value) as 1 | 2 | 3 | 4)} options={[1, 2, 3, 4].map(value => ({ value: String(value), label: `${value}×${value === 1 ? ' · design size' : ''}`, disabled: format === 'png' && !!mapDetails?.layout && !!canvasMapPngReason({ pixelWidth: mapDetails.layout.width * value, pixelHeight: mapDetails.layout.height * value }) }))}/></label>
+            <label className="export-map-field"><span>Margin</span><span className="export-map-margin"><input type="number" aria-label="Canvas map margin in design pixels" value={margin} min={0} max={1000} step={8} disabled={!!busy} onChange={event => setMargin(Number(event.target.value))}/><span>px</span></span></label>
+            <label className="export-map-labels"><input type="checkbox" checked={labels} disabled={!!busy} onChange={event => setLabels(event.target.checked)}/>Frame and page labels</label>
+            {mapDetails?.layout && <output className="export-map-size" aria-live="polite"><strong>{(format === 'png' ? mapDetails.layout.pixelWidth : mapDetails.layout.width).toLocaleString()} × {(format === 'png' ? mapDetails.layout.pixelHeight : mapDetails.layout.height).toLocaleString()} {format === 'png' ? 'px' : 'design px'}</strong><span>{format === 'png' ? `${scale}× resolution · pixel dimensions determine print size` : `Scalable canvas · embedded stills at ${scale}×`}</span></output>}
+            <p className="export-format-note">HTML source is flattened without running scripts. Video uses its poster or first frame; shaders use time zero. Fonts depend on this device. SVG requires a browser with HTML/CSS support.</p>
+          </div>}
           {(format === 'react' || format === 'html') && <p className="export-format-note">Visual structure is exported at its design size. Connect application behavior in your codebase.</p>}
           {(format === 'source' || format === 'project') && availableScope === 'selection' && <p className="export-format-note">Ancestor shells keep the selection in place. Original layout settings are retained in original-scope.json. Previews contain only the selected subtree.</p>}
           {textFormat && !reason && <button type="button" className="text-button export-preview-button" disabled={!!busy} onClick={() => void run('preview', async signal => { await prepare(signal); })}>{busy === 'preview' ? <LoaderCircle size={13} className="spin"/> : <Code2 size={13}/>}Preview source</button>}
-          <div className="export-file-actions">{textFormat && !reason && <><button type="button" className="secondary-button" disabled={!!busy} onClick={() => copy(0)}>{copied === (format === 'react' ? 'React' : format.toUpperCase()) ? <Check size={13}/> : <Copy size={13}/>}Copy {format === 'react' ? 'React' : format.toUpperCase()}</button>{format === 'react' && <button type="button" className="secondary-button" disabled={!!busy} onClick={() => copy(1)}>{copied === 'CSS' ? <Check size={13}/> : <Copy size={13}/>}Copy CSS</button>}</>}
-            <button type="button" className="primary-button" disabled={!!busy || !!reason} onClick={() => void run('download', async signal => { const file = await exportFile(project, target, format, signal); signal.throwIfAborted(); downloadExport(file); onNotify('Export downloaded.'); })}>{busy === 'download' ? <LoaderCircle size={13} className="spin"/> : <Download size={13}/>}Download {format === 'source' || format === 'project' || format === 'react' ? 'ZIP' : format.toUpperCase()}</button>
+          <div className="export-file-actions">{textFormat && !reason && <><button type="button" className="secondary-button" disabled={!!busy} onClick={() => copy(0)}>{copied === (format === 'react' ? 'React' : format === 'svg-map' ? 'SVG' : format.toUpperCase()) ? <Check size={13}/> : <Copy size={13}/>}Copy {format === 'react' ? 'React' : format === 'svg-map' ? 'SVG' : format.toUpperCase()}</button>{format === 'react' && <button type="button" className="secondary-button" disabled={!!busy} onClick={() => copy(1)}>{copied === 'CSS' ? <Check size={13}/> : <Copy size={13}/>}Copy CSS</button>}</>}
+            <button type="button" className="primary-button" disabled={!!busy || !!reason} onClick={() => void run('download', async signal => { const file = await exportFile(project, target, format, signal, map); signal.throwIfAborted(); downloadExport(file); onNotify('Export downloaded.'); })}>{busy === 'download' ? <LoaderCircle size={13} className="spin"/> : <Download size={13}/>}Download {format === 'source' || format === 'project' || format === 'react' ? 'ZIP' : format === 'svg-map' ? 'SVG' : format.toUpperCase()}</button>
           </div>
         </div>
       </div>

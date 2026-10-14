@@ -1,6 +1,6 @@
 import { json, Router, type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
-import { assetRefSchema, beginAssetUploadSchema, cancelAssetUploadSchema, createProjectSchema, MAX_INPUT_BYTES, mutateProjectSchema, readAssetChunkSchema, restoreProjectVersionSchema, revisionSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
+import { assetRefSchema, beginAssetUploadSchema, cancelAssetUploadSchema, createProjectSchema, libraryVersionRequestSchema, MAX_INPUT_BYTES, mutateProjectSchema, readAssetChunkSchema, restoreLibraryVersionSchema, restoreProjectVersionSchema, revisionSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
 import { ProjectStore, StoreError } from './store.ts';
 
 function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, any>, input: unknown): T {
@@ -59,6 +59,19 @@ export function createApiRouter(store: ProjectStore): Router {
     finally { response.off('close', close); }
   });
   router.get('/projects/:id/history', async (request, response) => { response.json({ versions: await store.listVersions(request.params.id) }); });
+  router.get('/projects/:id/library/history', async (request, response) => {
+    const { scope, componentId } = parse(libraryVersionRequestSchema, request.query);
+    response.json({ versions: await store.listLibraryVersions(request.params.id, scope, componentId) });
+  });
+  router.get('/projects/:id/library/history/:revision', async (request, response) => {
+    const { scope, componentId } = parse(libraryVersionRequestSchema, request.query);
+    const revision = parse(z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).pipe(revisionSchema), request.params.revision);
+    response.json(await store.getLibraryVersion(request.params.id, revision, scope, componentId));
+  });
+  router.post('/projects/:id/library/history/restore', async (request, response) => {
+    const { expectedRevision, revision, scope, componentId } = parse(restoreLibraryVersionSchema, request.body);
+    response.json(await store.restoreLibraryVersion(request.params.id, expectedRevision, revision, scope, componentId));
+  });
   router.get('/projects/:id/history/:revision', async (request, response) => {
     const revision = parse(z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).pipe(revisionSchema), request.params.revision);
     response.json(await store.getVersion(request.params.id, revision));

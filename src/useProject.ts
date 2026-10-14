@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CanvasSelection, DesignProject, Operation, ProjectSummary } from '../shared/types';
+import type { CanvasSelection, DesignProject, LibraryScope, Operation, ProjectSummary } from '../shared/types';
 import { ApiError, client, projectFromResult, TOKEN_CHANGED_EVENT } from './client';
 import { acceptCanvasLaunch, embedded, getCanvasLaunch, onCanvasLaunch, onToolResult, type CanvasLaunch, type CanvasTarget } from './bridge';
 
@@ -216,7 +216,7 @@ export function useProject() {
     return task;
   }, [applySnapshot]);
 
-  const restoreVersion = useCallback((revision: number): Promise<DesignProject | null> => {
+  const restoreVersion = useCallback((revision: number, scope?: LibraryScope, componentId?: string): Promise<DesignProject | null> => {
     const project = ref.current, request = selection.current;
     if (!project || pending.current || loadingProject.current) return Promise.resolve(null);
     pending.current++; setSaving(pending.current);
@@ -224,7 +224,7 @@ export function useProject() {
     const task = queue.current.then(async () => {
       if (!current()) return null;
       try {
-        const next = await client.restoreVersion(project.id, project.revision, revision);
+        const next = scope ? await client.restoreLibraryVersion(project.id, project.revision, revision, scope, componentId) : await client.restoreVersion(project.id, project.revision, revision);
         if (!current()) return null;
         applySnapshot(next); setError(''); return next;
       } catch (error) {

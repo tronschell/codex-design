@@ -1,13 +1,15 @@
 import type { DesignNode, DesignProject } from './types.js';
-import { exportMediaUrl, exportNodeCode, exportPageHtml, inlineCss, nodeCss, nodeLinkStyle, projectForBoard, resolvedNodes, safeCodeDocument, textListStyle, vectorDataUrl, type ExportOptions } from './export.js';
+import { exportMapPageMarkup, exportMediaUrl, exportNodeCode, exportPageHtml, inlineCss, nodeCss, nodeLinkStyle, projectForBoard, resolvedNodes, safeCodeDocument, textListStyle, vectorDataUrl, type ExportOptions } from './export.js';
 import { shaderRuntimeOptions, shaderRuntimeSource } from './shaders.js';
-import { ADVANCED_STYLE_PROPERTIES, nodeBoxSize } from './effects.js';
+import { ADVANCED_STYLE_PROPERTIES, nodeBoxSize, visibleBounds } from './effects.js';
 import { isSafeLink } from './links.js';
 import { resolveNodeTokens, tokenCssVariables } from './design-system.js';
 
 export type ExportScope = 'selection' | 'page' | 'board' | 'project';
 export interface ExportTarget { scope: ExportScope; boardId?: string; pageId?: string; nodeIds?: string[] }
-export type ExportFormat = 'react' | 'html' | 'svg' | 'source' | 'project' | 'png';
+export type ExportFormat = 'react' | 'html' | 'svg' | 'svg-map' | 'source' | 'project' | 'png';
+export interface CanvasMapSettings { background?: 'transparent' | 'white' | 'dark' | `#${string}`; scale?: 1 | 2 | 3 | 4; labels?: boolean; margin?: number }
+export const MAX_MAP_SIDE = 16_384, MAX_MAP_PIXELS = 64_000_000;
 export const exportFilename = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 96).replace(/-$/, '') || 'design';
 
 function targetPage(project: DesignProject, target: ExportTarget) {
@@ -55,6 +57,11 @@ export function exportTargetProject(project: DesignProject, target: ExportTarget
     }
   }
   const nodeIds = new Set(nodes.map(node => node.id)), boardId = page.boardId ?? project.boards[0]?.id;
+  nodes = nodes.map(node => {
+    if (!node.componentInstance || Object.values(node.componentInstance.nodeMap).every(id => nodeIds.has(id))) return node;
+    const { componentInstance: _instance, ...detached } = node;
+    return detached;
+  });
   return {
     ...project, boards: project.boards.filter(board => board.id === boardId), pages: [{ ...page, nodes }],
     threads: project.threads.filter(thread => thread.pageId === page.id && (target.scope !== 'selection' || (thread.nodeId !== null && nodeIds.has(thread.nodeId)))),
@@ -116,11 +123,64 @@ export function exportTargetSvg(project: DesignProject, target: ExportTarget): s
 }
 
 export function exportFormatReason(project: DesignProject, target: ExportTarget, format: ExportFormat): string | null {
-  if (format === 'png') return 'PNG capture is not available for HTML, video and shader layers. Use a source format to preserve them.';
   if (format === 'svg') return svgExportReason(project, target);
   if ((format === 'react' || format === 'html') && (target.scope === 'board' || target.scope === 'project')) return 'Choose a selection or page. Source ZIP includes HTML and React for multiple pages.';
   if (target.scope === 'selection' && !target.nodeIds?.length) return 'Select a layer or frame on the canvas first.';
   return null;
+}
+
+const xml = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
+
+export function canvasMapLayout(project: DesignProject, target: ExportTarget, settings: CanvasMapSettings = {}) {
+  const background = settings.background ?? 'dark', scale = settings.scale ?? 2, labels = settings.labels ?? true, margin = settings.margin ?? 80;
+  if (!['transparent', 'white', 'dark'].includes(background) && !/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(background)) throw new Error('Choose a background preset or a hexadecimal color.');
+  if (![1, 2, 3, 4].includes(scale) || !Number.isFinite(margin) || margin < 0 || margin > 1000) throw new Error('Use a 1×–4× scale and a margin between 0 and 1,000 design pixels.');
+  const scoped = exportTargetProject(project, target), included = target.scope === 'selection' ? selectionNodes(project, target).included : undefined;
+  const pages = scoped.pages.flatMap(page => {
+    const nodes = resolvedNodes(page.nodes, project.designSystem);
+    const bounds = nodes.filter(node => !included || included.has(node.id)).map(node => visibleBounds(node, nodes)).filter((box): box is NonNullable<typeof box> => !!box);
+    if (!bounds.length) return [];
+    const frameLabels = labels ? nodes.filter(node => node.type === 'frame' && (!node.parentId || (target.scope === 'selection' && target.nodeIds?.includes(node.id)))).flatMap(node => { const box = visibleBounds(node, nodes); return box ? [{ name: node.name, box }] : []; }) : [];
+    const left = Math.min(...bounds.map(box => box.x)), top = Math.min(...bounds.map(box => box.y), ...frameLabels.map(label => label.box.y - 28));
+    const width = Math.max(1, ...bounds.map(box => box.x + box.width - left)), height = Math.max(1, ...bounds.map(box => box.y + box.height - top));
+    const board = project.boards.find(board => board.id === (page.boardId ?? project.boards[0]?.id));
+    return [{ page, nodes, included, frameLabels, left, top, width, height, label: `${board?.name ? `${board.name} / ` : ''}${page.name}`, x: 0, y: 0 }];
+  });
+  if (!pages.length) throw new Error('This scope has no visible layers to export. Choose another page or selection.');
+  const columns = Math.ceil(Math.sqrt(pages.length)), rows = Math.ceil(pages.length / columns), header = pages.length > 1 && labels ? 40 : 0, gap = Math.max(80, margin);
+  const columnWidths = Array.from({ length: columns }, (_, column) => Math.max(...pages.filter((_, index) => index % columns === column).map(page => page.width)));
+  const rowHeights = Array.from({ length: rows }, (_, row) => Math.max(...pages.slice(row * columns, (row + 1) * columns).map(page => page.height + header)));
+  pages.forEach((page, index) => { page.x = margin + columnWidths.slice(0, index % columns).reduce((sum, width) => sum + width + gap, 0); page.y = margin + rowHeights.slice(0, Math.floor(index / columns)).reduce((sum, height) => sum + height + gap, 0); });
+  const width = Math.ceil(columnWidths.reduce((sum, width) => sum + width, 0) + gap * (columns - 1) + margin * 2), height = Math.ceil(rowHeights.reduce((sum, height) => sum + height, 0) + gap * (rows - 1) + margin * 2);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width > 1_000_000 || height > 1_000_000) throw new Error('This canvas spans more than 1,000,000 design pixels. Export a smaller scope.');
+  return { project: scoped, pages, width, height, pixelWidth: width * scale, pixelHeight: height * scale, header, background: background === 'dark' ? '#171717' : background === 'white' ? '#ffffff' : background, scale, labels, margin };
+}
+
+export function canvasMapPngReason(layout: Pick<ReturnType<typeof canvasMapLayout>, 'pixelWidth' | 'pixelHeight'>): string | null {
+  return layout.pixelWidth > MAX_MAP_SIDE || layout.pixelHeight > MAX_MAP_SIDE || layout.pixelWidth * layout.pixelHeight > MAX_MAP_PIXELS ? 'PNG is limited to 16,384 pixels per side and 64 megapixels. Choose a lower scale, a smaller scope, or SVG canvas map.' : null;
+}
+
+export function exportCanvasMap(project: DesignProject, target: ExportTarget, settings: CanvasMapSettings = {}, options: ExportOptions = {}) {
+  const layout = canvasMapLayout(project, target, settings), warnings = ['SVG canvas maps use HTML/CSS foreignObject. Open them in a modern browser; some image viewers and vector editors cannot display that content.', 'Text uses available system fonts and embedded source fonts. Fonts that are not installed may be substituted.'];
+  const visible = layout.pages.flatMap(page => page.nodes.filter(node => (!page.included || page.included.has(node.id)) && !!visibleBounds(node, page.nodes)));
+  for (const node of visible) {
+    const ref = node.type === 'image' ? node.media?.src : node.type === 'video' && !options.nodeImages?.[node.id] ? node.media?.poster : undefined;
+    if (ref && !/^data:image\//i.test(exportMediaUrl(ref, options))) throw new Error(`“${node.name}” needs embedded image bytes. Read its asset before exporting a self-contained canvas map.`);
+  }
+  const missingStill = visible.find(node => !options.nodeImages?.[node.id] && (node.type === 'shader' || (node.type === 'video' && !node.media?.poster)));
+  if (missingStill) throw new Error(`“${missingStill.name}” needs a ${missingStill.type} still. Download the canvas map from the editor to capture it, or use HTML / Source ZIP to retain playback.`);
+  if (visible.some(node => node.type === 'code' && !options.nodeImages?.[node.id] && !vectorDataUrl(node.source ?? ''))) warnings.push('Sandboxed HTML source remains embedded. SVG image previews cannot display its iframe; download from the editor to flatten these source layers.');
+  if (visible.some(node => node.type === 'video')) warnings.push('Videos are still images: the saved poster is preferred, otherwise the first decodable frame is captured.');
+  if (visible.some(node => node.type === 'shader')) warnings.push('Shaders are captured at time zero. Animated states and video playback remain in HTML and source exports.');
+  if (visible.some(node => node.styles.animation || node.styles.transition)) warnings.push('Canvas maps freeze CSS motion; named source animation states can differ from a running preview.');
+  const label = (name: string, x: number, y: number, width: number, large = false) => `<foreignObject x="${x}" y="${y}" width="${Math.max(1, width)}" height="${large ? 28 : 22}"><div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;display:inline-block;max-width:100%;padding:2px 5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#242424;color:#e8eaed;border-radius:3px;font:${large ? '600 16px' : '500 12px'}/18px Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">${xml(name)}</div></foreignObject>`;
+  const content = layout.pages.map(page => {
+    const x = page.x, y = page.y + layout.header;
+    return `${layout.header ? label(page.label, x, page.y, page.width, true) : ''}<foreignObject x="${x}" y="${y}" width="${page.width}" height="${page.height}" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${page.width}px;height:${page.height}px;overflow:visible;font-family:Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"><div style="position:absolute;left:${-page.left}px;top:${-page.top}px">${exportMapPageMarkup(layout.project, page.page.id, options, page.included)}</div></div></foreignObject>${page.frameLabels.map(frame => label(frame.name, x + frame.box.x - page.left, y + frame.box.y - page.top - 26, frame.box.width)).join('')}`;
+  }).join('');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}"><title>${xml(project.name)} — canvas map</title><desc>${xml(`Revision ${project.revision}. Frames retain their original spatial arrangement within each page. Independent pages are arranged in labeled groups. ${warnings.join(' ')}`)}</desc><style>${tokenCssVariables(project.designSystem).replaceAll('<', '\\3c ')}</style>${layout.background === 'transparent' ? '' : `<rect width="100%" height="100%" fill="${layout.background}"/>`}${content}</svg>`;
+  if (new TextEncoder().encode(svg).byteLength > 64 * 1024 * 1024) throw new Error('This SVG exceeds 64 MiB after embedding media. Export a smaller scope.');
+  return { svg, width: layout.width, height: layout.height, pixelWidth: layout.pixelWidth, pixelHeight: layout.pixelHeight, warnings };
 }
 
 export function exportTargetReact(project: DesignProject, target: ExportTarget, options: ExportOptions = {}): { jsx: string; css: string; files: Record<string, string> } {

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import type { DesignProject, ProjectVersion, ProjectVersionSummary } from '../shared/types.ts';
+import type { DesignProject, LibraryScope, ProjectVersion, ProjectVersionSummary } from '../shared/types.ts';
 import { MAX_INPUT_BYTES, projectSchema, projectVersionSummarySchema, revisionSchema } from '../shared/validation.ts';
 
 export class StoreError extends Error {
@@ -51,9 +51,9 @@ async function readBounded(filename: string, limit: number): Promise<string> {
   }
 }
 
-async function readMetadata<T>(filename: string, schema: z.ZodType<T, z.ZodTypeDef, any>): Promise<T> {
+async function readMetadata<T>(filename: string, schema: z.ZodType<T, z.ZodTypeDef, any>, limit = 8192): Promise<T> {
   let input: unknown;
-  try { input = JSON.parse(await readBounded(filename, 8192)); }
+  try { input = JSON.parse(await readBounded(filename, limit)); }
   catch (error) { if (error instanceof SyntaxError) throw corrupt('Saved history metadata is not valid JSON.'); throw error; }
   const parsed = schema.safeParse(input);
   if (!parsed.success) throw corrupt('Saved history metadata has an invalid structure.');
@@ -65,10 +65,10 @@ export class ProjectHistory {
   private readonly root: string;
   constructor(private readonly dataDir: string) { this.root = path.join(dataDir, 'history'); }
 
-  async save(project: DesignProject, label: string, previous?: DesignProject, restoredFrom?: number): Promise<void> {
+  async save(project: DesignProject, label: string, previous?: DesignProject, restoredFrom?: number, library?: ProjectVersionSummary['library']): Promise<void> {
     const json = JSON.stringify(project);
     if (Buffer.byteLength(json) > MAX_INPUT_BYTES) throw new StoreError(413, 'input_too_large', 'Project exceeds the 2 MiB limit');
-    const version = projectVersionSummarySchema.parse({ revision: project.revision, createdAt: project.updatedAt, label: label.slice(0, 500), ...(restoredFrom === undefined ? {} : { restoredFrom }) });
+    const version = projectVersionSummarySchema.parse({ revision: project.revision, createdAt: project.updatedAt, label: label.slice(0, 500), ...(restoredFrom === undefined ? {} : { restoredFrom }), ...(library ? { library } : {}) });
     if (!previous) {
       await this.initialize(project, version);
     } else {
@@ -106,6 +106,24 @@ export class ProjectHistory {
     const revisions = await this.ensure(project);
     if (revision < revisions[0] || revision > project.revision) throw new StoreError(404, 'version_not_found', `Revision ${revision} is not available in this project's recorded history.`);
     return this.readVersion(project.id, revision);
+  }
+
+  async listLibrary(project: DesignProject, scope: LibraryScope, componentId?: string): Promise<ProjectVersionSummary[]> {
+    const versions = await this.list(project), relevant: ProjectVersionSummary[] = [];
+    let previous: string | undefined;
+    for (const version of [...versions].reverse()) {
+      if (version.library) {
+        if (scope === 'system' ? version.library.system : version.library.componentIds.includes(componentId!)) relevant.push(version);
+        continue;
+      }
+      // Older snapshots have no scope metadata; compare their immutable library content once.
+      const saved = await this.readVersion(project.id, version.revision);
+      const value = scope === 'system' ? saved.project.designSystem : saved.project.designSystem.components.find(component => component.id === componentId);
+      const signature = JSON.stringify(value);
+      if (signature !== previous && value !== undefined) relevant.push(version);
+      previous = signature;
+    }
+    return relevant.reverse();
   }
 
   private directory(projectId: string) { return path.join(this.root, projectId); }
@@ -199,7 +217,7 @@ export class ProjectHistory {
   }
 
   private async readRecord(projectId: string, revision: number) {
-    const record = await readMetadata(path.join(this.directory(projectId), String(revision), 'version.json'), recordSchema);
+    const record = await readMetadata(path.join(this.directory(projectId), String(revision), 'version.json'), recordSchema, 64 * 1024);
     if (record.version.revision !== revision || (record.version.restoredFrom !== undefined && record.version.restoredFrom >= revision)) throw corrupt(`Metadata for revision ${revision} has an invalid revision.`);
     return record;
   }

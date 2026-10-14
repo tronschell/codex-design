@@ -15,6 +15,7 @@ export const isAssetRef = (value: unknown): value is string => typeof value === 
 export function projectAssetRefs(project: DesignProject): string[] {
   return [...new Set([
     ...project.pages.flatMap(page => page.nodes.flatMap(node => [node.media?.src, node.media?.poster].filter(isAssetRef))),
+    ...project.designSystem.components.flatMap(component => component.nodes.flatMap(node => [node.media?.src, node.media?.poster].filter(isAssetRef))),
     ...project.boards.flatMap(board => (board.inspiration ?? []).map(item => item.assetRef).filter(isAssetRef)),
   ])];
 }

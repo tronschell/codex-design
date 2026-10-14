@@ -21,7 +21,7 @@ export function defaultDesignSystem(legacyTokens: DesignTokens = defaultTokens):
       { id: LEGACY_TOKEN_IDS.foreground, name: 'Foreground', kind: 'color', value: legacyTokens.foreground },
       { id: LEGACY_TOKEN_IDS.fontFamily, name: 'Font family', kind: 'fontFamily', value: legacyTokens.fontFamily },
       { id: LEGACY_TOKEN_IDS.radius, name: 'Radius', kind: 'radius', value: legacyTokens.radius },
-    ], sources: [],
+    ], sources: [], components: [],
   };
 }
 
@@ -77,6 +77,7 @@ const markdownCell = (value: string | number) => markdownText(String(value)).rep
 export function designSystemMarkdown(system: DesignSystem): string {
   const parts = [`# ${markdownText(system.name).replace(/\r?\n/g, ' ')}`, markdownText(system.description), system.documentation];
   if (system.tokens.length) parts.push(`## Tokens\n\n| Name | Kind | Value | CSS variable | Description |\n| --- | --- | --- | --- | --- |\n${system.tokens.map(token => `| ${markdownCell(token.name)} | ${token.kind} | ${markdownCell(tokenCssValue(token))} | ${tokenCssVariableName(token)} | ${markdownCell(token.description ?? '')} |`).join('\n')}`);
+  if (system.components.length) parts.push(`## Reusable native components\n\n| Component | Definition ID | Released revision | Nodes | Description |\n| --- | --- | --- | --- | --- |\n${system.components.map(component => `| ${markdownCell(component.name)} | ${component.id} | ${component.version}${component.releaseLabel ? ` (${markdownCell(component.releaseLabel)})` : ''} | ${component.nodes.length} | ${markdownCell(component.description)} |`).join('\n')}\n\nDefinitions live in the project document. Linked instances retain their released revision and explicit local overrides; applying a newer release is deliberate. Source-backed code remains passive source. Prior releases are immutable project-history snapshots; portable project backups start a new history baseline when imported.`);
   if (system.sources.length) parts.push(`## Sources\n\n${system.sources.map(source => `- ${markdownText(source.path)} (${source.kind}; ${source.confidence})${source.notes ? `: ${markdownText(source.notes).replace(/\r?\n/g, ' ')}` : ''}`).join('\n')}`);
   return `${parts.filter(part => part.trim()).join('\n\n')}\n`;
 }

@@ -101,7 +101,9 @@ export type DesignSystemTokenKind = 'color' | 'fontFamily' | 'fontSize' | 'fontW
 export interface DesignSystemToken { id: string; name: string; kind: DesignSystemTokenKind; value: string | number; description?: string }
 export interface DesignSystemSource { path: string; kind: 'design-md' | 'component' | 'stylesheet' | 'config' | 'canvas'; notes: string; confidence: 'observed' | 'inferred' }
 export interface DesignSystemRequest { id: string; mode: 'generate' | 'find'; brief: string; repository: string; createdAt: string; queued: boolean }
-export interface DesignSystem { name: string; description: string; documentation: string; tokens: DesignSystemToken[]; sources: DesignSystemSource[]; request?: DesignSystemRequest }
+export interface NativeComponentDefinition { id: string; name: string; description: string; rootNodeId: string; nodes: DesignNode[]; version: number; releaseLabel?: string }
+export interface ComponentInstance { componentId: string; version: number; nodeMap: Record<string, string>; overrides: Record<string, string[]> }
+export interface DesignSystem { name: string; description: string; documentation: string; tokens: DesignSystemToken[]; sources: DesignSystemSource[]; components: NativeComponentDefinition[]; request?: DesignSystemRequest }
 export interface InspirationItem { id: string; name: string; assetRef: string; width: number; height: number; notes: string; usage: string; sourceUrl?: string }
 
 export interface DesignNode {
@@ -123,6 +125,7 @@ export interface DesignNode {
   effects?: NodeEffect[];
   styles: NodeStyle;
   tokenBindings?: Partial<Record<BindableStyleProperty, string>>;
+  componentInstance?: ComponentInstance;
   locked?: boolean;
   hidden?: boolean;
 }
@@ -158,8 +161,10 @@ export interface DesignProject {
   updatedAt: string;
 }
 export type ProjectSummary = Pick<DesignProject, 'id' | 'name' | 'description' | 'revision' | 'createdAt' | 'updatedAt'> & { boardCount?: number; pageCount: number; screenCount: number };
-export interface ProjectVersionSummary { revision: number; createdAt: string; label: string; restoredFrom?: number }
+export interface ProjectVersionSummary { revision: number; createdAt: string; label: string; restoredFrom?: number; library?: { system: boolean; componentIds: string[] } }
 export interface ProjectVersion { project: DesignProject; version: ProjectVersionSummary }
+export type LibraryScope = 'system' | 'component';
+export interface LibraryVersion { designSystem: DesignSystem; version: ProjectVersionSummary; component?: NativeComponentDefinition }
 
 export type Operation =
   | { type: 'rename_project'; name: string; description?: string }
@@ -171,7 +176,7 @@ export type Operation =
   | { type: 'replace_page'; pageId: string; page: DesignPage }
   | { type: 'delete_page'; pageId: string }
   | { type: 'create_node'; pageId: string; node: DesignNode }
-  | { type: 'update_node'; pageId: string; nodeId: string; patch: Partial<Omit<DesignNode, 'id'>> }
+  | { type: 'update_node'; pageId: string; nodeId: string; patch: Partial<Omit<DesignNode, 'id' | 'componentInstance'>> }
   | { type: 'delete_node'; pageId: string; nodeId: string }
   | { type: 'snap_node'; pageId: string; nodeId: string; distance?: number }
   | { type: 'create_thread'; thread: CommentThread }
@@ -181,6 +186,12 @@ export type Operation =
   | { type: 'upsert_design_token'; token: DesignSystemToken }
   | { type: 'delete_design_token'; tokenId: string }
   | { type: 'set_design_system_request'; request: DesignSystemRequest | null }
+  | { type: 'release_design_system'; label: string }
+  | { type: 'capture_component'; pageId: string; nodeId: string; componentId: string; name: string; description?: string }
+  | { type: 'instantiate_component'; componentId: string; pageId: string; nodeId: string; x: number; y: number; parentId?: string | null }
+  | { type: 'release_component'; pageId: string; nodeId: string; componentId?: string; label?: string }
+  | { type: 'update_component_instance'; pageId: string; nodeId: string; resetOverrides?: boolean }
+  | { type: 'detach_component_instance'; pageId: string; nodeId: string }
   | { type: 'upsert_inspiration'; boardId: string; item: InspirationItem }
   | { type: 'delete_inspiration'; boardId: string; itemId: string }
   | { type: 'set_tokens'; tokens: Partial<DesignTokens> };

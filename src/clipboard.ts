@@ -4,7 +4,7 @@ import { compatibleTokenKinds } from '../shared/design-system';
 import { hasTransformedAncestor, nodeBoxSize, nodeInnerSize, parentLocalDelta, visualBounds } from '../shared/effects';
 import { resolvedNodes } from '../shared/export';
 import { MAX_INPUT_BYTES, idSchema, nodeSchema, operationsSchema, projectSchema, threadSchema } from '../shared/validation';
-import { selectionRoots, subtree, uid } from './editor-utils';
+import { remapComponentInstance, selectionRoots, subtree, uid } from './editor-utils';
 
 export const CLIPBOARD_MIME = 'application/x-codex-design-selection+json';
 const format = 'codex-design-selection';
@@ -121,6 +121,8 @@ export function preparePaste(text: string, project: DesignProject, pageId: strin
     node.id = ids.get(original.id)!;
     node.effects = node.effects?.map(effect => ({ ...effect, id: uid() }));
     if (node.href?.startsWith('#') && ids.has(node.href.slice(1))) node.href = `#${ids.get(node.href.slice(1))!}`;
+    if (sameProject) remapComponentInstance(node, ids);
+    else delete node.componentInstance;
     if (node.tokenBindings) {
       const bindings = Object.entries(node.tokenBindings).filter(([property, tokenId]) => {
         const token = tokenId ? tokens.get(tokenId) : undefined;

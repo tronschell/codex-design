@@ -5,8 +5,8 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { createDemoProject } from '../shared/seed.ts';
-import { defaultTokens, type BindableStyleProperty, type CanvasSelection, type DesignProject, type Operation, type ProjectSummary, type ProjectVersion, type ProjectVersionSummary } from '../shared/types.ts';
-import { canvasSelectionSchema, createProjectSchema, idSchema, MAX_INPUT_BYTES, operationsSchema, projectSchema, revisionSchema } from '../shared/validation.ts';
+import { defaultTokens, type BindableStyleProperty, type CanvasSelection, type DesignNode, type DesignProject, type LibraryScope, type LibraryVersion, type NativeComponentDefinition, type Operation, type ProjectSummary, type ProjectVersion, type ProjectVersionSummary } from '../shared/types.ts';
+import { canvasSelectionSchema, createProjectSchema, idSchema, libraryVersionRequestSchema, MAX_INPUT_BYTES, operationsSchema, projectSchema, revisionSchema } from '../shared/validation.ts';
 import { ProjectHistory, StoreError } from './history.ts';
 import { AssetStore } from './assets.ts';
 import { resolvedNodes } from '../shared/export.ts';
@@ -14,6 +14,7 @@ import { parentLocalDelta, visualBounds } from '../shared/effects.ts';
 import { createSnapScene, snapBox } from '../shared/snapping.ts';
 import type { AssetChunk, AssetMetadata, AssetUpload, AssetUploadCancellation } from '../shared/media.ts';
 import { LEGACY_TOKEN_IDS, compatibleTokenKinds, defaultDesignSystem, resolveNodeTokens } from '../shared/design-system.ts';
+import { applyComponentOverride, componentInstanceRoot, componentSubtree, materializeComponent, recordComponentOverrides } from '../shared/components.ts';
 export { StoreError } from './history.ts';
 
 function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, any>, input: unknown, code = 'invalid_input'): T {
@@ -78,9 +79,45 @@ function changeLabel(project: DesignProject, operation: Operation): string {
     case 'upsert_design_token': return `Updated design token “${operation.token.name}”`;
     case 'delete_design_token': return `Deleted design token “${project.designSystem.tokens.find(token => token.id === operation.tokenId)?.name ?? operation.tokenId}”`;
     case 'set_design_system_request': return operation.request ? `Requested design system ${operation.request.mode === 'find' ? 'discovery' : 'generation'}` : 'Cleared design system request';
+    case 'release_design_system': return `Design system release: ${operation.label}`;
+    case 'capture_component': return `Created reusable component “${operation.name}”`;
+    case 'instantiate_component': return `Inserted reusable component “${project.designSystem.components.find(item => item.id === operation.componentId)?.name ?? operation.componentId}”`;
+    case 'release_component': return `Component release: ${operation.label ?? node?.name ?? operation.nodeId}`;
+    case 'update_component_instance': return `${operation.resetOverrides ? 'Reset and updated' : 'Updated'} component instance “${node?.name ?? operation.nodeId}”`;
+    case 'detach_component_instance': return `Detached component instance “${node?.name ?? operation.nodeId}”`;
     case 'upsert_inspiration': return `Updated inspiration “${operation.item.name}” on “${board?.name ?? operation.boardId}”`;
     case 'delete_inspiration': return `Removed inspiration from “${board?.name ?? operation.boardId}”`;
   }
+}
+
+function libraryChanges(previous: DesignProject, current: DesignProject, released = false): ProjectVersionSummary['library'] {
+  const componentIds = current.designSystem.components.filter(component => JSON.stringify(component) !== JSON.stringify(previous.designSystem.components.find(item => item.id === component.id))).map(component => component.id);
+  for (const component of previous.designSystem.components) if (!current.designSystem.components.some(item => item.id === component.id)) componentIds.push(component.id);
+  return { system: released || JSON.stringify(previous.designSystem) !== JSON.stringify(current.designSystem), componentIds };
+}
+
+function captureDefinition(nodes: DesignNode[], nodeId: string, definition: Pick<NativeComponentDefinition, 'id' | 'name' | 'description' | 'version'>, existing?: NativeComponentDefinition): NativeComponentDefinition {
+  const root = nodes.find(node => node.id === nodeId);
+  if (!root) throw new StoreError(404, 'node_not_found', `Node ${nodeId} does not exist`);
+  const subtree = componentSubtree(nodes, nodeId);
+  if (subtree.some(node => node.id !== nodeId && node.componentInstance)) throw new StoreError(400, 'nested_component', 'Detach nested component instances before capturing or releasing this subtree.');
+  const reverse = new Map(Object.entries(root.componentInstance?.nodeMap ?? {}).map(([key, value]) => [value, key]));
+  const ids = new Map([[nodeId, existing?.rootNodeId ?? nodeId]]), used = new Set(ids.values());
+  for (const node of subtree) if (node.id !== nodeId) {
+    let id = reverse.get(node.id) ?? node.id;
+    if (used.has(id)) id = `component_node_${randomUUID()}`;
+    ids.set(node.id, id); used.add(id);
+  }
+  const snapshots = subtree.map(original => {
+    const node = structuredClone(original);
+    node.id = ids.get(original.id)!;
+    node.parentId = original.id === nodeId ? null : ids.get(original.parentId!)!;
+    delete node.componentInstance; delete node.generation;
+    if (original.id === nodeId) { node.x = 0; node.y = 0; }
+    if (node.href?.startsWith('#') && ids.has(node.href.slice(1))) node.href = `#${ids.get(node.href.slice(1))}`;
+    return node;
+  });
+  return { ...definition, rootNodeId: ids.get(nodeId)!, nodes: snapshots };
 }
 
 function boardContents(project: DesignProject, boardId: string): string {
@@ -305,8 +342,10 @@ export class ProjectStore {
       project.updatedAt = now;
       const validated = parse(projectSchema, project, 'invalid_project');
       await this.assets.validateProject(validated);
-      const label = labels.length === 1 ? labels[0] : `${labels[0]} · ${labels.length - 1} more ${labels.length === 2 ? 'change' : 'changes'}`;
-      await this.history.save(validated, label, previous);
+      const namedRelease = changes.find(operation => operation.type === 'release_design_system' || (operation.type === 'release_component' && operation.label));
+      const mainLabel = namedRelease ? changeLabel(previous, namedRelease) : labels[0];
+      const label = labels.length === 1 ? mainLabel : `${mainLabel} · ${labels.length - 1} more ${labels.length === 2 ? 'change' : 'changes'}`;
+      await this.history.save(validated, label, previous, undefined, libraryChanges(previous, validated, changes.some(operation => operation.type === 'release_design_system')));
       this.emit(projectId);
       return validated;
     });
@@ -319,10 +358,17 @@ export class ProjectStore {
     return this.withWriteLock(async () => {
       const now = new Date().toISOString();
       const project = { ...imported, id: randomUUID(), revision: 0, createdAt: now, updatedAt: now };
-      await this.assets.validateProject(project);
-      await this.history.save(project, `Imported “${project.name}”`);
+      const releasedVersions = new Map(project.designSystem.components.map(component => [component.id, component.version]));
+      for (const page of project.pages) for (const node of page.nodes) if (node.componentInstance) {
+        if (node.componentInstance.version === releasedVersions.get(node.componentInstance.componentId)) node.componentInstance.version = 0;
+        else delete node.componentInstance;
+      }
+      for (const component of project.designSystem.components) component.version = 0;
+      const validated = parse(projectSchema, project, 'invalid_project');
+      await this.assets.validateProject(validated);
+      await this.history.save(validated, `Imported “${project.name}”`);
       this.emit(project.id);
-      return project;
+      return validated;
     });
   }
 
@@ -336,6 +382,69 @@ export class ProjectStore {
     parse(idSchema, projectId); parse(revisionSchema, revision);
     await this.init();
     return this.withWriteLock(async () => this.history.get(await this.read(projectId), revision));
+  }
+
+  async listLibraryVersions(projectId: string, scope: LibraryScope, componentId?: string): Promise<ProjectVersionSummary[]> {
+    parse(idSchema, projectId); parse(libraryVersionRequestSchema, { scope, componentId });
+    await this.init();
+    return this.withWriteLock(async () => this.history.listLibrary(await this.read(projectId), scope, componentId));
+  }
+
+  async getLibraryVersion(projectId: string, revision: number, scope: LibraryScope, componentId?: string): Promise<LibraryVersion> {
+    parse(libraryVersionRequestSchema, { scope, componentId });
+    const historical = await this.getVersion(projectId, revision);
+    const component = scope === 'component' ? historical.project.designSystem.components.find(item => item.id === componentId) : undefined;
+    if (scope === 'component' && !component) throw new StoreError(404, 'component_not_found', `Component ${componentId} does not exist in revision ${revision}.`);
+    return { designSystem: historical.project.designSystem, version: historical.version, ...(component ? { component } : {}) };
+  }
+
+  async restoreLibraryVersion(projectId: string, expectedRevision: number, revision: number, scope: LibraryScope, componentId?: string): Promise<DesignProject> {
+    parse(idSchema, projectId); parse(revisionSchema, expectedRevision); parse(revisionSchema, revision); parse(libraryVersionRequestSchema, { scope, componentId });
+    await this.init();
+    return this.withWriteLock(async () => {
+      const current = await this.read(projectId);
+      this.checkRevision(current, expectedRevision);
+      const historical = await this.history.get(current, revision);
+      const restored = structuredClone(current);
+      if (scope === 'component') {
+        const source = historical.project.designSystem.components.find(item => item.id === componentId);
+        if (!source) throw new StoreError(404, 'component_not_found', `Component ${componentId} does not exist in revision ${revision}.`);
+        const component = { ...structuredClone(source), version: current.revision + 1, releaseLabel: `Restored revision ${revision}` };
+        const index = restored.designSystem.components.findIndex(item => item.id === componentId);
+        if (index < 0) restored.designSystem.components.push(component); else restored.designSystem.components[index] = component;
+        for (const node of component.nodes) {
+          const resolved = resolveNodeTokens(node, historical.project.designSystem);
+          for (const property of Object.keys(node.tokenBindings ?? {}) as BindableStyleProperty[]) {
+            const token = restored.designSystem.tokens.find(item => item.id === node.tokenBindings![property]);
+            if (token && compatibleTokenKinds(property).includes(token.kind)) continue;
+            Object.assign(node.styles, { [property]: resolved.styles[property] });
+            delete node.tokenBindings![property];
+          }
+          if (node.tokenBindings && !Object.keys(node.tokenBindings).length) delete node.tokenBindings;
+        }
+      } else {
+        const available = new Set(historical.project.designSystem.components.map(component => component.id));
+        if (current.pages.some(page => page.nodes.some(node => node.componentInstance && !available.has(node.componentInstance.componentId)))) throw new StoreError(400, 'linked_component_missing', 'This system version predates a linked component. Detach its live instances before applying this version.');
+        const availableTokens = new Map(historical.project.designSystem.tokens.map(token => [token.id, token]));
+        for (const page of restored.pages) for (const node of page.nodes) {
+          const resolved = resolveNodeTokens(node, current.designSystem);
+          for (const property of Object.keys(node.tokenBindings ?? {}) as BindableStyleProperty[]) {
+            const token = availableTokens.get(node.tokenBindings![property]!);
+            if (token && compatibleTokenKinds(property).includes(token.kind)) continue;
+            Object.assign(node.styles, { [property]: resolved.styles[property] });
+            delete node.tokenBindings![property];
+          }
+          if (node.tokenBindings && !Object.keys(node.tokenBindings).length) delete node.tokenBindings;
+        }
+        restored.designSystem = structuredClone(historical.project.designSystem);
+      }
+      restored.revision += 1; restored.updatedAt = new Date().toISOString();
+      const validated = parse(projectSchema, restored, 'invalid_project');
+      await this.assets.validateProject(validated);
+      await this.history.save(validated, `Restored ${scope === 'system' ? 'design system' : 'component'} from revision ${revision}`, current, revision, libraryChanges(current, validated, true));
+      this.emit(projectId);
+      return validated;
+    });
   }
 
   async restoreVersion(projectId: string, expectedRevision: number, revision: number): Promise<DesignProject> {
@@ -355,7 +464,7 @@ export class ProjectStore {
         }),
       }, 'invalid_project');
       await this.assets.validateProject(restored);
-      await this.history.save(restored, `Restored version ${revision}`, current, revision);
+      await this.history.save(restored, `Restored version ${revision}`, current, revision, libraryChanges(current, restored));
       this.emit(projectId);
       return restored;
     });
@@ -511,8 +620,16 @@ export class ProjectStore {
         const target = page(operation.pageId);
         if (operation.page.id !== operation.pageId) throw new StoreError(400, 'invalid_operation', 'A replacement page must keep its page ID');
         const targetBoard = board(operation.page.boardId ?? target.boardId ?? project.boards[0].id);
-        project.pages[project.pages.findIndex((item) => item.id === operation.pageId)] = { ...operation.page, boardId: targetBoard.id };
-        const retained = new Set(operation.page.nodes.map((node) => node.id));
+        const replacementPage = structuredClone(operation.page);
+        const editableRoots = new Set(target.nodes.filter(node => node.componentInstance && JSON.stringify(node.componentInstance) === JSON.stringify(replacementPage.nodes.find(item => item.id === node.id)?.componentInstance)).map(node => node.id));
+        for (const original of target.nodes) {
+          const root = componentInstanceRoot(target.nodes, original.id), replacement = replacementPage.nodes.find(node => node.id === original.id);
+          if (!root || !replacement || !editableRoots.has(root.id)) continue;
+          if (original.id !== root.id && original.parentId !== replacement.parentId) throw new StoreError(400, 'component_structure', 'Detach the component instance before changing its internal hierarchy.');
+          recordComponentOverrides(replacementPage.nodes, original, replacement);
+        }
+        project.pages[project.pages.findIndex((item) => item.id === operation.pageId)] = { ...replacementPage, boardId: targetBoard.id };
+        const retained = new Set(replacementPage.nodes.map((node) => node.id));
         project.threads = project.threads.filter((item) => item.pageId !== operation.pageId || item.nodeId === null || retained.has(item.nodeId));
         break;
       }
@@ -523,19 +640,31 @@ export class ProjectStore {
         project.threads = project.threads.filter((item) => item.pageId !== operation.pageId);
         break;
       }
-      case 'create_node': page(operation.pageId).nodes.push(operation.node); break;
+      case 'create_node': {
+        const target = page(operation.pageId);
+        const containing = operation.node.parentId ? componentInstanceRoot(target.nodes, operation.node.parentId)?.componentInstance : undefined;
+        if (containing && !Object.values(containing.nodeMap).includes(operation.node.id)) throw new StoreError(400, 'component_structure', 'Detach the containing component instance before adding children.');
+        target.nodes.push(operation.node); break;
+      }
       case 'update_node': {
         const target = page(operation.pageId);
         const node = target.nodes.find((item) => item.id === operation.nodeId);
         if (!node) throw new StoreError(404, 'node_not_found', `Node ${operation.nodeId} does not exist`);
+        const before = structuredClone(node), root = componentInstanceRoot(target.nodes, node.id);
+        if (root && root.id !== node.id && operation.patch.parentId !== undefined && operation.patch.parentId !== node.parentId) throw new StoreError(400, 'component_structure', 'Detach the component instance before changing its internal hierarchy.');
         if ((node.styles.layout === 'vertical' || node.styles.layout === 'horizontal') && operation.patch.styles?.layout === 'free') {
           const positions = new Map(resolvedNodes(target.nodes, project.designSystem).map((item) => [item.id, { x: item.x, y: item.y }]));
           // Freeze only this stack's participating children before removing its layout.
-          for (const child of target.nodes) if (child.parentId === node.id && !child.hidden) Object.assign(child, positions.get(child.id));
+          for (const child of target.nodes) if (child.parentId === node.id && !child.hidden) {
+            const original = structuredClone(child);
+            Object.assign(child, positions.get(child.id));
+            recordComponentOverrides(target.nodes, original, child);
+          }
         }
         const styles = { ...node.styles, ...operation.patch.styles };
         if ((operation.patch.source !== undefined && operation.patch.jsx === undefined) || (operation.patch.type !== undefined && operation.patch.type !== 'code')) delete node.jsx;
         Object.assign(node, operation.patch, { styles });
+        recordComponentOverrides(target.nodes, before, node);
         break;
       }
       case 'snap_node': {
@@ -553,12 +682,16 @@ export class ProjectStore {
         const bounds = visualBounds(positioned, nodes), snapped = snapBox(createSnapScene(nodes, positioned), bounds, operation.distance ?? 8);
         const delta = parentLocalDelta(positioned, nodes, { x: snapped.box.x - bounds.x, y: snapped.box.y - bounds.y });
         if (!delta) throw new StoreError(400, 'singular_parent_transform', 'This parent transform is collapsed or too extreme to map snapping safely.');
+        const before = structuredClone(node);
         node.x += delta.x; node.y += delta.y;
+        recordComponentOverrides(target.nodes, before, node);
         break;
       }
       case 'delete_node': {
         const target = page(operation.pageId);
         if (!target.nodes.some((item) => item.id === operation.nodeId)) throw new StoreError(404, 'node_not_found', `Node ${operation.nodeId} does not exist`);
+        const instanceRoot = componentInstanceRoot(target.nodes, operation.nodeId);
+        if (instanceRoot && instanceRoot.id !== operation.nodeId) throw new StoreError(400, 'component_structure', 'Detach the component instance before deleting one of its members.');
         const children = new Map<string, string[]>();
         for (const node of target.nodes) if (node.parentId !== null) children.set(node.parentId, [...(children.get(node.parentId) ?? []), node.id]);
         const deleted = new Set<string>();
@@ -599,7 +732,7 @@ export class ProjectStore {
       }
       case 'update_design_system': Object.assign(project.designSystem, operation.patch); break;
       case 'upsert_design_token': {
-        for (const target of project.pages) for (const node of target.nodes) for (const [property, tokenId] of Object.entries(node.tokenBindings ?? {})) if (tokenId === operation.token.id && !compatibleTokenKinds(property as BindableStyleProperty).includes(operation.token.kind)) throw new StoreError(400, 'incompatible_token_kind', `Design token ${operation.token.id} is bound to ${property}. Detach its bindings before changing its kind.`);
+        for (const nodes of [...project.pages.map(page => page.nodes), ...project.designSystem.components.map(component => component.nodes)]) for (const node of nodes) for (const [property, tokenId] of Object.entries(node.tokenBindings ?? {})) if (tokenId === operation.token.id && !compatibleTokenKinds(property as BindableStyleProperty).includes(operation.token.kind)) throw new StoreError(400, 'incompatible_token_kind', `Design token ${operation.token.id} is bound to ${property}. Detach its bindings before changing its kind.`);
         const index = project.designSystem.tokens.findIndex(token => token.id === operation.token.id);
         if (index < 0) project.designSystem.tokens.push(operation.token);
         else project.designSystem.tokens[index] = operation.token;
@@ -608,7 +741,7 @@ export class ProjectStore {
       }
       case 'delete_design_token': {
         if (!project.designSystem.tokens.some(token => token.id === operation.tokenId)) throw new StoreError(404, 'token_not_found', `Design token ${operation.tokenId} does not exist`);
-        for (const target of project.pages) for (const node of target.nodes) {
+        for (const target of [...project.pages, ...project.designSystem.components.map(component => ({ nodes: component.nodes, boardId: undefined, component }))]) for (const node of target.nodes) {
           const bindings = node.tokenBindings;
           if (!bindings || !Object.values(bindings).includes(operation.tokenId)) continue;
           const resolved = resolveNodeTokens(node, project.designSystem);
@@ -621,6 +754,7 @@ export class ProjectStore {
           if (Object.keys(remaining).length) node.tokenBindings = remaining;
           else delete node.tokenBindings;
           if (target.boardId) touchedBoards.add(target.boardId);
+          if ('component' in target) target.component.version = project.revision + 1;
         }
         project.designSystem.tokens = project.designSystem.tokens.filter(token => token.id !== operation.tokenId);
         break;
@@ -629,6 +763,68 @@ export class ProjectStore {
         if (operation.request === null) delete project.designSystem.request;
         else project.designSystem.request = operation.request;
         break;
+      case 'release_design_system': break;
+      case 'capture_component': {
+        const target = page(operation.pageId), root = target.nodes.find(node => node.id === operation.nodeId);
+        if (project.designSystem.components.some(item => item.id === operation.componentId)) throw new StoreError(400, 'component_exists', 'Use a new component ID, or release a revision of the existing component.');
+        if (!root) throw new StoreError(404, 'node_not_found', `Node ${operation.nodeId} does not exist`);
+        if (componentInstanceRoot(target.nodes, root.id)) throw new StoreError(400, 'component_already_linked', 'Detach this instance before creating a different component from it.');
+        const definition = captureDefinition(target.nodes, root.id, { id: operation.componentId, name: operation.name, description: operation.description ?? '', version: project.revision + 1 });
+        project.designSystem.components.push(definition);
+        root.componentInstance = { componentId: definition.id, version: definition.version, nodeMap: Object.fromEntries(definition.nodes.map(node => [node.id, node.id])), overrides: {} };
+        break;
+      }
+      case 'instantiate_component': {
+        const target = page(operation.pageId), definition = project.designSystem.components.find(component => component.id === operation.componentId);
+        if (!definition) throw new StoreError(404, 'component_not_found', `Component ${operation.componentId} does not exist`);
+        if (operation.parentId && componentInstanceRoot(target.nodes, operation.parentId)) throw new StoreError(400, 'nested_component', 'Nested linked component instances are not supported. Choose a parent outside another instance.');
+        const instance = { componentId: definition.id, version: definition.version, nodeMap: Object.fromEntries(definition.nodes.map(node => [node.id, node.id === definition.rootNodeId ? operation.nodeId : `node_${randomUUID()}`])), overrides: {} };
+        target.nodes.push(...materializeComponent(definition, instance, { x: operation.x, y: operation.y, parentId: operation.parentId ?? null }));
+        break;
+      }
+      case 'release_component': {
+        const target = page(operation.pageId), selected = target.nodes.find(node => node.id === operation.nodeId);
+        if (!selected) throw new StoreError(404, 'node_not_found', `Node ${operation.nodeId} does not exist`);
+        const containing = componentInstanceRoot(target.nodes, selected.id);
+        if (containing && containing.id !== selected.id) throw new StoreError(400, 'component_root_required', 'Select the whole component instance before releasing it.');
+        const componentId = operation.componentId ?? selected.componentInstance?.componentId;
+        const index = project.designSystem.components.findIndex(component => component.id === componentId), previous = project.designSystem.components[index];
+        if (!previous) throw new StoreError(404, 'component_not_found', 'Choose the existing component to release, or create a reusable component first.');
+        if (selected.componentInstance && selected.componentInstance.componentId !== previous.id) throw new StoreError(400, 'component_mismatch', 'Detach this instance before releasing it to a different component.');
+        const definition = captureDefinition(target.nodes, selected.id, { id: previous.id, name: previous.name, description: previous.description, version: project.revision + 1 }, previous);
+        if (operation.label) definition.releaseLabel = operation.label;
+        const subtree = componentSubtree(target.nodes, selected.id);
+        selected.componentInstance = { componentId: definition.id, version: definition.version, nodeMap: Object.fromEntries(definition.nodes.map((node, index) => [node.id, subtree[index].id])), overrides: {} };
+        project.designSystem.components[index] = definition;
+        break;
+      }
+      case 'update_component_instance': {
+        const target = page(operation.pageId), root = target.nodes.find(node => node.id === operation.nodeId), existing = root?.componentInstance;
+        if (!root || !existing) throw new StoreError(400, 'component_root_required', 'Select the whole linked component instance to apply a release.');
+        const definition = project.designSystem.components.find(component => component.id === existing.componentId);
+        if (!definition) throw new StoreError(404, 'component_not_found', 'This component definition is unavailable. Detach the instance to keep editing its native nodes.');
+        const retained = new Set(definition.nodes.map(node => node.id)), oldNodes = new Map(target.nodes.map(node => [node.id, node]));
+        const removed = new Set(Object.entries(existing.nodeMap).filter(([id]) => !retained.has(id)).map(([, id]) => id));
+        if (project.threads.some(thread => thread.pageId === target.id && thread.nodeId && removed.has(thread.nodeId)) || (!operation.resetOverrides && Object.entries(existing.overrides).some(([id, paths]) => !retained.has(id) && paths.length))) throw new StoreError(400, 'component_update_conflict', 'This release removes a node with a conversation or local override. Detach the instance to preserve that work.');
+        const instance = { componentId: definition.id, version: definition.version, nodeMap: Object.fromEntries(definition.nodes.map(node => [node.id, Object.hasOwn(existing.nodeMap, node.id) ? existing.nodeMap[node.id] : `node_${randomUUID()}`])), overrides: operation.resetOverrides ? {} : structuredClone(existing.overrides) };
+        const nodes = materializeComponent(definition, instance, root);
+        for (const original of definition.nodes) {
+          const node = nodes.find(item => item.id === instance.nodeMap[original.id])!, local = oldNodes.get(node.id);
+          if (!local) continue;
+          for (const path of Object.hasOwn(instance.overrides, original.id) ? instance.overrides[original.id] : []) applyComponentOverride(node, local, path);
+        }
+        for (const id of Object.keys(instance.overrides)) if (!retained.has(id)) delete instance.overrides[id];
+        const previousIds = new Set(Object.values(existing.nodeMap)), insertion = target.nodes.findIndex(node => node.id === root.id);
+        target.nodes = target.nodes.filter(node => !previousIds.has(node.id));
+        target.nodes.splice(Math.min(insertion, target.nodes.length), 0, ...nodes);
+        break;
+      }
+      case 'detach_component_instance': {
+        const target = page(operation.pageId), root = componentInstanceRoot(target.nodes, operation.nodeId);
+        if (!root) throw new StoreError(400, 'component_root_required', 'This node is not part of a linked component instance.');
+        delete root.componentInstance;
+        break;
+      }
       case 'upsert_inspiration': {
         const target = board(operation.boardId);
         const items = target.inspiration ??= [];

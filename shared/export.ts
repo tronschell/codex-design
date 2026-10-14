@@ -7,8 +7,8 @@ import { compatibleTokenKinds, designSystemMarkdown, resolveNodeTokens, resolveN
 export const textListStyle = { margin: 0, padding: 0, listStylePosition: 'inside' } as const;
 export const nodeLinkStyle = { position: 'absolute', inset: 0, display: 'block', borderRadius: 'inherit', pointerEvents: 'auto' } as const;
 
-export interface ExportOptions { assetUrls?: Record<string, string>; canvasSize?: { width: number; height: number } }
-interface RenderOptions extends ExportOptions { system: DesignSystem; styleFallbacks: ReadonlyMap<string, DesignNode['styles']>; hasLinks: boolean }
+export interface ExportOptions { assetUrls?: Record<string, string>; canvasSize?: { width: number; height: number }; nodeImages?: Record<string, string> }
+interface RenderOptions extends ExportOptions { system: DesignSystem; styleFallbacks: ReadonlyMap<string, DesignNode['styles']>; hasLinks: boolean; staticMap?: boolean; included?: ReadonlySet<string> }
 
 export function resolvedNodes(nodes: DesignNode[], system?: DesignSystem): DesignNode[] {
   if (system) nodes = resolveNodesTokens(nodes, system);
@@ -112,33 +112,45 @@ export function exportMediaUrl(ref: string | undefined, options: ExportOptions =
 }
 
 function renderNode(node: DesignNode, children: Map<string | null, DesignNode[]>, options: RenderOptions, ancestors = new Set<string>(), linkedAncestor = false, inheritedPointerEvents: 'auto' | 'none' = 'auto'): string {
-  if (ancestors.has(node.id)) return '';
+  if (ancestors.has(node.id) || (options.staticMap && node.hidden)) return '';
   const nextAncestors = new Set(ancestors).add(node.id);
   const href = node.href && isSafeLink(node.href) ? node.href : '';
   const pointerEvents = node.styles.pointerEvents ?? inheritedPointerEvents;
   const style = nodeCss(node, options.system, options.styleFallbacks.get(node.id));
+  const shell = options.included && !options.included.has(node.id);
+  if (options.staticMap) { style.animation = 'none'; style.transition = 'none'; }
+  if (shell) Object.assign(style, { background: 'transparent', borderColor: 'transparent', boxShadow: 'none', textShadow: 'none' });
   if (linkedAncestor && node.styles.pointerEvents === undefined) style.pointerEvents = 'none';
   const attributes = `${options.hasLinks ? `id="${escapeHtml(node.id)}" ` : ''}data-node-id="${escapeHtml(node.id)}" data-node-type="${node.type}" aria-label="${escapeHtml(node.name)}" style="${escapeHtml(inlineCss(style))}"`;
   const vector = node.type === 'code' ? vectorDataUrl(node.source ?? '') : null;
   const mediaStyle = `${node.type === 'video' && href ? 'position:relative;' : ''}display:block;width:100%;height:100%;object-fit:${node.styles.objectFit ?? node.media?.fit ?? 'cover'};pointer-events:${linkedAncestor && node.type !== 'video' && node.styles.pointerEvents === undefined ? 'none' : linkedAncestor || href ? pointerEvents : node.styles.pointerEvents ?? (node.type === 'video' ? 'auto' : 'none')}`;
-  let content = node.type === 'text' ? escapeHtml(node.content ?? '') : node.type === 'image'
-    ? `<img alt="${escapeHtml(node.media?.alt ?? node.name)}" draggable="false" style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media?.src, options))}">`
+  const snapshot = options.nodeImages?.[node.id];
+  let content = snapshot ? `<img alt="${escapeHtml(node.name)}" style="display:block;width:100%;height:100%;object-fit:fill;pointer-events:none" src="${escapeHtml(snapshot)}"/>` : node.type === 'text' ? escapeHtml(node.content ?? '') : node.type === 'image'
+    ? `<img alt="${escapeHtml(node.media?.alt ?? node.name)}" draggable="false" style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media?.src, options))}"/>`
     : node.type === 'video'
-      ? `<video aria-label="${escapeHtml(node.media?.alt ?? node.name)}" playsinline${node.media?.autoplay ? ' autoplay' : ' controls'}${node.media?.loop ? ' loop' : ''}${node.media?.muted !== false ? ' muted' : ''}${node.media?.poster ? ` poster="${escapeHtml(exportMediaUrl(node.media.poster, options))}"` : ''} style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media?.src, options))}"></video>`
+      ? options.staticMap && node.media?.poster ? `<img alt="${escapeHtml(node.name)}" style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media.poster, options))}"/>` : `<video aria-label="${escapeHtml(node.media?.alt ?? node.name)}" playsinline=""${node.media?.autoplay ? ' autoplay=""' : ' controls=""'}${node.media?.loop ? ' loop=""' : ''}${node.media?.muted !== false ? ' muted=""' : ''}${node.media?.poster ? ` poster="${escapeHtml(exportMediaUrl(node.media.poster, options))}"` : ''} style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media?.src, options))}"></video>`
     : node.type === 'shader'
-      ? `<canvas aria-label="${escapeHtml(node.name)}" data-shader="${escapeHtml(JSON.stringify(shaderRuntimeOptions(node.shader)))}" style="display:block;width:100%;height:100%"></canvas><span data-shader-status hidden style="position:absolute;inset:0;padding:8px;overflow:auto;color:#dddddd;background:#242424;font:11px/1.4 system-ui,sans-serif"></span>`
+      ? options.staticMap ? '' : `<canvas aria-label="${escapeHtml(node.name)}" data-shader="${escapeHtml(JSON.stringify(shaderRuntimeOptions(node.shader)))}" style="display:block;width:100%;height:100%"></canvas><span data-shader-status hidden style="position:absolute;inset:0;padding:8px;overflow:auto;color:#dddddd;background:#242424;font:11px/1.4 system-ui,sans-serif"></span>`
     : node.type === 'code'
-    ? vector ? `<img alt="${escapeHtml(node.name)}" draggable="false" style="display:block;width:100%;height:100%;object-fit:${node.styles.objectFit ?? 'fill'};pointer-events:none" src="${escapeHtml(vector)}">`
+    ? vector ? `<img alt="${escapeHtml(node.name)}" draggable="false" style="display:block;width:100%;height:100%;object-fit:${node.styles.objectFit ?? 'fill'};pointer-events:none" src="${escapeHtml(vector)}"/>`
       : `<iframe title="${escapeHtml(node.name)}" sandbox="" referrerpolicy="no-referrer" style="display:block;width:100%;height:100%;border:0;pointer-events:none" srcdoc="${escapeHtml(safeCodeDocument(node.source ?? '', options.system))}"></iframe>`
     : node.type === 'arrow' ? '<span style="position:absolute;right:0;top:-5px;width:9px;height:9px;border-top:2px solid currentColor;border-right:2px solid currentColor;transform:rotate(45deg)"></span>' : '';
   const list = node.styles.listStyleType;
   if (node.type === 'text' && list && list !== 'none') {
     const tag = list === 'decimal' ? 'ol' : 'ul';
-    content = `<${tag} style="${inlineCss({ ...textListStyle, listStyleType: list })}">${(node.content ?? '').split(/\r?\n/).map(line => `<li>${escapeHtml(line) || '<br>'}</li>`).join('')}</${tag}>`;
+    content = `<${tag} style="${inlineCss({ ...textListStyle, listStyleType: list })}">${(node.content ?? '').split(/\r?\n/).map(line => `<li>${escapeHtml(line) || '<br/>'}</li>`).join('')}</${tag}>`;
   }
-  const link = href ? `<a aria-label="${escapeHtml(node.name)}" href="${escapeHtml(href)}"${href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"'} style="${inlineCss({ ...nodeLinkStyle, pointerEvents })}"></a>` : '';
+  if (shell) content = '';
+  const link = href && !shell && !options.staticMap ? `<a aria-label="${escapeHtml(node.name)}" href="${escapeHtml(href)}"${href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"'} style="${inlineCss({ ...nodeLinkStyle, pointerEvents })}"></a>` : '';
   const body = node.type === 'video' ? link + content : content + link;
   return `<div ${attributes}>${body}${(children.get(node.id) ?? []).map(child => renderNode(child, children, options, nextAncestors, linkedAncestor || !!href, pointerEvents)).join('')}</div>`;
+}
+
+export function exportMapPageMarkup(project: DesignProject, pageId: string, options: ExportOptions = {}, included?: ReadonlySet<string>): string {
+  const page = requirePage(project, pageId), nodes = resolvedNodes(page.nodes, project.designSystem);
+  const renderOptions: RenderOptions = { ...options, system: project.designSystem, styleFallbacks: new Map(page.nodes.map(node => [node.id, node.styles])), hasLinks: false, staticMap: true, included };
+  const children = childIndex(nodes);
+  return nodes.filter(node => !node.parentId).map(node => renderNode(node, children, renderOptions)).join('');
 }
 
 function childIndex(nodes: DesignNode[]): Map<string | null, DesignNode[]> {

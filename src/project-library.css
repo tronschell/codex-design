@@ -1,4 +1,11 @@
-.project-library { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; color: #d5d5d5; background: #171717; container: project-library / inline-size; }
+.project-library { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; color: #d5d5d5; background: #171717; container: project-library / inline-size; }
+.library-workspace-tabs { display: flex; flex: 0 0 32px; align-items: center; gap: 4px; min-width: 0; padding: 0 6px; background: #202020; border-bottom: 1px solid #393939; }
+.library-workspace-tabs > div { display: flex; align-items: stretch; align-self: stretch; gap: 2px; }
+.library-workspace-tabs [role="tab"] { padding: 0 7px; color: #aaa; background: transparent; border: 0; border-bottom: 2px solid transparent; }
+.library-workspace-tabs [role="tab"]:hover { color: #eee; background: #2b2b2b; }
+.library-workspace-tabs [aria-selected="true"] { color: #eee; border-bottom-color: #bbb; }
+.library-workspace-tabs > span { min-width: 0; margin-left: auto; overflow: hidden; color: #999; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.library-workspace-body { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
 .project-library button, .project-library input, .project-library select, .project-library textarea { font-family: inherit; font-size: 12px; }
 .project-library button:focus-visible, .project-library input:focus-visible, .project-library select:focus-visible, .project-library textarea:focus-visible, .project-library summary:focus-visible { outline: 2px solid #7db8ff; outline-offset: -2px; }
 .project-library-stage { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; outline: none; touch-action: none; }
@@ -60,6 +67,29 @@
 .library-reference-caption { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 4px; min-height: 0; padding: 7px 9px; }
 .library-reference-caption > strong { overflow: hidden; font-size: 12px; font-weight: 500; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .library-reference-caption > span { overflow: hidden; color: #939393; font-size: 11px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.library-component-preview { position: relative; flex: 0 0 156px; width: 296px; max-width: 100%; height: 156px; overflow: hidden; background: #1c1c1c; pointer-events: none; }
+.library-component-preview > div { position: absolute; width: 0; height: 0; transform-origin: 0 0; }
+.library-component-preview * { pointer-events: none !important; }
+.library-instance-list, .library-version-list { margin: 5px 0; padding: 0; list-style: none; }
+.library-instance-list > li { display: flex; align-items: center; gap: 5px; padding: 5px 0; border-bottom: 1px solid #353535; }
+.library-instance-list > li > span { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.library-instance-list strong, .library-instance-list small { overflow: hidden; font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.library-instance-list small, .library-version-number, .library-versions h3 small { color: #999; font-size: 10px; font-weight: 400; }
+.library-version-list { max-height: 260px; overflow: auto; }
+.project-library .library-version-list button { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 5px 6px; color: #ccc; text-align: left; background: transparent; border: 0; border-radius: 5px; }
+.project-library .library-version-list button:hover { background: #2d2d2d; }
+.project-library .library-version-list button[aria-pressed="true"] { background: #3a3a3a; }
+.library-version-list strong { font-size: 11px; font-weight: 450; overflow-wrap: anywhere; }
+.library-version-list time { color: #aaa; font-size: 10px; }
+.library-version-preview { margin-top: 8px; padding-top: 8px; border-top: 1px solid #393939; }
+.library-version-preview h4 { margin: 0 0 6px; font-size: 12px; font-weight: 500; }
+.library-version-preview > ul { margin: 8px 0; padding-left: 16px; color: #aaa; font-size: 11px; line-height: 1.6; }
+.library-version-preview > details { margin: 8px 0; color: #aaa; font-size: 11px; }
+.library-version-preview summary { cursor: pointer; }
+.library-version-preview pre { max-height: 240px; overflow: auto; color: #bbb; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.library-version-colors { display: flex; flex-wrap: wrap; gap: 4px; }
+.library-version-colors > span { width: 22px; height: 22px; border: 1px solid #777; border-radius: 4px; }
+.library-action-error { color: #efb5ad; }
 .project-library-panel { position: relative; z-index: 25; display: flex; flex: 0 0 336px; flex-direction: column; width: 336px; min-width: 0; min-height: 0; background: #202020; border-left: 1px solid #393939; }
 .library-panel-header { display: flex; flex: 0 0 32px; align-items: center; gap: 5px; min-width: 0; height: 32px; padding: 3px 4px 3px 8px; border-bottom: 1px solid #373737; }
 .library-panel-header > h2 { flex: 1; min-width: 0; overflow: hidden; margin: 0; color: #dcdcdc; font-size: 13px; font-weight: 550; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
@@ -130,5 +160,5 @@
 @keyframes library-spin { to { transform: rotate(360deg); } }
 @container project-library (max-width: 1000px) { .project-library-panel { flex-basis: 300px; width: 300px; } .library-zoom-step { display: none !important; } }
 @container project-library (max-width: 700px) { .project-library-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(280px, calc(100% - 48px)); box-shadow: -10px 0 28px #00000040; } .project-library-toolbar { gap: 3px; } .library-toolbar-count { display: none; } }
-@container project-library (max-width: 360px) { .library-toolbar-title { max-width: 76px; } .project-library-toolbar { gap: 2px; } .library-toolbar-divider { margin: 0; } }
+@container project-library (max-width: 360px) { .library-toolbar-title { max-width: 76px; } .project-library-toolbar { gap: 2px; } .library-toolbar-divider { margin: 0; } .library-workspace-tabs { gap: 1px; padding: 0 3px; } .library-workspace-tabs [role="tab"] { padding: 0 4px; font-size: 11px; } .library-workspace-tabs > span { display: none; } }
 @media (prefers-reduced-motion: reduce) { .library-spinner { animation: none; } }

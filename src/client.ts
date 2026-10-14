@@ -1,5 +1,5 @@
-import type { DesignProject, Operation, ProjectSummary, ProjectVersion, ProjectVersionSummary } from '../shared/types';
-import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadSchema, assetUploadCancellationSchema, cancelAssetUploadSchema, beginAssetUploadSchema, projectSchema, projectVersionSchema, projectVersionSummarySchema, readAssetChunkSchema } from '../shared/validation';
+import type { DesignProject, LibraryScope, LibraryVersion, Operation, ProjectSummary, ProjectVersion, ProjectVersionSummary } from '../shared/types';
+import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadSchema, assetUploadCancellationSchema, cancelAssetUploadSchema, beginAssetUploadSchema, libraryVersionRequestSchema, libraryVersionSchema, projectSchema, projectVersionSchema, projectVersionSummarySchema, readAssetChunkSchema } from '../shared/validation';
 import { MAX_ASSET_CHUNK_BYTES, type AssetChunk, type AssetMetadata, type AssetUpload } from '../shared/media';
 import { callTool, embedded } from './bridge';
 import { recordCanvasWork } from './canvas-profile';
@@ -225,6 +225,26 @@ export const client = {
   },
   async restoreVersion(id: string, expectedRevision: number, revision: number): Promise<DesignProject> {
     return requireProject(embedded ? await tool('canvas_restore_version', { projectId: id, expectedRevision, revision }) : { project: await http(`/projects/${encodeURIComponent(id)}/history/restore`, { expectedRevision, revision }) });
+  },
+  async listLibraryVersions(id: string, scope: LibraryScope, componentId?: string): Promise<ProjectVersionSummary[]> {
+    const input = libraryVersionRequestSchema.parse({ scope, componentId });
+    const query = new URLSearchParams({ scope, ...(componentId ? { componentId } : {}) });
+    const result = embedded ? await tool('canvas_list_library_versions', { projectId: id, ...input }) : await http<Record<string, unknown>>(`/projects/${encodeURIComponent(id)}/library/history?${query}`);
+    const parsed = projectVersionSummarySchema.array().safeParse(result?.versions);
+    if (!parsed.success) throw new ApiError('The server returned invalid library history.', 502, 'invalid_response');
+    return parsed.data;
+  },
+  async getLibraryVersion(id: string, revision: number, scope: LibraryScope, componentId?: string): Promise<LibraryVersion> {
+    const input = libraryVersionRequestSchema.parse({ scope, componentId });
+    const query = new URLSearchParams({ scope, ...(componentId ? { componentId } : {}) });
+    const result = embedded ? await tool('canvas_get_library_version', { projectId: id, revision, ...input }) : await http<Record<string, unknown>>(`/projects/${encodeURIComponent(id)}/library/history/${revision}?${query}`);
+    const parsed = libraryVersionSchema.safeParse({ designSystem: result.designSystem, version: result.version, ...(result.component ? { component: result.component } : {}) });
+    if (!parsed.success || parsed.data.version.revision !== revision || (scope === 'component' && parsed.data.component?.id !== componentId)) throw new ApiError('The server returned an invalid library version.', 502, 'invalid_response');
+    return parsed.data;
+  },
+  async restoreLibraryVersion(id: string, expectedRevision: number, revision: number, scope: LibraryScope, componentId?: string): Promise<DesignProject> {
+    const input = { expectedRevision, revision, ...libraryVersionRequestSchema.parse({ scope, componentId }) };
+    return requireProject(embedded ? await tool('canvas_restore_library_version', { projectId: id, ...input }) : { project: await http(`/projects/${encodeURIComponent(id)}/library/history/restore`, input) });
   },
   async create(name: string, template: 'blank' | 'demo'): Promise<DesignProject> {
     return requireProject(embedded ? await tool('canvas_create_project', { name, template }) : { project: await http('/projects', { name, template }) });

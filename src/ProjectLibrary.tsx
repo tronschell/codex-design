@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { ArrowLeft, ArrowUpRight, Check, Clock3, Copy, Download, Hand, ImagePlus, LoaderCircle, Maximize2, PanelRight, Plus, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import type { DesignNode, DesignProject, DesignSystemToken, DesignSystemTokenKind, InspirationItem, Operation, Viewport } from '../shared/types';
+import type { DesignNode, DesignProject, DesignSystemToken, DesignSystemTokenKind, InspirationItem, LibraryScope, Operation, Viewport } from '../shared/types';
 import { designSystemMarkdown, LEGACY_TOKEN_IDS, tokenCssVariables } from '../shared/design-system';
 import { designSystemRequestPrompt } from '../shared/design-system-workflow';
 import { sendFollowUp } from './bridge';
@@ -11,11 +11,20 @@ import MediaNode from './MediaNode';
 import './project-library.css';
 import { usePanelResize } from './usePanelResize';
 import { Select } from './Select';
+import ComponentEditor from './ComponentLibrary';
+import ComponentPreview from './ComponentPreview';
+import LibraryVersions from './LibraryVersions';
 
 export interface ProjectLibraryProps {
   project: DesignProject;
   boardId: string;
-  mode: 'system' | 'inspiration';
+  mode: 'system' | 'components' | 'inspiration';
+  pageId?: string;
+  selectedNodeId?: string;
+  insertionPosition: { x: number; y: number };
+  onModeChange: (mode: 'system' | 'components' | 'inspiration') => void;
+  onApply: (revision: number, scope: LibraryScope, componentId?: string) => Promise<DesignProject | null>;
+  onInserted: (nodeId: string) => void;
   readOnly: boolean;
   onChange: (operations: Operation[]) => Promise<DesignProject | null>;
   onClose: () => void;
@@ -148,20 +157,21 @@ function InspirationPreview({ item, container }: { item: InspirationItem; contai
   return <span ref={shell} className="library-reference-preview">{visible && <MediaNode node={node}/>}</span>;
 }
 
-export default function ProjectLibrary({ project, boardId, mode, readOnly, onChange, onClose, onNotify }: ProjectLibraryProps) {
+export default function ProjectLibrary({ project, boardId, mode, pageId, selectedNodeId, insertionPosition, onModeChange, onApply, onInserted, readOnly, onChange, onClose, onNotify }: ProjectLibraryProps) {
   const panel = usePanelResize('codex-design:library-panel-width', 336, 'Library panel width');
   const system = project.designSystem, board = project.boards.find(item => item.id === boardId), inspiration = board?.inspiration ?? [];
   const scopeKey = `${project.id}/${mode}/${mode === 'inspiration' ? boardId : ''}`;
   const [view, setView] = useState<Viewport>(() => views.get(scopeKey) ?? initialView);
-  const [panelOpen, setPanelOpen] = useState(true), [tab, setTab] = useState<'tokens' | 'docs' | 'requests'>('tokens');
+  const [panelOpen, setPanelOpen] = useState(true), [tab, setTab] = useState<'tokens' | 'docs' | 'requests' | 'versions'>('tokens');
+  const [selectedComponentId, setSelectedComponentId] = useState(() => project.pages.flatMap(page => page.nodes).find(node => node.componentInstance && Object.values(node.componentInstance.nodeMap).includes(selectedNodeId ?? ''))?.componentInstance?.componentId ?? '');
   const [selectedTokenId, setSelectedTokenId] = useState(''), [selectedReferenceId, setSelectedReferenceId] = useState('');
   const selectedToken = system.tokens.find(token => token.id === selectedTokenId), selectedReference = inspiration.find(item => item.id === selectedReferenceId);
-  const tokenState = useLibraryDraft(`${scopeKey}/token/${selectedTokenId}`, selectedToken ? { id: selectedToken.id, name: selectedToken.name, kind: selectedToken.kind, value: String(selectedToken.value), description: selectedToken.description ?? '' } : null, emptyToken);
-  const referenceState = useLibraryDraft(`${scopeKey}/reference/${selectedReferenceId}`, selectedReference ? { name: selectedReference.name, notes: selectedReference.notes, usage: selectedReference.usage, sourceUrl: selectedReference.sourceUrl ?? '' } : null, emptyReference);
-  const metadataState = useLibraryDraft(`${scopeKey}/metadata`, { name: system.name, description: system.description, documentation: system.documentation }, () => ({ name: '', description: '', documentation: '' }));
+  const tokenState = useLibraryDraft(`${project.id}/token/${selectedTokenId}`, selectedToken ? { id: selectedToken.id, name: selectedToken.name, kind: selectedToken.kind, value: String(selectedToken.value), description: selectedToken.description ?? '' } : null, emptyToken);
+  const referenceState = useLibraryDraft(`${project.id}/${boardId}/reference/${selectedReferenceId}`, selectedReference ? { name: selectedReference.name, notes: selectedReference.notes, usage: selectedReference.usage, sourceUrl: selectedReference.sourceUrl ?? '' } : null, emptyReference);
+  const metadataState = useLibraryDraft(`${project.id}/metadata`, { name: system.name, description: system.description, documentation: system.documentation }, () => ({ name: '', description: '', documentation: '' }));
   const { value: tokenDraft, setValue: setTokenDraft } = tokenState, { value: referenceDraft, setValue: setReferenceDraft } = referenceState, { value: metadata, setValue: setMetadata } = metadataState;
   const retainedReference = useRef<{ key: string; item: InspirationItem | null }>({ key: referenceState.key, item: selectedReference ?? null });
-  if (retainedReference.current.key !== `${scopeKey}/reference/${selectedReferenceId}`) retainedReference.current = { key: `${scopeKey}/reference/${selectedReferenceId}`, item: selectedReference ?? null };
+  if (retainedReference.current.key !== `${project.id}/${boardId}/reference/${selectedReferenceId}`) retainedReference.current = { key: `${project.id}/${boardId}/reference/${selectedReferenceId}`, item: selectedReference ?? null };
   else if (selectedReference) retainedReference.current.item = selectedReference;
   const editableReference = selectedReference ?? (referenceState.deleted ? retainedReference.current.item : null);
   const [requestMode, setRequestMode] = useState<'generate' | 'find'>(system.request?.mode ?? 'generate');
@@ -200,7 +210,9 @@ export default function ProjectLibrary({ project, boardId, mode, readOnly, onCha
       return box;
     });
   }, [inspiration]);
-  const content = mode === 'system' ? tokenLayout : referenceLayout;
+  const componentLayout = useMemo(() => project.designSystem.components.map((item, index) => ({ item, x: index % 3 * 332, y: Math.floor(index / 3) * 226, width: 300, height: 198 })), [project.designSystem.components]);
+  const content = mode === 'system' ? tokenLayout : mode === 'components' ? componentLayout : referenceLayout;
+  const modeLabel = mode === 'system' ? 'Design system' : mode === 'components' ? 'Components' : 'Inspiration';
   const contentSize = { width: Math.max(0, ...content.map(box => box.x + box.width)), height: Math.max(0, ...content.map(box => box.y + box.height)) };
 
   const moveView = useCallback((next: Viewport) => {
@@ -233,8 +245,9 @@ export default function ProjectLibrary({ project, boardId, mode, readOnly, onCha
   useLayoutEffect(() => {
     upload.current?.abort(); cancelPan(); setDropActive(false); setError(''); setDelivery(''); setShowRequest(false);
     const next = views.get(scopeKey) ?? initialView;
-    viewRef.current = next; setView(next); setSelectedTokenId(''); setSelectedReferenceId('');
+    viewRef.current = next; setView(next);
   }, [scopeKey, cancelPan]);
+  useEffect(() => { setSelectedReferenceId(''); }, [boardId]);
   useEffect(() => {
     mounted.current = true;
     const previous = document.activeElement;
@@ -395,8 +408,18 @@ export default function ProjectLibrary({ project, boardId, mode, readOnly, onCha
   };
   const savedPrompt = system.request ? designSystemRequestPrompt(project, system.request) : '';
 
-  return <section ref={root} className="project-library" aria-label={mode === 'system' ? 'Project design system' : 'Board inspiration'} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !(event.target as Element).closest('input, textarea, select, [contenteditable="true"]')) { event.preventDefault(); close(); } }} onKeyUp={event => { if (event.code === 'Space') setSpacePan(false); event.stopPropagation(); }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setSpacePan(false); }}>
-    <main ref={stage} className={`project-library-stage${hand || spacePan ? ' is-hand' : ''}${panning ? ' is-panning' : ''}${dropActive ? ' is-file-drop' : ''}`} tabIndex={0} aria-label={`${mode === 'system' ? 'Design system' : 'Inspiration'} canvas. Drag the background to pan; Control or Command and scroll to zoom.`} onPointerDown={pointerDown} onPointerMove={event => {
+  return <section ref={root} className="project-library" aria-label="Project design library" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !(event.target as Element).closest('input, textarea, select, [contenteditable="true"]')) { event.preventDefault(); close(); } }} onKeyUp={event => { if (event.code === 'Space') setSpacePan(false); event.stopPropagation(); }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setSpacePan(false); }}>
+    <nav className="library-workspace-tabs" aria-label="Project design library sections">
+      <button type="button" className="library-icon" aria-label="Return to design canvas" title="Return to design canvas · Esc" onClick={close}><ArrowLeft size={16}/></button>
+      <div role="tablist" aria-label="Design library" onKeyDown={event => {
+        const modes = ['system', 'components', 'inspiration'] as const, index = modes.indexOf(mode);
+        const next = event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : event.key === 'Home' ? 0 : event.key === 'End' ? 2 : -1;
+        if (next < 0) return; event.preventDefault(); event.stopPropagation(); onModeChange(modes[next]);
+        (event.currentTarget.querySelectorAll('button')[next] as HTMLButtonElement)?.focus();
+      }}>{([{ id: 'system', label: 'Design system' }, { id: 'components', label: 'Components' }, { id: 'inspiration', label: 'Inspiration' }] as const).map(item => <button key={item.id} id={`library-workspace-tab-${item.id}`} role="tab" type="button" tabIndex={mode === item.id ? 0 : -1} aria-selected={mode === item.id} aria-controls="library-workspace-content" onClick={() => onModeChange(item.id)}>{item.label}</button>)}</div><span title={project.name}>{project.name}</span>
+    </nav>
+    <div className="library-workspace-body" role="tabpanel" id="library-workspace-content" aria-labelledby={`library-workspace-tab-${mode}`}>
+    <main ref={stage} className={`project-library-stage${hand || spacePan ? ' is-hand' : ''}${panning ? ' is-panning' : ''}${dropActive ? ' is-file-drop' : ''}`} tabIndex={0} aria-label={`${modeLabel} canvas. Drag the background to pan; Control or Command and scroll to zoom.`} onPointerDown={pointerDown} onPointerMove={event => {
       const active = gesture.current;
       if (!active || active.pointerId !== event.pointerId) return;
       const dx = event.clientX - active.x, dy = event.clientY - active.y;
@@ -420,22 +443,23 @@ export default function ProjectLibrary({ project, boardId, mode, readOnly, onCha
       <div className="project-library-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
         {mode === 'system' ? tokenLayout.map(group => <section key={group.name} className="library-token-group" aria-label={`${group.name} tokens`} style={{ left: group.x, top: group.y, width: group.width }}>
           <header><h3>{group.name}</h3><span>{group.tokens.length}</span></header><div className="library-token-grid">{group.tokens.map(token => <button type="button" key={token.id} className={`library-token-card${selectedTokenId === token.id ? ' is-selected' : ''}`} aria-pressed={selectedTokenId === token.id} title={`${token.name} · ${displayValue(token)}${token.description ? `\n${token.description}` : ''}`} onClick={() => { setSelectedTokenId(token.id); setTab('tokens'); setPanelOpen(true); }}><TokenPreview token={token}/><span className="library-token-caption"><strong>{token.name}</strong><code>{displayValue(token)}</code></span></button>)}</div>
-        </section>) : referenceLayout.map(box => <button type="button" key={box.item.id} className={`library-reference-card${selectedReferenceId === box.item.id ? ' is-selected' : ''}`} aria-pressed={selectedReferenceId === box.item.id} title={box.item.name} style={{ left: box.x, top: box.y, width: box.width, height: box.height }} onClick={() => { setSelectedReferenceId(box.item.id); setPanelOpen(true); }}><span className="library-reference-image" style={{ height: box.imageHeight }}><InspirationPreview item={box.item} container={stage}/></span><span className="library-reference-caption"><strong>{box.item.name}</strong><span>{box.item.notes || box.item.usage || `${box.item.width} × ${box.item.height}`}</span></span></button>)}
+        </section>) : mode === 'components' ? componentLayout.map(box => <button type="button" key={box.item.id} className={`library-reference-card${selectedComponentId === box.item.id ? ' is-selected' : ''}`} aria-pressed={selectedComponentId === box.item.id} style={{ left: box.x, top: box.y, width: box.width, height: box.height }} onClick={() => { setSelectedComponentId(box.item.id); setPanelOpen(true); }}><ComponentPreview definition={box.item} system={system} container={stage}/><span className="library-reference-caption"><strong>{box.item.name}</strong><span>v{box.item.version} · {box.item.nodes.length} layers</span></span></button>) : referenceLayout.map(box => <button type="button" key={box.item.id} className={`library-reference-card${selectedReferenceId === box.item.id ? ' is-selected' : ''}`} aria-pressed={selectedReferenceId === box.item.id} title={box.item.name} style={{ left: box.x, top: box.y, width: box.width, height: box.height }} onClick={() => { setSelectedReferenceId(box.item.id); setPanelOpen(true); }}><span className="library-reference-image" style={{ height: box.imageHeight }}><InspirationPreview item={box.item} container={stage}/></span><span className="library-reference-caption"><strong>{box.item.name}</strong><span>{box.item.notes || box.item.usage || `${box.item.width} × ${box.item.height}`}</span></span></button>)}
       </div>
       <div className="project-library-toolbar" onPointerDown={event => event.stopPropagation()}>
-        <button type="button" className="library-icon" aria-label="Return to design canvas" title="Return to design canvas · Esc" onClick={close}><ArrowLeft size={16}/></button><span className="library-toolbar-title">{mode === 'system' ? 'Design system' : 'Inspiration'}</span><span className="library-toolbar-count">{mode === 'system' ? system.tokens.length : inspiration.length}</span><span className="library-toolbar-divider"/>
+        <span className="library-toolbar-title">{modeLabel}</span><span className="library-toolbar-count">{mode === 'system' ? system.tokens.length : mode === 'components' ? system.components.length : inspiration.length}</span><span className="library-toolbar-divider"/>
         <button type="button" className={`library-icon${hand ? ' is-active' : ''}`} aria-label="Hand tool" title="Hand tool · hold Space to pan" aria-pressed={hand} onClick={() => setHand(!hand)}><Hand size={15}/></button><button type="button" className="library-icon library-zoom-step" aria-label="Zoom out" title="Zoom out · −" onClick={() => zoomAt(viewRef.current.zoom / 1.2)}><ZoomOut size={15}/></button><button type="button" className="library-zoom" title="Reset zoom · 0" aria-label={`Zoom ${Math.round(view.zoom * 100)} percent. Reset to 100 percent.`} onClick={() => zoomAt(1)}>{Math.round(view.zoom * 100)}%</button><button type="button" className="library-icon library-zoom-step" aria-label="Zoom in" title="Zoom in · +" onClick={() => zoomAt(viewRef.current.zoom * 1.2)}><ZoomIn size={15}/></button><button type="button" className="library-icon" aria-label="Fit library content" title="Fit all content · 1" disabled={!content.length} onClick={fit}><Maximize2 size={15}/></button><span className="library-toolbar-divider"/><button type="button" className={`library-icon${panelOpen ? ' is-active' : ''}`} aria-label="Toggle library panel" title="Toggle library panel" aria-pressed={panelOpen} onClick={() => setPanelOpen(!panelOpen)}><PanelRight size={15}/></button>
         {mode === 'inspiration' && <><span className="library-toolbar-divider"/><button type="button" className="library-icon" disabled={readOnly || working && !upload.current || stopping} aria-label={upload.current ? 'Cancel image import' : 'Import inspiration images'} title={upload.current ? 'Cancel image import' : 'Import images · paste or drop images on this canvas'} onClick={() => { if (upload.current) { upload.current.abort(); setStopping(true); setBusy('Stopping import…'); } else fileInput.current?.click(); }}>{upload.current ? <X size={16}/> : <ImagePlus size={16}/>}</button></>}
       </div>
       {(busy || error || dropActive) && <div className={`project-library-message${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'} onPointerDown={event => event.stopPropagation()}>{busy && !error && <LoaderCircle size={13} className="library-spinner"/>}<span>{error || (dropActive ? 'Drop images into this board' : busy)}</span>{error && <button type="button" className="library-icon" aria-label="Dismiss library error" onClick={() => setError('')}><X size={14}/></button>}</div>}
     </main>
-    {panelOpen && <aside ref={panel.ref} style={panel.style} className="project-library-panel" aria-label={mode === 'system' ? 'Design system editor' : 'Inspiration editor'} aria-busy={working}>
+    {panelOpen && <aside ref={panel.ref} style={panel.style} className="project-library-panel" aria-label={`${modeLabel} editor`} aria-busy={working}>
       <div {...panel.handleProps}/>
-      <header className="library-panel-header"><h2>{mode === 'system' ? system.name : 'Board inspiration'}</h2>{readOnly && <span>Read only</span>}<button type="button" className="library-icon" aria-label="Collapse library panel" title="Collapse library panel" onClick={() => setPanelOpen(false)}><X size={15}/></button></header>
-      <div className="library-scope" title={mode === 'system' ? project.name : board?.name}>{mode === 'system' ? <><span>Project</span><strong>{project.name}</strong><small>All boards</small></> : <><span>Board</span><strong>{board?.name || 'Unavailable'}</strong><small>{inspiration.length}/100</small></>}</div>
+      <header className="library-panel-header"><h2>{mode === 'system' ? system.name : mode === 'components' ? 'Components' : 'Board inspiration'}</h2>{readOnly && <span>Read only</span>}<button type="button" className="library-icon" aria-label="Collapse library panel" title="Collapse library panel" onClick={() => setPanelOpen(false)}><X size={15}/></button></header>
+      <div className="library-scope" title={mode !== 'inspiration' ? project.name : board?.name}>{mode !== 'inspiration' ? <><span>Project</span><strong>{project.name}</strong><small>All boards</small></> : <><span>Board</span><strong>{board?.name || 'Unavailable'}</strong><small>{inspiration.length}/100</small></>}</div>
       {mode === 'system' ? <>
-        <div className="library-panel-tabs" role="tablist" aria-label="Design system sections">{([{ id: 'tokens', label: 'Tokens' }, { id: 'docs', label: 'Documentation' }, { id: 'requests', label: 'Codex' }] as const).map(item => <button type="button" role="tab" id={`library-tab-${item.id}`} aria-controls={`library-section-${item.id}`} aria-selected={tab === item.id} key={item.id} onClick={() => setTab(item.id)}>{item.label}{item.id === 'requests' && system.request?.queued && <span className="library-queued-dot"/>}</button>)}</div>
+        <div className="library-panel-tabs" role="tablist" aria-label="Design system sections">{([{ id: 'tokens', label: 'Tokens' }, { id: 'docs', label: 'Documentation' }, { id: 'requests', label: 'Codex' }, { id: 'versions', label: 'Versions' }] as const).map(item => <button type="button" role="tab" id={`library-tab-${item.id}`} aria-controls={`library-section-${item.id}`} aria-selected={tab === item.id} key={item.id} onClick={() => setTab(item.id)}>{item.label}{item.id === 'requests' && system.request?.queued && <span className="library-queued-dot"/>}</button>)}</div>
         <div className="library-panel-scroll" role="tabpanel" id={`library-section-${tab}`} aria-labelledby={`library-tab-${tab}`}>
+          {tab === 'versions' && <LibraryVersions project={project} scope="system" disabled={disabled} onChange={onChange} onApply={onApply} onNotify={onNotify}/>}
           {tab === 'tokens' && <>
             <div className="library-token-picker"><Select label="Select design token" value={selectedToken || tokenState.deleted ? selectedTokenId : ''} onChange={setSelectedTokenId} options={[{value:'',label:'New token'},...(tokenState.deleted?[{value:selectedTokenId,label:`Deleted · ${tokenDraft.name}`}]:[]),...groups.flatMap(group=>system.tokens.filter(token=>group.kinds.includes(token.kind)).map(token=>({value:token.id,label:`${group.name} · ${token.name}${token.kind==='color'?` · ${token.value}`:''}`,...(token.kind==='color'?{color:String(token.value)}:{})})))]}/><button type="button" className="library-icon" aria-label="Add design token" title="Add design token" disabled={disabled} onClick={addToken}><Plus size={16}/></button></div>
             <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); saveToken(); }}>
@@ -461,11 +485,12 @@ export default function ProjectLibrary({ project, boardId, mode, readOnly, onCha
             {system.request && <section className="library-section library-request-status"><h3><span><Clock3 size={13}/>{system.request.queued ? 'Queued request' : 'Saved request'}</span><button type="button" className="library-icon library-delete" disabled={disabled} title="Remove saved request" aria-label="Remove saved design system request" onClick={() => void run('Removing request…', async current => { if (await persist([{ type: 'set_design_system_request', request: null }], current)) onNotify('Saved request removed.'); })}><Trash2 size={13}/></button></h3><p className="library-request-meta">{system.request.mode === 'find' ? 'Find existing' : 'Generate'} · {new Date(system.request.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p><p className="library-field-note" role="status">{delivery || 'Codex updates this project when it handles the request. A queued request does not mean work has started.'}</p><div className="library-button-row"><button type="button" className="library-button" disabled={working} onClick={() => void run('Copying request…', async current => { setShowRequest(true); try { await copy(savedPrompt); if (current()) onNotify('Design system request copied.'); } catch (failure) { if (current()) requestAnimationFrame(() => { queuedPrompt.current?.focus(); queuedPrompt.current?.select(); }); throw failure; } })}><Copy size={13}/>Copy request</button><button type="button" className="library-button" aria-expanded={showRequest} onClick={() => setShowRequest(!showRequest)}>{showRequest ? 'Hide prompt' : 'View prompt'}</button></div>{showRequest && <textarea ref={queuedPrompt} className="library-queued-prompt" rows={10} readOnly spellCheck={false} aria-label="Saved design system request prompt" value={savedPrompt}/>}</section>}
           </>}
         </div>
-      </> : <div className="library-panel-scroll">
+      </> : mode === 'components' ? <ComponentEditor key={`${project.id}/${boardId}`} project={project} pageId={pageId} selectedNodeId={selectedNodeId} componentId={selectedComponentId} disabled={disabled} position={insertionPosition} onSelect={setSelectedComponentId} onChange={onChange} onApply={onApply} onNotify={onNotify} onReturn={close} onInserted={onInserted}/> : <div className="library-panel-scroll">
         <section className="library-section"><div className="library-button-row"><button type="button" className="library-button" disabled={disabled || inspiration.length >= 100 || !board} onClick={() => fileInput.current?.click()}><ImagePlus size={13}/>Import images</button>{upload.current && <button type="button" className="library-button" disabled={stopping} onClick={() => { upload.current?.abort(); setStopping(true); setBusy('Stopping import…'); }}><X size={13}/>Cancel</button>}</div><p className="library-field-note">Paste or drop images on this canvas. Originals are saved with this board.</p>{(!!inspiration.length || referenceState.deleted) && <label className="library-reference-picker">Reference<Select label="Select inspiration image" value={editableReference?.id??''} onChange={setSelectedReferenceId} options={[{value:'',label:'Select an image'},...(referenceState.deleted?[{value:selectedReferenceId,label:`Deleted · ${referenceDraft.name}`}]:[]),...inspiration.map(item=>({value:item.id,label:item.name}))]}/></label>}</section>
         {editableReference ? <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); saveReference(); }}><h3>{referenceState.deleted ? 'Deleted reference draft' : 'Reference details'}{selectedReference && <button type="button" className="library-icon library-delete" disabled={disabled} title="Delete reference; saved versions retain it" aria-label="Delete selected inspiration image" onClick={() => void run('Deleting reference…', async current => { if (await persist([{ type: 'delete_inspiration', boardId, itemId: selectedReference.id }], current)) { setSelectedReferenceId(''); onNotify('Inspiration deleted. Earlier versions retain the image.'); } })}><Trash2 size={13}/></button>}</h3><DraftConflicts fields={referenceState.conflicts} saved={referenceState.base}/>{referenceState.deleted && <p className="library-draft-warning">Deleted elsewhere. Your edits and the saved image reference are retained. Restore reference adds it back to this board. Changing selection discards this draft.</p>}<label>Name<input required maxLength={160} readOnly={disabled} value={referenceDraft.name} onChange={event => setReferenceDraft({ ...referenceDraft, name: event.target.value })}/></label><label>What you like<textarea maxLength={5000} rows={5} readOnly={disabled} value={referenceDraft.notes} placeholder="Layout, typography, color, hierarchy or interaction details" onChange={event => setReferenceDraft({ ...referenceDraft, notes: event.target.value })}/></label><label>Intended use<textarea maxLength={5000} rows={4} readOnly={disabled} value={referenceDraft.usage} placeholder="Where this reference should inform the board" onChange={event => setReferenceDraft({ ...referenceDraft, usage: event.target.value })}/></label><label>Source link · optional<input type="url" maxLength={2000} readOnly={disabled} value={referenceDraft.sourceUrl} placeholder="https://…" onChange={event => setReferenceDraft({ ...referenceDraft, sourceUrl: event.target.value })}/></label><div className="library-reference-meta"><span>{editableReference.width} × {editableReference.height}</span>{editableReference.sourceUrl && <a href={editableReference.sourceUrl} target="_blank" rel="noopener noreferrer">Open source<ArrowUpRight size={11}/></a>}</div><button type="submit" className="library-button library-primary" disabled={disabled || !referenceDraft.name.trim()}><Check size={13}/>{referenceState.deleted ? 'Restore reference' : 'Save reference'}</button></form> : <p className="library-note">{inspiration.length ? 'Select an image to edit what you like and how it should inform this board.' : 'No inspiration images saved for this board.'}</p>}
       </div>}
     </aside>}
+    </div>
     <input ref={fileInput} className="library-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg" multiple disabled={disabled || mode !== 'inspiration'} aria-label="Import inspiration image files" onChange={event => { importImages(Array.from(event.target.files ?? [])); event.target.value = ''; }}/>
   </section>;
 }

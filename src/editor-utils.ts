@@ -28,12 +28,20 @@ export function selectionBounds(selected: DesignNode[], nodes: DesignNode[]) {
   const x = Math.min(...boxes.map(box => box.x)), y = Math.min(...boxes.map(box => box.y));
   return { x, y, width: Math.max(...boxes.map(box => box.x + box.width)) - x, height: Math.max(...boxes.map(box => box.y + box.height)) - y };
 }
+export function remapComponentInstance(node: DesignNode, ids: ReadonlyMap<string, string>) {
+  const instance = node.componentInstance;
+  if (!instance) return;
+  if (Object.values(instance.nodeMap).some(id => !ids.has(id))) { delete node.componentInstance; return; }
+  instance.nodeMap = Object.fromEntries(Object.entries(instance.nodeMap).map(([definitionId, id]) => [definitionId, ids.get(id)!]));
+}
 export function duplicateNodes(nodeIds: string[], nodes: DesignNode[]) {
   const roots = new Set(selectionRoots(nodeIds, nodes).map(node => node.id));
   const group = [...roots].flatMap(id => subtree(id, nodes)), ids = new Map(group.map(node => [node.id, uid()]));
   return group.map(node => {
     const root = roots.has(node.id), offset = root ? parentLocalDelta(node,nodes,{x:40,y:40}) ?? {x:40,y:40} : {x:0,y:0};
-    return { ...structuredClone(node), id: ids.get(node.id)!, parentId: root ? node.parentId : ids.get(node.parentId!)!, name: root ? `${node.name} copy` : node.name, x: node.x + offset.x, y: node.y + offset.y };
+    const copy = { ...structuredClone(node), id: ids.get(node.id)!, parentId: root ? node.parentId : ids.get(node.parentId!)!, name: root ? `${node.name} copy` : node.name, x: node.x + offset.x, y: node.y + offset.y };
+    remapComponentInstance(copy, ids);
+    return copy;
   });
 }
 export function bounds(nodes: DesignNode[]) {

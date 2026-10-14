@@ -1,7 +1,7 @@
 .export-backdrop { position: fixed; inset: 0; z-index: 110; display: flex; align-items: flex-start; justify-content: flex-end; padding: 40px 8px 8px; background: #00000026; }
 .export-panel { display: flex; flex-direction: column; width: min(560px, 100%); max-height: calc(100dvh - 48px); overflow: auto; color: #e8eaed; background: #242424; border: 1px solid #474747; border-radius: 8px; box-shadow: 0 12px 34px #00000066; }
-.export-panel button, .export-panel select { font-family: inherit; font-size: 12px; }
-.export-panel button:focus-visible, .export-panel select:focus-visible, .export-panel textarea:focus-visible { outline: 2px solid #4497ff; outline-offset: 2px; }
+.export-panel button, .export-panel select, .export-panel input { font-family: inherit; font-size: 12px; }
+.export-panel button:focus-visible, .export-panel select:focus-visible, .export-panel input:focus-visible, .export-panel textarea:focus-visible { outline: 2px solid #4497ff; outline-offset: 2px; }
 .export-panel button:disabled { cursor: default; }
 .export-panel-header { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; min-height: 32px; padding: 4px 8px; border-bottom: 1px solid #3c3c3c; }
 .export-panel-header h2 { flex: 1; margin: 0; font-size: 14px; font-weight: 550; }
@@ -25,6 +25,18 @@
 .export-format-detail h3 { margin: 0 0 6px; font-size: 13px; font-weight: 550; }
 .export-format-detail p { margin: 0 0 8px; color: #c0c0c0; font-size: 12px; line-height: 1.5; }
 .export-format-detail .export-format-note { color: #aaa; font-size: 11px; }
+.export-map-options { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 2px 0 6px; }
+.export-map-field { display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 6px; color: #bbb; font-size: 11px; }
+.export-map-field .rounded-select, .export-map-field input[type="text"], .export-map-field input[type="number"] { width: 100%; min-width: 0; height: 24px; padding: 2px 5px; color: #e8eaed; background: #303030; border: 1px solid #484848; border-radius: 5px; }
+.export-map-color, .export-map-margin { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.export-map-color input[type="color"] { flex: 0 0 24px; width: 24px; height: 24px; padding: 2px; background: #303030; border: 1px solid #484848; border-radius: 5px; }
+.export-map-margin input { max-width: 88px; }
+.export-map-labels { display: flex; align-items: center; gap: 5px; min-height: 24px; color: #c0c0c0; font-size: 11px; }
+.export-map-labels input { width: 13px; height: 13px; margin: 0; accent-color: #4497ff; }
+.export-map-size { display: flex; flex-direction: column; gap: 3px; padding: 6px 0; font-variant-numeric: tabular-nums; }
+.export-map-size strong { color: #e8eaed; font-size: 12px; font-weight: 550; }
+.export-map-size span { color: #aaa; font-size: 10px; line-height: 1.5; }
+.export-map-options .export-format-note { margin-bottom: 0; }
 .export-preview-button { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0; color: #c6c6c6; }
 .export-file-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; width: 100%; margin-top: auto; padding-top: 12px; }
 .export-panel .primary-button, .export-panel .secondary-button { min-height: 24px; padding: 3px 6px; gap: 4px; border-radius: 4px; font-size: 11px; white-space: nowrap; }

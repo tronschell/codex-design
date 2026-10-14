@@ -86,6 +86,7 @@ export interface ShaderRuntimeOptions {
   scale: number;
   seed: number;
   animate: boolean;
+  capture?: { width: number; height: number };
 }
 
 export function shaderRuntimeOptions(shader?: ShaderConfig): ShaderRuntimeOptions {
@@ -101,7 +102,8 @@ export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderR
   const doc = canvas.ownerDocument, win = doc.defaultView!;
   const motion = win.matchMedia('(prefers-reduced-motion: reduce)');
   let gl: WebGLRenderingContext | null = null, program: WebGLProgram | null = null, buffer: WebGLBuffer | null = null;
-  let disposed = false, failed = false, visible = typeof IntersectionObserver === 'undefined', frame = 0;
+  const capture = options.capture;
+  let disposed = false, failed = false, visible = !!capture || typeof IntersectionObserver === 'undefined', frame = 0;
   let elapsed = 0, previousTime = 0, previousPaint = -Infinity;
   let vertex: WebGLShader | null = null, fragment: WebGLShader | null = null;
   const locations = new Map<string, WebGLUniformLocation | null>();
@@ -132,7 +134,8 @@ export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderR
   function initialize(): boolean {
     if (gl) return true;
     try {
-      gl = canvas.getContext('webgl', { alpha: true, antialias: false, depth: false, stencil: false, powerPreference: 'low-power' });
+      if (capture && (!Number.isInteger(capture.width) || !Number.isInteger(capture.height) || capture.width < 1 || capture.height < 1 || capture.width > 16_384 || capture.height > 16_384 || capture.width * capture.height > 64_000_000)) throw new Error('Shader captures are limited to 16,384 pixels per side and 64 megapixels.');
+      gl = canvas.getContext('webgl', { alpha: true, antialias: false, depth: false, stencil: false, powerPreference: 'low-power', preserveDrawingBuffer: !!capture });
       if (!gl) throw new Error('WebGL is unavailable. Enable hardware acceleration or use another browser.');
       vertex = compile(gl.VERTEX_SHADER, 'attribute vec2 a_position; void main() { gl_Position = vec4(a_position, 0.0, 1.0); }');
       fragment = compile(gl.FRAGMENT_SHADER, options.fragmentSource);
@@ -159,15 +162,17 @@ export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderR
     const ratio = Math.min(win.devicePixelRatio || 1, 1.5);
     const width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight);
     const limit = Math.min(ratio, 2048 / Math.max(width, height), Math.sqrt(1000000 / (width * height)));
-    const pixelWidth = Math.max(1, Math.floor(width * limit)), pixelHeight = Math.max(1, Math.floor(height * limit));
+    const pixelWidth = capture?.width ?? Math.max(1, Math.floor(width * limit)), pixelHeight = capture?.height ?? Math.max(1, Math.floor(height * limit));
+    if (capture && (pixelWidth > gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || pixelHeight > gl.getParameter(gl.MAX_RENDERBUFFER_SIZE))) { fail('This shader capture exceeds the graphics driver limit. Choose a lower export scale.'); return; }
     if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) { canvas.width = pixelWidth; canvas.height = pixelHeight; }
     gl.viewport(0, 0, pixelWidth, pixelHeight);
     gl.uniform2f(locations.get('u_resolution')!, pixelWidth, pixelHeight);
     gl.uniform1f(locations.get('u_time')!, elapsed * options.speed);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    if (capture && gl.getError() !== gl.NO_ERROR) fail('The graphics driver could not render this shader still. Choose a lower export scale.');
   }
-  function canDraw() { return !disposed && !failed && visible && !doc.hidden; }
-  function canAnimate() { return canDraw() && options.animate && options.speed > 0 && !motion.matches; }
+  function canDraw() { return !disposed && !failed && visible && (!!capture || !doc.hidden); }
+  function canAnimate() { return !capture && canDraw() && options.animate && options.speed > 0 && !motion.matches; }
   function tick(time: number) {
     frame = 0;
     if (!canAnimate()) { previousTime = 0; return; }
@@ -185,8 +190,8 @@ export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderR
     if (canAnimate()) frame = win.requestAnimationFrame(tick);
   }
   function contextLost(event: Event) { event.preventDefault(); stop(); fail('The graphics context was lost. Reload the canvas to restore this shader.'); }
-  const intersection = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(entries => { visible = entries.some(entry => entry.isIntersecting && entry.intersectionRatio > 0); sync(); });
-  const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
+  const intersection = capture || typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(entries => { visible = entries.some(entry => entry.isIntersecting && entry.intersectionRatio > 0); sync(); });
+  const resize = capture || typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
   intersection?.observe(canvas); resize?.observe(canvas);
   doc.addEventListener('visibilitychange', sync); motion.addEventListener('change', sync);
   win.addEventListener('resize', sync); canvas.addEventListener('webglcontextlost', contextLost);
@@ -195,7 +200,7 @@ export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderR
     disposed = true; stop(); intersection?.disconnect(); resize?.disconnect();
     doc.removeEventListener('visibilitychange', sync); motion.removeEventListener('change', sync);
     win.removeEventListener('resize', sync); canvas.removeEventListener('webglcontextlost', contextLost);
-    if (gl) { if (buffer) gl.deleteBuffer(buffer); if (program) gl.deleteProgram(program); if (vertex) gl.deleteShader(vertex); if (fragment) gl.deleteShader(fragment); }
+    if (gl) { if (buffer) gl.deleteBuffer(buffer); if (program) gl.deleteProgram(program); if (vertex) gl.deleteShader(vertex); if (fragment) gl.deleteShader(fragment); if (capture) gl.getExtension('WEBGL_lose_context')?.loseContext(); }
   } };
 }
 

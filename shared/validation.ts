@@ -84,17 +84,6 @@ export const designSystemSourceSchema = z.object({
 export const designSystemRequestSchema = z.object({
   id: idSchema, mode: z.enum(['generate', 'find']), brief: z.string().trim().min(1).max(20_000), repository: z.string().max(2000), createdAt: timestamp, queued: z.boolean(),
 }).strict();
-export const designSystemSchema = z.object({
-  name: nameSchema, description: z.string().max(5000), documentation: z.string().max(100_000),
-  tokens: z.array(designSystemTokenSchema).max(1000), sources: z.array(designSystemSourceSchema).max(1000), request: designSystemRequestSchema.optional(),
-}).strict().superRefine((system, ctx) => {
-  const ids = new Set<string>(), names = new Set<string>();
-  system.tokens.forEach((token, index) => {
-    if (ids.has(token.id)) ctx.addIssue({ code: 'custom', message: `Duplicate token ID: ${token.id}`, path: ['tokens', index, 'id'] });
-    if (names.has(token.name.toLowerCase())) ctx.addIssue({ code: 'custom', message: `Duplicate token name: ${token.name}`, path: ['tokens', index, 'name'] });
-    ids.add(token.id); names.add(token.name.toLowerCase());
-  });
-});
 
 export const assetRefSchema = z.string().regex(ASSET_REF_PATTERN, 'Use an uploaded asset:<SHA-256> media reference');
 export const inspirationItemSchema = z.object({
@@ -162,6 +151,17 @@ export const nodeStyleSchema = z.object({
 
 export const tokenBindingsSchema = z.object(Object.fromEntries(BINDABLE_STYLE_PROPERTIES.map(property => [property, idSchema.optional()])) as Record<typeof BINDABLE_STYLE_PROPERTIES[number], z.ZodOptional<typeof idSchema>>).strict();
 
+const componentOverrideProperties = ['type', 'name', 'x', 'y', 'width', 'height', 'content', 'href', 'source', 'jsx', 'media', 'shader', 'effects', 'locked', 'hidden'];
+const componentOverridePathSchema = z.string().max(100).refine(value => componentOverrideProperties.includes(value) || (value.startsWith('styles.') && Object.hasOwn(nodeStyleSchema.shape, value.slice(7))) || (value.startsWith('tokenBindings.') && (BINDABLE_STYLE_PROPERTIES as readonly string[]).includes(value.slice(14))), 'Use an editable node property or an individual styles/tokenBindings property');
+export const componentInstanceSchema = z.object({
+  componentId: idSchema, version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  nodeMap: z.record(idSchema, idSchema), overrides: z.record(idSchema, z.array(componentOverridePathSchema).max(100)),
+}).strict().superRefine((instance, ctx) => {
+  if (Object.keys(instance.nodeMap).length < 1 || Object.keys(instance.nodeMap).length > 5000) ctx.addIssue({ code: 'custom', message: 'A linked instance must map 1–5000 definition nodes', path: ['nodeMap'] });
+  if (new Set(Object.values(instance.nodeMap)).size !== Object.keys(instance.nodeMap).length) ctx.addIssue({ code: 'custom', message: 'Instance node IDs must be unique', path: ['nodeMap'] });
+  if (Object.keys(instance.overrides).some(id => !Object.hasOwn(instance.nodeMap, id))) ctx.addIssue({ code: 'custom', message: 'Overrides must reference mapped definition nodes', path: ['overrides'] });
+});
+
 export const nodeSchema = z.object({
   id: idSchema, type: z.enum(['frame', 'text', 'rectangle', 'ellipse', 'line', 'arrow', 'code', 'image', 'video', 'shader']),
   name: nameSchema, parentId: idSchema.nullable(),
@@ -171,8 +171,49 @@ export const nodeSchema = z.object({
   jsx: z.object({ source: z.string().max(100_000), starters: z.array(z.enum(['ios-frame', 'android-frame', 'macos-window', 'browser-window'])).max(4), deviceChrome: z.enum(['safe-area', 'device']).optional() }).strict().optional(),
   generation: z.object({ status: z.enum(['building', 'ready']), updatedAt: timestamp.optional() }).strict().optional().describe('Frames being generated use building, then ready when complete. The store timestamps actual saved work; editor-only loading chrome never changes authored styles.'),
   media: mediaSchema.optional(), shader: shaderSchema.optional(), effects: nodeEffectsSchema.optional(),
-  styles: nodeStyleSchema, tokenBindings: tokenBindingsSchema.optional(), locked: z.boolean().optional(), hidden: z.boolean().optional(),
+  styles: nodeStyleSchema, tokenBindings: tokenBindingsSchema.optional(), componentInstance: componentInstanceSchema.optional(), locked: z.boolean().optional(), hidden: z.boolean().optional(),
 }).strict();
+
+export const nativeComponentDefinitionSchema = z.object({
+  id: idSchema, name: nameSchema, description: z.string().max(5000), rootNodeId: idSchema,
+  nodes: z.array(nodeSchema).min(1).max(5000), version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), releaseLabel: nameSchema.optional(),
+}).strict().superRefine((component, ctx) => {
+  const nodes = new Map(component.nodes.map(node => [node.id, node]));
+  if (nodes.size !== component.nodes.length) ctx.addIssue({ code: 'custom', message: 'Component node IDs must be unique', path: ['nodes'] });
+  const root = nodes.get(component.rootNodeId);
+  if (!root || root.parentId !== null || root.x !== 0 || root.y !== 0) ctx.addIssue({ code: 'custom', message: 'A component needs one root at local position 0, 0', path: ['rootNodeId'] });
+  const complete = new Set<string>([component.rootNodeId]);
+  component.nodes.forEach((node, index) => {
+    if (node.componentInstance) ctx.addIssue({ code: 'custom', message: 'Nested linked components must be detached before capture', path: ['nodes', index] });
+    const seen = new Set<string>();
+    let current: typeof node | undefined = node;
+    while (current && !complete.has(current.id) && !seen.has(current.id)) { seen.add(current.id); current = current.parentId === null ? undefined : nodes.get(current.parentId); }
+    if (!current || seen.has(current.id)) ctx.addIssue({ code: 'custom', message: 'Every component node must descend from its root without cycles', path: ['nodes', index, 'parentId'] });
+    else seen.forEach(id => complete.add(id));
+  });
+});
+
+export const designSystemSchema = z.object({
+  name: nameSchema, description: z.string().max(5000), documentation: z.string().max(100_000),
+  tokens: z.array(designSystemTokenSchema).max(1000), sources: z.array(designSystemSourceSchema).max(1000), components: z.array(nativeComponentDefinitionSchema).max(200).default([]), request: designSystemRequestSchema.optional(),
+}).strict().superRefine((system, ctx) => {
+  const componentIds = new Set<string>(), componentNames = new Set<string>();
+  system.components.forEach((component, index) => {
+    if (componentIds.has(component.id)) ctx.addIssue({ code: 'custom', message: `Duplicate component ID: ${component.id}`, path: ['components', index, 'id'] });
+    if (componentNames.has(component.name.toLowerCase())) ctx.addIssue({ code: 'custom', message: `Duplicate component name: ${component.name}`, path: ['components', index, 'name'] });
+    componentIds.add(component.id); componentNames.add(component.name.toLowerCase());
+    for (const node of component.nodes) for (const [property, tokenId] of Object.entries(node.tokenBindings ?? {})) {
+      const token = system.tokens.find(item => item.id === tokenId);
+      if (!token || !compatibleTokenKinds(property as typeof BINDABLE_STYLE_PROPERTIES[number]).includes(token.kind)) ctx.addIssue({ code: 'custom', message: `Component ${component.name} has an invalid ${property} token binding`, path: ['components', index, 'nodes'] });
+    }
+  });
+  const ids = new Set<string>(), names = new Set<string>();
+  system.tokens.forEach((token, index) => {
+    if (ids.has(token.id)) ctx.addIssue({ code: 'custom', message: `Duplicate token ID: ${token.id}`, path: ['tokens', index, 'id'] });
+    if (names.has(token.name.toLowerCase())) ctx.addIssue({ code: 'custom', message: `Duplicate token name: ${token.name}`, path: ['tokens', index, 'name'] });
+    ids.add(token.id); names.add(token.name.toLowerCase());
+  });
+});
 
 export const viewportSchema = z.object({
   x: coordinate, y: coordinate, zoom: z.number().finite().min(0.02).max(16),
@@ -261,6 +302,10 @@ const resolvedProjectSchema = z.object({
   });
   if (project.designSystem.request) addId(project.designSystem.request.id, ['designSystem', 'request', 'id']);
   const tokens = new Map(project.designSystem.tokens.map(token => [token.id, token]));
+  const components = new Map(project.designSystem.components.map(component => [component.id, component]));
+  project.designSystem.components.forEach((component, index) => {
+    if (component.version > project.revision) ctx.addIssue({ code: 'custom', message: 'A component release cannot reference a future project revision', path: ['designSystem', 'components', index, 'version'] });
+  });
   const pages = new Map(project.pages.map((page) => [page.id, page]));
   let nodeCount = 0;
   project.pages.forEach((page, pageIndex) => {
@@ -292,6 +337,25 @@ const resolvedProjectSchema = z.object({
       }
       path.forEach((id) => complete.add(id));
     });
+    const owners = new Set<string>();
+    page.nodes.forEach((root, nodeIndex) => {
+      const instance = root.componentInstance;
+      if (!instance) return;
+      const location = ['pages', pageIndex, 'nodes', nodeIndex, 'componentInstance'];
+      const definition = components.get(instance.componentId);
+      if (!definition) ctx.addIssue({ code: 'custom', message: 'The linked component definition does not exist in this project', path: [...location, 'componentId'] });
+      if (instance.version > project.revision) ctx.addIssue({ code: 'custom', message: 'An instance cannot reference a future project revision', path: [...location, 'version'] });
+      if (definition && (!Object.hasOwn(instance.nodeMap, definition.rootNodeId) || instance.nodeMap[definition.rootNodeId] !== root.id)) ctx.addIssue({ code: 'custom', message: 'The instance root must map the component definition root', path: [...location, 'nodeMap'] });
+      const mapped = new Set(Object.values(instance.nodeMap));
+      for (const id of mapped) {
+        const node = nodes.get(id);
+        if (!node || owners.has(id)) { ctx.addIssue({ code: 'custom', message: 'Instance members must exist on this page and belong to one instance', path: [...location, 'nodeMap'] }); continue; }
+        owners.add(id);
+        if (id !== root.id && (!node.parentId || !mapped.has(node.parentId) || node.componentInstance)) ctx.addIssue({ code: 'custom', message: 'Every mapped member must remain inside its instance; nested instances are unsupported', path: [...location, 'nodeMap'] });
+      }
+      if (page.nodes.some(node => node.parentId && mapped.has(node.parentId) && !mapped.has(node.id))) ctx.addIssue({ code: 'custom', message: 'Detach the instance before adding unlinked children', path: [...location, 'nodeMap'] });
+      if (definition && instance.version === definition.version && (definition.nodes.length !== mapped.size || definition.nodes.some(node => !Object.hasOwn(instance.nodeMap, node.id)))) ctx.addIssue({ code: 'custom', message: 'An instance must map all nodes in its linked component release', path: [...location, 'nodeMap'] });
+    });
   });
   project.boards.forEach((board, boardIndex) => {
     if (!boardPageCounts.get(board.id)) ctx.addIssue({ code: 'custom', message: 'Each board must keep at least one page', path: ['boards', boardIndex] });
@@ -321,7 +385,7 @@ export const operationSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('replace_page'), pageId: idSchema, page: pageSchema }).strict(),
   z.object({ type: z.literal('delete_page'), pageId: idSchema }).strict(),
   z.object({ type: z.literal('create_node'), pageId: idSchema, node: nodeSchema }).strict(),
-  z.object({ type: z.literal('update_node'), pageId: idSchema, nodeId: idSchema, patch: nonempty(nodeSchema.omit({ id: true }).shape) }).strict(),
+  z.object({ type: z.literal('update_node'), pageId: idSchema, nodeId: idSchema, patch: nonempty(nodeSchema.omit({ id: true, componentInstance: true }).shape) }).strict(),
   z.object({ type: z.literal('delete_node'), pageId: idSchema, nodeId: idSchema }).strict(),
   z.object({ type: z.literal('snap_node'), pageId: idSchema, nodeId: idSchema, distance: z.number().finite().min(0).max(100).default(8).describe('Maximum snapping distance in design units; defaults to 8. Snaps visible free-positioned unlocked nodes to parent content, siblings, other roots or canvas origin.') }).strict(),
   z.object({ type: z.literal('create_thread'), thread: threadSchema }).strict(),
@@ -332,15 +396,31 @@ export const operationSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('upsert_design_token'), token: designSystemTokenSchema }).strict(),
   z.object({ type: z.literal('delete_design_token'), tokenId: idSchema }).strict(),
   z.object({ type: z.literal('set_design_system_request'), request: designSystemRequestSchema.nullable() }).strict(),
+  z.object({ type: z.literal('release_design_system'), label: nameSchema }).strict(),
+  z.object({ type: z.literal('capture_component'), pageId: idSchema, nodeId: idSchema, componentId: idSchema, name: nameSchema, description: z.string().max(5000).optional() }).strict(),
+  z.object({ type: z.literal('instantiate_component'), componentId: idSchema, pageId: idSchema, nodeId: idSchema, x: coordinate, y: coordinate, parentId: idSchema.nullable().optional() }).strict(),
+  z.object({ type: z.literal('release_component'), pageId: idSchema, nodeId: idSchema, componentId: idSchema.optional(), label: nameSchema.optional() }).strict(),
+  z.object({ type: z.literal('update_component_instance'), pageId: idSchema, nodeId: idSchema, resetOverrides: z.boolean().optional() }).strict(),
+  z.object({ type: z.literal('detach_component_instance'), pageId: idSchema, nodeId: idSchema }).strict(),
   z.object({ type: z.literal('upsert_inspiration'), boardId: idSchema, item: inspirationItemSchema }).strict(),
   z.object({ type: z.literal('delete_inspiration'), boardId: idSchema, itemId: idSchema }).strict(),
 ]);
 export const operationsSchema: z.ZodType<Operation[]> = z.array(operationSchema).min(1).max(2000);
 export const revisionSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-export const projectVersionSummarySchema = z.object({ revision: revisionSchema, createdAt: timestamp, label: z.string().trim().min(1).max(500), restoredFrom: revisionSchema.optional() }).strict();
+export const projectVersionSummarySchema = z.object({ revision: revisionSchema, createdAt: timestamp, label: z.string().trim().min(1).max(500), restoredFrom: revisionSchema.optional(), library: z.object({ system: z.boolean(), componentIds: z.array(idSchema).max(200) }).strict().optional() }).strict();
 export const projectVersionSchema: z.ZodType<ProjectVersion, z.ZodTypeDef, unknown> = z.object({ project: projectSchema, version: projectVersionSummarySchema }).strict().superRefine(({ project, version }, ctx) => {
   if (project.revision !== version.revision) ctx.addIssue({ code: 'custom', message: 'Version revision does not match its project snapshot', path: ['version', 'revision'] });
 });
 export const restoreProjectVersionSchema = z.object({ expectedRevision: revisionSchema, revision: revisionSchema }).strict();
+export const libraryScopeSchema = z.enum(['system', 'component']);
+export const libraryVersionRequestSchema = z.object({ scope: libraryScopeSchema, componentId: idSchema.optional() }).strict().superRefine((input, ctx) => {
+  if ((input.scope === 'component') !== (input.componentId !== undefined)) ctx.addIssue({ code: 'custom', message: 'Supply componentId only for component history', path: ['componentId'] });
+});
+export const libraryVersionSchema = z.object({ designSystem: designSystemSchema, version: projectVersionSummarySchema, component: nativeComponentDefinitionSchema.optional() }).strict();
+export const restoreLibraryVersionSchema = z.object({ expectedRevision: revisionSchema, revision: revisionSchema, scope: libraryScopeSchema, componentId: idSchema.optional() }).strict().refine(input => (input.scope === 'component') === (input.componentId !== undefined), 'Supply componentId only for component history');
 export const createProjectSchema = z.object({ name: nameSchema, template: z.enum(['blank', 'demo']).default('blank') }).strict();
 export const mutateProjectSchema = z.object({ expectedRevision: revisionSchema, operations: operationsSchema }).strict();
+export const canvasMapSettingsSchema = z.object({
+  background: z.union([z.enum(['transparent', 'white', 'dark']), z.string().refine((value): value is `#${string}` => /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(value), 'Use a hexadecimal background color')]).optional(),
+  scale: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(), labels: z.boolean().optional(), margin: z.number().finite().min(0).max(1000).optional(),
+}).strict();
