@@ -13,6 +13,7 @@ export interface HistoryPanelProps {
 }
 
 const batchSize = 12;
+const previewCacheSize = 8;
 const message = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
 
 function versionTime(value: string) {
@@ -105,12 +106,14 @@ export default function HistoryPanel({ project, saving, onClose, onPreview, onAp
   const getVersion = useCallback((revision: number) => {
     const entries = cache.current;
     const cached = entries.get(revision);
-    if (cached) return cached;
+    if (cached) { entries.delete(revision); entries.set(revision, cached); return cached; }
     const request = client.getVersion(project.id, revision).then(version => {
       if (version.project.id !== project.id || version.version.revision !== revision) throw new Error('The server returned a different version. Refresh the history and try again.');
       return version;
     });
     entries.set(revision, request);
+    // Keep nearby previews warm without retaining the entire project journal.
+    if (entries.size > previewCacheSize) entries.delete(entries.keys().next().value!);
     void request.catch(() => { if (entries.get(revision) === request) entries.delete(revision); });
     return request;
   }, [project.id]);
