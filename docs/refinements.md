@@ -257,3 +257,9 @@ Strict TypeScript compilation and direct caller/style inspection passed. Product
 ## Technology badge logos — October 14, 2026
 
 README ChatGPT/Codex and MCP Apps badges now use self-contained SVGs with their actual white logos, keeping the existing compact badge style. Source/CC0 attribution lives in SVG metadata. Rendered both through the existing bundled SVG renderer and inspected the images directly. This documentation-only change needs no application build or plugin-runtime refresh; no dependencies or tests were added or run.
+
+## README promo overview — October 14, 2026
+
+Replaced the distant single-board screenshot with one 1,518 × 1,437 PNG combining five live Forma captures: a mobile canvas close-up, the desktop workspace, structured design tokens, Documentation/DESIGN.md and the complete Properties panel. The layout has equal 20-pixel gaps, 40-pixel outer margins, a soft neutral gradient, rounded cards and the existing color SVG identity. The README links to the full-size image.
+
+The user chose pixel-exact direct composition. The shipped image uses the original capture pixels with cropping and corner masks only; screenshots are neither rescaled nor redrawn, and AI-styled drafts are not included. The mobile canvas was captured at 82% zoom, desktop at 62%, and the token canvas at 67%; the connected pane provides 726 × 901 source captures. The final PNG is 952,428 bytes. Inspected the complete composition and confirmed DESIGN.md, Effects and Advanced remain visible. This is documentation-only, with no application build, plugin refresh, test, dependency or design-document mutation. No runtime performance improvement is claimed.
