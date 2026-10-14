@@ -40,4 +40,9 @@ await build({
   bundle: true, platform: 'node', target: 'node22', format: 'esm',
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
 });
+await build({
+  entryPoints: [resolve(root, 'server/browser.ts')], outfile: resolve(dist, 'browser.mjs'),
+  bundle: true, platform: 'node', target: 'node22', format: 'esm',
+  banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
+});
 console.log('Built self-contained canvas widget and MCP runtime.');

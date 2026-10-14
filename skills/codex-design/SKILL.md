@@ -5,6 +5,8 @@ description: Create and edit interface designs or slides in Codex Design. Genera
 
 # Codex Design
 
+When connected through the separate standard MCP/browser entrypoint, the same design tools and original references are available without a Codex plugin. `canvas_open_canvas` returns `standaloneUrl` and requests opening it in the default browser; show that URL if automatic launch is unavailable. Keep project/board/page IDs explicit in this conversation. Browser comments are queued until the person asks the active agent to handle them; do not imply automatic chat delivery or native image generation when the harness does not provide those capabilities. Codex's embedded plugin uses its existing connection workflow below.
+
 ## Design prompts and skills
 
 For design creation, redesigns and visual iteration, call `canvas_get_design_guidance`, then read [codex-design.md](codex-design.md) in full and [Hi-fi design](skills/hi-fi-design/SKILL.md) before building. `canvas_read_design_reference` serves these exact files to connected clients without filesystem access; follow `nextOffset` until null to finish each file. Use the matching skill in the bundled [skills](skills/) directory for the requested medium. For a new visual direction without an existing brand, also read [Frontend design](skills/frontend-design/SKILL.md). The original [starter components](starter-components/) are bundled alongside them.

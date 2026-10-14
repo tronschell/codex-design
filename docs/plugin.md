@@ -2,6 +2,8 @@
 
 ## Local package
 
+Other harnesses can use the separate [standard MCP + browser entrypoint](harnesses.md). The Codex plugin keeps the existing `dist/mcp.mjs` entrypoint, side pane, metadata and project storage.
+
 `plugin.json` provides portable identity and OpenAI presentation metadata. Skills are discovered under `skills/`; the MCP server is declared in root `mcp.json` with an explicit `stdio` transport. The repo marketplace uses `source.path: "./"`, relative to the repository root, with `AVAILABLE` installation and `ON_INSTALL` authentication policies.
 
 The manifest includes square monochrome light/dark `composerIcon` and `logo` SVG assets under `assets/`; these are also included in the distribution archive. The MCP implementation and the resource shared by both canvas entrypoints advertise the same theme-specific SVG icons as standard inline data URIs, so native sidebar clients do not need to fetch a private local file. Hosts may cache presentation metadata until a reload. `canvas_open_app` declares the app-only `global` sidebar entrypoint, while `canvas_open_canvas` declares the separate `thread` conversation-panel entrypoint, following the official [Plugin Extensions](https://developers.openai.com/plugins/build/extensions) format. Installation and launcher registration are separate: a plugin can be enabled and expose tools even when these launcher fields are absent. Supported sidebar surfaces use the registered entrypoint; the agent can also invoke `canvas_open_canvas` directly.

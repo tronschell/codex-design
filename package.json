@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build && node scripts/build-widget.mjs",
     "start": "NODE_ENV=production tsx server/index.ts",
     "mcp": "tsx server/stdio.ts",
+    "mcp:browser": "node dist/browser.mjs",
     "typecheck": "tsc --noEmit",
     "package:plugin": "node scripts/package-plugin.mjs"
   },

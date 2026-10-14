@@ -42,6 +42,8 @@ instead of claiming installation succeeded.
 
 After installation, ask: **“Design a mobile app in Codex Design.”** The canvas opens beside the chat without a development server. See the [official local-plugin setup](https://developers.openai.com/plugins/build/plugins).
 
+**Pi, OpenCode or another harness:** use the [standard MCP + browser setup](docs/harnesses.md). It runs independently of the Codex plugin and works with your harness's model.
+
 ## Development
 
 Requires Node.js 22+ and npm.
