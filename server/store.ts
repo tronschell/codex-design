@@ -133,6 +133,8 @@ export class ProjectStore {
   private initializing?: Promise<void>;
   private queue: Promise<unknown> = Promise.resolve();
   private listeners = new Set<(projectId: string) => void>();
+  private summaries = new Map<string, { version: string; summary: ProjectSummary }>();
+  private cachedProject?: { id: string; version: string; project: DesignProject };
   private readonly history: ProjectHistory;
   private readonly assets: AssetStore;
 
@@ -156,13 +158,11 @@ export class ProjectStore {
 
   async list(): Promise<ProjectSummary[]> {
     await this.init();
-    const projects = await Promise.all((await this.projectIds()).map((id) => this.read(id)));
-    return projects.map(({ id, name, description, revision, createdAt, updatedAt, boards, pages }) => ({
-      id, name, description, revision, createdAt, updatedAt,
-      boardCount: boards.length,
-      pageCount: pages.length,
-      screenCount: pages.reduce((count, page) => count + page.nodes.filter((node) => node.type === 'frame' && node.parentId === null).length, 0),
-    })).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    const ids = await this.projectIds(), present = new Set(ids);
+    for (const id of this.summaries.keys()) if (!present.has(id)) this.summaries.delete(id);
+    if (this.cachedProject && !present.has(this.cachedProject.id)) this.cachedProject = undefined;
+    const projects = await Promise.all(ids.map((id) => this.read(id, true)));
+    return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   }
 
   async get(id: string): Promise<DesignProject> {
@@ -491,16 +491,33 @@ export class ProjectStore {
     return (await readdir(this.dataDir)).filter((file) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\.json$/.test(file)).map((file) => file.slice(0, -5));
   }
 
-  private async read(id: string): Promise<DesignProject> {
+  private async read(id: string): Promise<DesignProject>;
+  private async read(id: string, summaryOnly: true): Promise<ProjectSummary>;
+  private async read(id: string, summaryOnly = false): Promise<DesignProject | ProjectSummary> {
     const filename = path.join(this.dataDir, `${id}.json`);
     try {
-      if ((await stat(filename)).size > MAX_INPUT_BYTES) throw new StoreError(500, 'corrupt_project', `Saved project ${id} exceeds the size limit`);
+      const info = await stat(filename, { bigint: true });
+      if (info.size > MAX_INPUT_BYTES) throw new StoreError(500, 'corrupt_project', `Saved project ${id} exceeds the size limit`);
+      // Check the file on every read so atomic saves and edits from other processes remain visible.
+      const version = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+      const cachedSummary = this.summaries.get(id);
+      if (summaryOnly && cachedSummary?.version === version) return { ...cachedSummary.summary };
+      if (!summaryOnly && this.cachedProject?.id === id && this.cachedProject.version === version) return structuredClone(this.cachedProject.project);
       let input: unknown;
       try { input = JSON.parse(await readFile(filename, 'utf8')); }
       catch (error) { if (error instanceof SyntaxError) throw new StoreError(500, 'corrupt_project', `Saved project ${id} is not valid JSON`); throw error; }
       const parsed = projectSchema.safeParse(input);
       if (!parsed.success || parsed.data.id !== id) throw new StoreError(500, 'corrupt_project', `Saved project ${id} has an invalid structure`);
-      return parsed.data;
+      const { name, description, revision, createdAt, updatedAt, boards, pages } = parsed.data;
+      const summary = {
+        id, name, description, revision, createdAt, updatedAt, boardCount: boards.length, pageCount: pages.length,
+        screenCount: pages.reduce((count, page) => count + page.nodes.filter((node) => node.type === 'frame' && node.parentId === null).length, 0),
+      };
+      this.summaries.set(id, { version, summary });
+      if (summaryOnly) return { ...summary };
+      // Keep one full document; callers receive independent objects without retaining an entire library.
+      this.cachedProject = { id, version, project: parsed.data };
+      return structuredClone(parsed.data);
     } catch (error) {
       if (isMissing(error)) throw new StoreError(404, 'project_not_found', `Project ${id} does not exist`);
       throw error;

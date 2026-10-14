@@ -547,3 +547,74 @@ Functionality and consistency work, with no claimed runtime speed improvement. M
 | MCP runtime | 1,092,191 B | 1,100,756 B | +8,565 B | +0.78% |
 
 User effect: fonts can be chosen visually and searched, while DESIGN.md token edits update linked styles through one atomic save instead of leaving a separate stale documentation table. Current source variables follow authored same-specificity declarations. These added capabilities increase artifact bytes; no load-time, interaction latency, memory, heap/RSS, CPU, GPU or FPS savings were measured or claimed. Direct inspection covered actual typography, filtering/focus and narrow panel layout without modifying existing designs. No tests, assertions, fixtures or dependencies were added or run.
+
+## Application performance pass — October 14, 2026
+
+Baseline: `ff22c4d`. GPT‑6.1 Sol at max reasoning profiled/reviewed the store and geometry paths; the primary agent profiled the production browser. This pass changes validated-read caching, ancestor lookup, camera-independent bounds/selection work and redundant asset copies. It does not change saved designs, source, comments, History Apply, project scope or rendering quality. No tests, dependencies, fixtures or verification designs were added or run.
+
+### Workloads and method
+
+The installed library contains **six actual projects, seven pages and 1,512 native nodes**. Forma has 397 nodes; GaugeReel has 412 nodes and 16 root screens; statusline.sh is the largest JSON document at 382,223 B, 217 nodes across two pages. Its measured first page has 86 nodes, eight roots and three source-backed nodes. A separate unchanged repository GaugeReel revision 4 supplies the repeated 412-node store-read workload. These are the largest available real designs; this is **not** a measurement of thousands of projects or a 10,000-object board.
+
+Store measurements use Node.js 24.19.0 on macOS arm64. Each phase/workload runs in three fresh processes, alternating before/after: one cold call, ten warmups and 200 sequential read-only calls. The already-initialized store skips only initialization writes/locking; ordinary read/stat/validation/copy behavior runs unchanged. Reported values are medians of the three run results; CPU is process user+system CPU during the 200 calls, peak RSS is `process.resourceUsage().maxRSS` for that isolated profiling process, and retained heap is sampled after explicit GC. These are store-worker measurements, not the desktop app's total RAM or CPU percentage. Raw output/document hashes match before/after; all saved-file hashes remain unchanged.
+
+Geometry measurements use the same Node process with frozen before/current functions: twenty warmups and 100 alternating paired samples on the six nonempty page arrays; the seventh page is empty. Canvas-map preparation includes newly resolved arrays and index creation. No browser paint, input or GPU work is included. All real-node geometry output hashes match.
+
+| Store / geometry metric | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Six-project list, warm median | 8.941167 ms | 0.061792 ms | −8.879375 ms | −99.31% |
+| Six-project list, warm p95 | 11.055 ms | 0.100 ms | −10.955 ms | −99.10% |
+| Forma read, warm median | 2.409792 ms | 0.432167 ms | −1.977625 ms | −82.07% |
+| GaugeReel 412-node read, warm median | 1.878166 ms | 0.332584 ms | −1.545582 ms | −82.29% |
+| List CPU, 200 reads | 2,198.060 ms | 26.098 ms | −2,171.962 ms | −98.81% |
+| Forma read CPU, 200 reads | 597.200 ms | 91.412 ms | −505.788 ms | −84.69% |
+| List profiling process peak RSS | 270,096 KiB | 76,912 KiB | −193,184 KiB | −71.52% |
+| Forma read profiling process peak RSS | 223,904 KiB | 69,024 KiB | −154,880 KiB | −69.17% |
+| List process post-GC heap | 6,317,672 B | 6,848,776 B | +531,104 B | +8.41% |
+| Cold six-project list | 24.653292 ms | 25.760167 ms | +1.106875 ms | +4.49% |
+| Cold Forma read | 10.515083 ms | 11.074333 ms | +0.559250 ms | +5.32% |
+| Cold GaugeReel read | 8.061292 ms | 8.949167 ms | +0.887875 ms | +11.01% |
+| Visible bounds, 1,512 installed nodes | 5.559542 ms | 3.328708 ms | −2.230834 ms | −40.13% |
+| Visible bounds, GaugeReel 412 nodes | 1.258208 ms | 0.734125 ms | −0.524083 ms | −41.65% |
+| Five nonempty projects' canvas-map layout | 6.525458 ms | 3.885334 ms | −2.640124 ms | −40.46% |
+
+User effect: repeated project-menu/SSE refreshes avoid re-reading and validating every unchanged design; returning to a recently read project avoids repeated validation. Every request still checks file identity, size and nanosecond modification/change times, so ordinary edits and atomic saves by another process invalidate the cache. Changed data still passes the complete schema and corruption checks. Summaries contain scalar metadata; only **one** full validated document is retained, and callers get independent copies. Caching reduces allocation churn under repeated reads, at the cost of a small retained heap increase and slightly slower cold reads. It does not establish a cold-start improvement. Ancestor lookup now uses a weak snapshot index, without caching geometry or ignoring current transforms. Camera-only renders reuse root bounds and selection eligibility until their actual inputs change.
+
+### Production loading and canvas interaction
+
+Both builds run on separate loopback ports, using the same saved documents, IAB session, warm browser/server caches and fixed 1,280 × 720 viewport (1,280 × 688 canvas, Inspector closed). Local-only identical HTML instrumentation records browser Performance APIs and DOM marks; it is absent from packaged builds. Five alternating navigations per phase/project reduce order bias. The first-canvas mark is the first animation-frame callback after rendered design nodes appear; React has committed the controls, but source iframes/media may still be loading. It is **not** TTI, LCP, INP, or proof that every resource is ready. `loadEventEnd` measures the outer document's load, which can precede asynchronous project/source loading.
+
+Pan method: reload the unselected Forma overview, then eight native 0.5-page wheel scrolls, alternating down/up at (1,000, 500). Three rounds per build, alternating phase order. Each round receives eight wheel events and eight camera responses. Wheel response measures event capture to the next rAF after the canvas transform changes, a callback proxy rather than input-to-paint. Frame intervals cover the active input plus a 150 ms tail and measure callback cadence, **not rendered FPS**. Pan rows are medians of the three rounds, with ordinary midpoint medians for eight response samples. No ≥50 ms long-task entries were observed in these short captures; this is not a CPU-utilization measurement.
+
+| Production browser metric, warm | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Forma first-canvas median, 397 nodes | 64.0 ms | 56.1 ms | −7.9 ms | −12.34% |
+| GaugeReel first-canvas median, 412 nodes | 64.5 ms | 56.3 ms | −8.2 ms | −12.71% |
+| Source-heavy document first-canvas median | 53.4 ms | 52.3 ms | −1.1 ms | −2.06% |
+| Forma outer-document load median | 40.6 ms | 37.2 ms | −3.4 ms | −8.37% |
+| GaugeReel outer-document load median | 36.3 ms | 37.9 ms | +1.6 ms | +4.41% |
+| Source-heavy outer-document load median | 37.0 ms | 40.4 ms | +3.4 ms | +9.19% |
+| Source-heavy first iframe load median | 59.1 ms | 61.1 ms | +2.0 ms | +3.38% |
+| Wheel-to-camera callback median | 8.65 ms | 8.70 ms | +0.05 ms | +0.58% |
+| Active rAF interval median | 8.3 ms | 8.3 ms | 0.0 ms | 0.00% |
+| Active rAF interval p95 | 9.2 ms | 9.3 ms | +0.1 ms | +1.09% |
+
+User effect: the measured native canvas appeared around eight milliseconds earlier. Five samples are small and ranges overlap (GaugeReel 53.9–76.2 ms before, 55.4–67.6 ms after), so the 12.71% figure is specific to this workload, not a general loading guarantee. Source readiness and outer load did not consistently improve. Panning was already responsive in this workload and remains essentially unchanged; no smoother-FPS or lower input-to-paint claim is made. Hand panning, selection and Properties/Code were inspected through the actual UI without editing designs.
+
+Earlier sequential warm samples also varied more: Forma first-canvas median 88.0→60.5 ms, GaugeReel 78.9→58.2 ms, source-heavy 72.1→53.5 ms. The alternating comparison above is the primary result; the larger sequential gains are not used as the headline.
+
+### Asset allocations and artifact cost
+
+`client.readAsset` returns a Uint8Array backed by a fresh exact-length ordinary ArrayBuffer. Display and embedded-text/canvas-map export preparation now pass that owned buffer directly to Blob, avoiding an extra full-length `Uint8Array.slice()`; ZIP import retains its necessary slicing because those bytes can be subarray views. Measured file/metadata lengths for the four currently referenced images total **8,702,896 B**. One acquisition per distinct referenced asset therefore removes 8,702,896 B of explicit temporary copies (to 0 B, −100% of that copy); the largest single removed copy is 2,613,943 B. This is measured payload size plus inspected allocation behavior, **not measured browser RAM**, not all images mounted simultaneously, and not removal of Blob's own storage or image-decoding memory. The same redundant-copy removal applies to embedded-text and canvas-map export preparation; Source ZIP did not use this copy path.
+
+Exact uncompressed production widget bytes are 818,720→818,956 B (+236 B, +0.03%); Node zlib gzip level 9 is 234,147→234,196 B (+49 B, +0.02%). The MCP runtime is 1,100,756→1,102,033 B (+1,277 B, +0.12%). The widget stays self-contained; introducing lazy chunks without changing the packaging/host loader would break it, so this pass does not split the bundle or claim a download-size win.
+
+### Coverage and remaining limits
+
+Production compilation, strict unused-symbol compilation, a bounded GPT‑6.1 Sol max source review and direct UI inspection passed. Fresh production HTTP MCP reads expose the same 34 tools and identical structured project, focused component context, React export and history-list hashes. No designs, versions, conversations, original imported references or assets were changed for measurement.
+
+Reliable app-only browser heap/RSS, total desktop CPU, GPU usage, paint/FPS, dropped frames, true input latency/INP, formal interaction readiness, cold browser/plugin-host launch, save-to-paint streaming, large video/shader workloads, thousands of projects and boards larger than the saved 412-node workload remain **unmeasured**. The browser's heap counters varied with navigation/GC and could not establish isolated memory savings. The server peak-RSS reductions above must not be presented as a 71.52% reduction in the desktop app's memory.
+
+Remaining scaling issues found by inspection: a cold library list still validates every project, and a changed revision still transfers a full project snapshot. The warm summary cache removes the repeated cost but does not solve cold-library scaling. A persisted summary index or revision deltas need their own integrity/recovery design and real larger workloads before implementation. Media/shader virtualization and bounded shader animation already exist; they are retained without inventing new savings.
+
+Raw local captures (ignored by Git): `application-performance-store.json`, `application-performance-browser.json`, `application-performance-observer.js`, `application-performance-bundles.json`, `effects-geometry-profile.json`, and `media-explicit-copy-profile.json` under `artifacts/`.

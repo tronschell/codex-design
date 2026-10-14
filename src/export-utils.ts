@@ -38,7 +38,7 @@ function dataUrl({ asset, bytes }: LoadedAsset, signal?: AbortSignal): Promise<s
     reader.onerror = () => { cleanup(); reject(new Error(`Could not prepare media ${asset.name} for export.`)); };
     reader.onload = () => { cleanup(); resolve(String(reader.result)); };
     signal?.addEventListener('abort', abort, { once: true });
-    try { reader.readAsDataURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: asset.mimeType })); }
+    try { reader.readAsDataURL(new Blob([bytes.buffer as ArrayBuffer], { type: asset.mimeType })); }
     catch (error) { cleanup(); reject(error); }
   });
 }

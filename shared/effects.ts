@@ -52,13 +52,25 @@ const multiply = (a: Matrix, b: Matrix): Matrix => [
   a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
 ];
 const transformsFor = (node: DesignNode) => (node.effects ?? []).filter((effect): effect is TransformEffect => effect.type === 'transform' && effect.enabled !== false);
+const nodeIndexes = new WeakMap<DesignNode[], Map<string, DesignNode>>();
+function parentNode(nodes: DesignNode[], id: string | null) {
+  if (!id) return undefined;
+  let byId = nodeIndexes.get(nodes);
+  if (!byId) {
+    // Resolved arrays are snapshots; cache lookups, while geometry still reads current node values.
+    byId = new Map();
+    for (const node of nodes) byId.set(node.id, node);
+    nodeIndexes.set(nodes, byId);
+  }
+  return byId.get(id);
+}
 function ancestors(node: DesignNode, nodes: DesignNode[]): DesignNode[] {
   const result: DesignNode[] = [], seen = new Set<string>();
   let current: DesignNode | undefined = node;
   while (current && !seen.has(current.id)) {
     result.push(current); seen.add(current.id);
     const parentId: string | null = current.parentId;
-    current = parentId ? nodes.find(item => item.id === parentId) : undefined;
+    current = parentNode(nodes, parentId);
   }
   return result;
 }
@@ -158,13 +170,13 @@ function inverseVector(matrix: Matrix, delta: { x: number; y: number }): { x: nu
 }
 
 export function parentLocalDelta(node: DesignNode, nodes: DesignNode[], delta: { x: number; y: number }): { x: number; y: number } | null {
-  const parent = nodes.find(item => item.id === node.parentId);
+  const parent = parentNode(nodes, node.parentId);
   return parent ? inverseVector(worldMatrix(parent, nodes), delta) : delta;
 }
 
 export function parentLocalPoint(parentId: string | null, nodes: DesignNode[], point: { x: number; y: number }): { x: number; y: number } | null {
   if (!parentId) return point;
-  const parent = nodes.find(item => item.id === parentId);
+  const parent = parentNode(nodes, parentId);
   if (!parent) return null;
   const matrix = worldMatrix(parent, nodes), local = inverseVector(matrix, { x: point.x - matrix[4], y: point.y - matrix[5] });
   if (!local) return null;

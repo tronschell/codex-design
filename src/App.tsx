@@ -186,7 +186,7 @@ export default function App() {
     while (current) { if (current.hidden || seen.has(current.id)) return false; seen.add(current.id); current = current.parentId ? nodeById.get(current.parentId) : undefined; }
     return true;
   }), [selectedNodes, nodeById]);
-  const movableSelection = selectedRoots.length > 0 && selectedRoots.every(node => objectEditable(node,nodeById) && !['vertical','horizontal'].includes(nodeById.get(node.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(node,baseNodes,{x:0,y:0}) !== null);
+  const movableSelection = useMemo(() => selectedRoots.length > 0 && selectedRoots.every(node => objectEditable(node,nodeById) && !['vertical','horizontal'].includes(nodeById.get(node.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(node,baseNodes,{x:0,y:0}) !== null), [selectedRoots, nodeById, baseNodes]);
   const roots = useMemo(() => nodes.filter(node => !node.parentId), [nodes]);
   const cancelGesture = useCallback(() => { gesture.current = null; setMarquee(null); setPreviewPatch(null); setDrawing(null); setSnapGuides([]); }, []);
   useLayoutEffect(() => { cancelGesture(); }, [project?.id, project?.revision, page?.id, loading, historyOpen, library, tool, modal, cancelGesture]);
@@ -207,6 +207,7 @@ export default function App() {
     };
   }, [cancelGesture, flushView]);
   const screens = useMemo(() => roots.filter(node => node.type === 'frame'), [roots]);
+  const rootBounds = useMemo(() => new Map(roots.filter(node => clippedRootTypes.has(node.type) && ![node.styles.overflow,node.styles.overflowX,node.styles.overflowY].includes('visible') && !node.effects?.some(effect=>effect.enabled!==false&&effect.type!=='transform')).map(node => [node.id, visualBounds(node, nodes)])), [roots, nodes]);
   const visibleRootKey = useMemo(() => {
     if (library) return '[]';
     if (!stageSize.width || !stageSize.height) return JSON.stringify(roots.map(node => node.id));
@@ -217,11 +218,11 @@ export default function App() {
     }
     // Keep overflowing roots and the edited tree; clipped frames get a 200px prefetch gutter.
     return JSON.stringify(roots.filter(node => {
-      if (node.id === selectedRoot?.id || !clippedRootTypes.has(node.type) || [node.styles.overflow,node.styles.overflowX,node.styles.overflowY].includes('visible') || node.effects?.some(effect=>effect.enabled!==false&&effect.type!=='transform')) return true;
-      const box = visualBounds(node, nodes);
+      const box = rootBounds.get(node.id);
+      if (node.id === selectedRoot?.id || !box) return true;
       return view.x+(box.x+box.width)*view.zoom>=-200&&view.x+box.x*view.zoom<=stageSize.width+200&&view.y+(box.y+box.height)*view.zoom>=-200&&view.y+box.y*view.zoom<=stageSize.height+200;
     }).map(node=>node.id));
-  }, [roots, nodes, selected, nodeById, stageSize, view, library]);
+  }, [roots, rootBounds, selected, nodeById, stageSize, view, library]);
   const visibleRootIds = useMemo<ReadonlySet<string>>(() => new Set(JSON.parse(visibleRootKey) as string[]), [visibleRootKey]);
   const frameLabels = useMemo(() => layoutFrameLabels(nodes, view.zoom), [nodes, view.zoom]);
   const notify = useCallback((message: string) => { setToast(message); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(''), 4400); }, []);
@@ -730,8 +731,8 @@ export default function App() {
     else notify('Comment saved.');
     return true;
   };
-  const selectedBox = selectionBounds(selectionRoots(visibleSelection.map(node=>node.id),nodes),nodes);
-  const resizableSelection = selectedRoots.length > 0 && selectedRoots.every(node=>objectEditable(node,nodeById)&&!hasTransformedAncestor(node,baseNodes)) && (!multiple || movableSelection);
+  const selectedBox = useMemo(() => selectionBounds(selectionRoots(visibleSelection.map(node=>node.id),nodes),nodes), [visibleSelection, nodes]);
+  const resizableSelection = useMemo(() => selectedRoots.length > 0 && selectedRoots.every(node=>objectEditable(node,nodeById)&&!hasTransformedAncestor(node,baseNodes)) && (!multiple || movableSelection), [selectedRoots, nodeById, baseNodes, multiple, movableSelection]);
   const hoveredNode = tool==='comment' && !commentTarget && hovered ? nodeById.get(hovered) : null;
   const hoveredBox = hoveredNode ? visualBounds(hoveredNode,nodes) : null;
   const commentPosition = commentTarget && stageRef.current ? {left:Math.max(16,Math.min(stageRef.current.clientWidth-400,view.x+commentTarget.x*view.zoom+22)),top:Math.max(90,Math.min(stageRef.current.clientHeight-330,view.y+commentTarget.y*view.zoom+12))} : {left:20,top:100};

@@ -12,7 +12,7 @@ function acquireAssetUrl(ref: string) {
   if (!entry) {
     const pending: AssetUrl = { users: 0, promise: Promise.resolve('') };
     pending.promise = client.readAsset(ref).then(({ asset, bytes }) => {
-      const url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: asset.mimeType }));
+      const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: asset.mimeType }));
       pending.url = url;
       if (!pending.users) { URL.revokeObjectURL(url); if (assetUrls.get(ref) === pending) assetUrls.delete(ref); }
       return url;
