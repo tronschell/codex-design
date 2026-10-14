@@ -32,10 +32,14 @@
 .layout-mode-control button[aria-pressed="true"] { color: #ededed; background: #3b3b3b; box-shadow: 0 1px 2px #0003; }
 .layout-stack-settings { margin-top: 7px; }
 .layout-spacing .two-fields { gap: 6px; }
+.layout-spacing .two-fields > .property-field { gap: 6px; }
 .layout-spacing .field-input { height: 26px; }
-.layout-spacing .two-fields > .property-field > span { flex-basis: 37px; font-size: 11px; }
+.layout-spacing .two-fields > .property-field > span { flex-basis: 76px; font-size: 11px; }
 .layout-error { margin: 7px 0 0; color: #efb7ac; font-size: 11px; line-height: 1.4; }
 @container (max-width: 285px) {
+  .layout-spacing .two-fields { grid-template-columns: minmax(0, 1fr); }
+  .inspector .token-field { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .inspector .token-link { margin-left: 82px; }
   .layout-geometry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .layout-mode-control button { font-size: 10px; gap: 2px; }
 }

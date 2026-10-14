@@ -279,11 +279,13 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 .select-field { display: flex; align-items: center; gap: 6px; min-height: 24px; margin: 2px 0; }
 .select-field > span { flex: 0 0 76px; color: #959595; font-size: 12px; }
 .select-field select { flex: 1; width: 100%; min-width: 0; height: 22px; padding: 0 18px 0 6px; color: #cfcfcf; font-size: 12px; appearance: none; background: #222222 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%238e8e83' stroke-width='1.2'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E") no-repeat right 8px center; border: 1px solid #393939; border-radius: 5px; }
-.color-field { display: grid; align-items: center; gap: 6px; min-height: 24px; margin: 2px 0; grid-template-columns: 76px 22px minmax(0, 1fr); }
-.color-swatch { position: relative; flex: 0 0 25px; width: 22px; height: 22px; overflow: hidden; border: 1px solid #595959; border-radius: 4px; grid-column: 2; grid-row: 1; }
+.color-field { display: grid; align-items: center; gap: 6px; min-height: 24px; margin: 2px 0; grid-template-columns: 76px minmax(0, 1fr); }
+.color-swatch { position: relative; z-index: 1; width: 16px; height: 16px; margin-left: 3px; overflow: hidden; border: 1px solid #777; border-radius: 3px; grid-column: 2; grid-row: 1; }
+.color-swatch:focus-within { outline: 2px solid #7db8ff; outline-offset: 1px; }
 .color-swatch input { position: absolute; inset: -5px; width: 40px; height: 40px; cursor: pointer; opacity: 0; }
 .color-field > .property-field { flex: 1; min-width: 0; margin: 0; display: contents; }
-.color-field .field-input { grid-column: 3; grid-row: 1; }
+.color-field .field-input { grid-column: 2; grid-row: 1; }
+.color-field .field-input input { padding-left: 25px; }
 .color-field .property-field > span { flex-basis: 70px; grid-column: 1; grid-row: 1; }
 .direction-buttons { display: flex; align-items: center; gap: 2px; min-height: 24px; margin: 2px 0; }
 .direction-buttons > span { flex: 0 0 81px; color: #959595; font-size: 11px; }
@@ -432,7 +434,6 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
   .zoom-trigger { min-width: 56px; padding-right: 4px; padding-left: 4px; font-size: 11px; }
   .inspector-tabs { padding-left: 4px; flex: 0 0 30px; height: 30px; padding: 0 4px; }
   .inspector-tabs > button:not(.close-inspector) { padding-right: 3px; padding-left: 3px; font-size: 11px; flex: 0 0 auto; padding: 0 8px; }
-  .property-field > span, .select-field > span { flex-basis: 65px; }
   .direction-buttons > span { flex-basis: 70px; }
   .layer-tree { max-height: 176px; min-height: 44px; padding: 2px 0; }
 }
@@ -492,7 +493,7 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 .inspector-disclosure > summary:focus-visible { outline: 1px solid #7db8ff; outline-offset: 1px; border-radius: 5px; }
 .select-field > .rounded-select { flex: 1; width: auto; }
 .advanced-settings .property-field > span, .advanced-settings .select-field > span { flex-basis: 100px; font-size: 11px; }
-.advanced-settings .color-field { grid-template-columns: 100px 22px minmax(0, 1fr); }
+.advanced-settings .color-field { grid-template-columns: 100px minmax(0, 1fr); }
 .inspector .field-input, .inspector .color-swatch, .project-library-panel input, .project-library-panel select, .project-library-panel textarea { border-radius: 6px; }
 
 .snap-guides { position: absolute; inset: 0; z-index: 11; width: 100%; height: 100%; overflow: hidden; pointer-events: none; }

@@ -80,8 +80,8 @@
 .appearance-controls .appearance-gradient-values .appearance-field { gap: 6px; }
 .appearance-controls .appearance-gradient-values .appearance-field > span { flex-basis: 42px; font-size: 10px; }
 .appearance-controls .appearance-outline-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 8px; }
-.appearance-controls .appearance-outline-values .appearance-field { gap: 5px; }
-.appearance-controls .appearance-outline-values .appearance-field > span { flex-basis: auto; font-size: 10px; }
+.appearance-controls .appearance-outline-values .appearance-field { gap: 8px; }
+.appearance-controls .appearance-outline-values .appearance-field > span { flex-basis: 52px; }
 .appearance-controls .appearance-no-fill { margin: 0; padding: 5px 0; color: #a7a7a7; font-size: 11px; }
 .appearance-controls .appearance-save-status { padding: 5px 8px; color: #b8b8b8; font-size: 10px; line-height: 16px; border-bottom: 1px solid #353535; }
 .appearance-controls .appearance-error { margin: 0; padding: 7px 8px; color: #e9b8b1; font-size: 11px; line-height: 1.45; border-bottom: 1px solid #353535; }

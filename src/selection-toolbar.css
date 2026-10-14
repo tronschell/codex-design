@@ -32,6 +32,8 @@
 .quick-fields .two-fields { gap: 5px; }
 .quick-fields .two-fields .property-field > span { flex: 0 0 12px; }
 .quick-fields .color-field > .property-field > span { display: none; }
+.quick-fields .color-field { grid-template-columns: minmax(0, 1fr); }
+.quick-fields .color-field .color-swatch, .quick-fields .color-field .field-input { grid-column: 1; }
 .quick-fields .secondary-button { align-self: flex-end; }
 .quick-link-label { display: flex; flex-direction: column; gap: 4px; color: #aaaaaa; font-size: 11px; }
 .quick-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }

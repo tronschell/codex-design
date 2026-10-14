@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { colorParts, withOpacity } from './color-picker';
 
 export function Field({ label, value, onChange, type = 'text', suffix, min, max, readOnly = false, disabled = false, step = 'any', title }: { label: string; value: string | number; onChange: (value: string) => void; type?: string; suffix?: string; min?: number; max?: number; readOnly?: boolean; disabled?: boolean; step?: string | number; title?: string }) {
   const [draft, setDraft] = useState(String(value));
@@ -8,5 +9,6 @@ export function Field({ label, value, onChange, type = 'text', suffix, min, max,
 }
 
 export function ColorField({ label, value, onChange, title, disabled = false }: { label: string; value: string; onChange: (color: string) => void; title?: string; disabled?: boolean }) {
-  return <div className="color-field"><label className="color-swatch" title={title ?? `${label} color`} style={{ background: value }}><input aria-label={`${label} picker`} type="color" disabled={disabled} value={/^#[a-f0-9]{6}$/i.test(value) ? value : '#171717'} onChange={e => onChange(e.target.value)} /></label><Field label={label} value={value} onChange={onChange} title={title} disabled={disabled} /></div>;
+  const color = colorParts(value);
+  return <div className="color-field"><label className="color-swatch" title={title ?? `${label} color`} style={{ background: value }}><input aria-label={`${label} picker`} type="color" disabled={disabled} value={color.hex} onChange={e => onChange(withOpacity(e.target.value, color.opacity > 0 ? color.opacity : 1))} /></label><Field label={label} value={value} onChange={onChange} title={title} disabled={disabled} /></div>;
 }

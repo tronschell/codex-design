@@ -18,7 +18,10 @@
 .effect-popover-header h4 { margin: 0; color: #dddddd; font-size: 12px; font-weight: 550; }
 .effect-popover-fields { padding: 4px 8px 6px; }
 .effect-popover .two-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.effect-popover .two-fields > .property-field { gap: 6px; }
 .effect-popover .two-fields > .property-field > span { flex: 0 0 42px; font-size: 11px; }
+.effect-popover .property-field > span { flex-basis: 42px; font-size: 11px; }
+.effect-popover .color-field { grid-template-columns: 42px minmax(0, 1fr); }
 .effect-popover .field-input > span { color: #aaaaaa; }
 .effect-popover .property-field > span { color: #aaaaaa; }
 .effect-popover .color-swatch:focus-within { outline: 2px solid #7db8ff; outline-offset: 2px; }
