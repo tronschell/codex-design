@@ -471,3 +471,16 @@ Measured artifact comparison, not a runtime speed/memory claim. Method: Python P
 | MCP runtime | 1,030,019 B | 1,030,361 B | +342 B | +0.03% |
 
 User effect: the mark remains crisp at sidebar/icon sizes and has explicit light/dark contrast. The MCP server reads the two small packaged SVGs and exposes inline icons in initialization and canvas-resource metadata; branding no longer depends solely on manifest PNG paths. The widget is unchanged. No startup/decoding time, requests/bytes transferred, CPU, RAM, FPS or sidebar rendering improvement was measured. The SVG previews and real MCP metadata were inspected; actual host sidebar caching/rendering still needs confirmation after reload. Existing design data is separate from these artifact counts. No tests were added or run.
+
+## Shift-click selection footprint — October 14, 2026
+
+This is a usability feature, not a measured runtime optimization. Comparable artifact method: Python Path.stat().st_size over the installed `f745ad6` production files and the final production build, on the same machine using `npm run build`; workload is the self-contained editor widget and MCP entry, excluding user designs/media.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Canvas widget | 693,740 B | 699,489 B | +5,749 B | +0.83% |
+| MCP runtime | 1,030,361 B | 1,030,383 B | +22 B | +0.0021% |
+
+User effect: Shift-click accumulates or removes objects, and group moves/nudges/duplication/deletion save as one undoable change. Selection export and agent context include all selected IDs. Group snapping excludes the moving subtrees, and inverse parent transforms preserve world-space offsets. Group resizing applies only to untransformed free-positioned roots and retains descendant content sizes. No interaction-time, throughput, load-time, CPU, heap/RSS, GPU, browser-memory or FPS measurements were collected; no speed or memory improvement is claimed.
+
+Verification uses production build/package, strict unused-symbol compilation and bounded direct source review. The review corrected fractional-zoom resize edge drift and retained focus before disabling group action buttons. Connected MCP Apps automation does not support modified clicks/native gestures, so live Shift-click, dragging/resizing, keyboard actions and installed-host focus remain unexercised. Existing user designs were not mutated to verify the feature; the GaugeReel JSON retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.

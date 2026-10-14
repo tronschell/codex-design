@@ -96,7 +96,7 @@ const TreeNode = memo(function NodeLayer({ node, childrenByParent, ancestors, on
     data-node-type={node.type}
     style={style}
     onPointerDown={canEdit && onSelect ? event => { event.stopPropagation(); if (!editing) onSelect(node.id, event); } : undefined}
-    onDoubleClick={canEdit && onTextEdit && node.type === 'text' ? event => { event.stopPropagation(); setEditing(true); } : undefined}
+    onDoubleClick={canEdit && onTextEdit && node.type === 'text' ? event => { event.stopPropagation(); if (!event.shiftKey) setEditing(true); } : undefined}
     contentEditable={node.type === 'text' && editing}
     suppressContentEditableWarning
     onBlur={editing ? finishEditing : undefined}

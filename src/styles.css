@@ -203,6 +203,9 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 .frame-play svg { width: 8px; height: 8px; }
 .frame-play:hover { color: #ececec; background: #333333; }
 .selection-overlay { position: absolute; z-index: 10; border: 1px solid #4497ff; pointer-events: none; }
+.selection-member { border-color: #4497ff99; }
+.selection-group { border-style: dashed; }
+.multi-selection-toolbar > span { padding: 0 3px; color: #c8c8c8; font-size: 11px; white-space: nowrap; }
 .resize-handle { position: absolute; z-index: 1; width: 7px; height: 7px; padding: 0; background: #ffffff; border: 1px solid #4497ff; border-radius: 0; pointer-events: auto; }
 .resize-handle.nw { top: -4px; left: -4px; cursor: nwse-resize; }
 .resize-handle.ne { top: -4px; right: -4px; cursor: nesw-resize; }

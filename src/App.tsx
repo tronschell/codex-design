@@ -11,7 +11,7 @@ import ExportPanel from './ExportPanel';
 import ProjectLibrary from './ProjectLibrary';
 import { resolveProjectTokens } from '../shared/design-system';
 import { hasTransformedAncestor, parentLocalDelta, parentLocalPoint, visualBounds } from '../shared/effects';
-import { createSnapScene, snapBox, type SnapScene, type SnapGuide } from '../shared/snapping';
+import { createSnapScene, snapBox, type SnapBox, type SnapScene, type SnapGuide } from '../shared/snapping';
 import { importProjectFile } from './export-utils';
 import InsertMenu from './InsertMenu';
 import { mediaAccept, mediaDimensions, mediaFile } from './media-import';
@@ -19,13 +19,13 @@ import CommentPopover, { CommentList, type CommentTarget } from './Comments';
 import { commentPrompt } from '../shared/comments';
 import { client, configureToken } from './client';
 import { embedded, fullscreen, sendFollowUp, updateModelContext } from './bridge';
-import { clampZoom, duplicateNodes, fitViewport, insertionBounds, layoutFrameLabels, newNode, uid } from './editor-utils';
+import { clampZoom, duplicateNodes, fitViewport, insertionBounds, layoutFrameLabels, newNode, selectionBounds, selectionRoots, uid } from './editor-utils';
 import { useProject } from './useProject';
 import { recordCanvasReady, recordCanvasView } from './canvas-profile';
 
 type Tool = 'select' | 'hand' | 'text' | 'frame' | 'note' | 'pen' | 'rectangle' | 'ellipse' | 'line' | 'arrow' | 'code' | 'comment';
 type Menu = 'project' | 'page' | 'shapes' | 'zoom' | 'frames' | 'insert' | 'comments' | null;
-type ObjectGesture = { kind: 'drag' | 'resize'; node: DesignNode; nodes: DesignNode[]; scene: SnapScene | null; corner?: string; startX: number; startY: number; moved: boolean; pointer: { clientX: number; clientY: number } };
+type ObjectGesture = { kind: 'drag' | 'resize'; targets: DesignNode[]; selectionKey: string; box: SnapBox; nodes: DesignNode[]; scene: SnapScene | null; corner?: string; startX: number; startY: number; moved: boolean; pointer: { clientX: number; clientY: number } };
 type Gesture = { kind: 'pan'; startX: number; startY: number; view: Viewport } | ObjectGesture | { kind: 'draw'; tool: Tool; startX: number; startY: number; x: number; y: number; parentId: string | null; points: { x: number; y: number }[] };
 type HistoryEntry = { projectId: string; pageId: string; before: DesignPage; after: DesignPage; beforeThreads: CommentThread[]; afterThreads: CommentThread[] };
 type ChangeBox = { id: string; x: number; y: number; width: number; height: number; removed?: boolean };
@@ -93,7 +93,10 @@ export default function App() {
   const historyReturn = useRef<{ boardId: string; pageId: string; view: Viewport; inspector: boolean } | null>(null);
   const project = historyOpen && historyPreview?.id === liveProject?.id ? historyPreview : liveProject;
   const [boardId, setBoardId] = useState(initialBoardId);
-  const [pageId, setPageId] = useState(() => embedded ? '' : new URLSearchParams(location.search).get('page') || ''), [selection, setSelection] = useState<string | null>(null);
+  const [pageId, setPageId] = useState(() => embedded ? '' : new URLSearchParams(location.search).get('page') || '');
+  const [selectionIds, setSelectionIds] = useState<string[]>([]);
+  const selection = selectionIds.at(-1) ?? null, selectionKey = JSON.stringify(selectionIds), multiple = selectionIds.length > 1;
+  const setSelection = useCallback((id: string | null) => setSelectionIds(id ? [id] : []), []);
   const [tool, setTool] = useState<Tool>('select'), [menu, setMenu] = useState<Menu>(null), [inspector, setInspector] = useState(false);
   const [view, commitView] = useState<Viewport>({ x: 90, y: 130, zoom: .31 });
   const viewRef = useRef(view), cameraFrame = useRef(0);
@@ -116,8 +119,12 @@ export default function App() {
   }, []);
   useEffect(() => () => { if (cameraFrame.current) cancelAnimationFrame(cameraFrame.current); }, []);
   recordCanvasView(view);
-  const [previewPatch, setPreviewPatch] = useState<Partial<DesignNode> | null>(null), [drawing, setDrawing] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [previewPatch, setPreviewPatch] = useState<Record<string, Partial<DesignNode>> | null>(null), [drawing, setDrawing] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null), [showComments, setShowComments] = useState(true);
+  const selectLayer = useCallback((id: string, additive = false) => {
+    setSelectionIds(previous => additive ? previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id] : [id]);
+    setCommentTarget(null);
+  }, []);
   const [commentNavigation, setCommentNavigation] = useState<{ projectId: string; pageId: string; threadId: string } | null>(null);
   const commentMore = useRef<HTMLButtonElement>(null);
   const [toast, setToast] = useState(''), [modal, setModal] = useState<'export' | 'help' | 'auth' | null>(null), [previewId, setPreviewId] = useState<string | null>(null);
@@ -127,6 +134,7 @@ export default function App() {
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   useEffect(() => { try { localStorage.setItem('codex-design:snapping', String(snapping)); } catch { /* Optional local preference. */ } }, [snapping]);
   const [, setHistoryVersion] = useState(0), [hovered, setHovered] = useState<string | null>(null);
+  const multiToolbar = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null), importRef = useRef<HTMLInputElement>(null), mediaRef = useRef<HTMLInputElement>(null), gesture = useRef<Gesture | null>(null), space = useRef(false);
   const [mediaProgress, setMediaProgress] = useState(''), [dropActive, setDropActive] = useState(false);
   const mediaController = useRef<AbortController | null>(null);
@@ -156,19 +164,22 @@ export default function App() {
   const renderProject = useMemo(() => project ? resolveProjectTokens(project) : null, [project]);
   const renderPage = renderProject?.pages.find(item => item.id === page?.id);
   const baseNodes = useMemo(() => resolvedNodes(renderPage?.nodes || []), [renderPage?.nodes]);
-  const nodes = useMemo(() => previewPatch && selection ? resolvedNodes((renderPage?.nodes || []).map(node => node.id === selection ? { ...node, ...previewPatch } : node)) : baseNodes, [baseNodes, renderPage?.nodes, selection, previewPatch]);
+  const nodes = useMemo(() => previewPatch ? resolvedNodes((renderPage?.nodes || []).map(node => previewPatch[node.id] ? { ...node, ...previewPatch[node.id] } : node)) : baseNodes, [baseNodes, renderPage?.nodes, previewPatch]);
   const nodeById = useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes]);
   const selected = selection ? nodeById.get(selection) : undefined;
   const storedSelected = useMemo(() => page?.nodes.find(node => node.id === selection), [page?.nodes, selection]);
-  const selectedHidden = useMemo(() => {
-    let current = selected; const seen = new Set<string>();
-    while (current) { if (current.hidden || seen.has(current.id)) return true; seen.add(current.id); current = current.parentId ? nodeById.get(current.parentId) : undefined; }
-    return false;
-  }, [selected, nodeById]);
+  const selectedNodes = useMemo(() => selectionIds.flatMap(id => nodeById.get(id) ?? []), [selectionIds, nodeById]);
+  const selectedRoots = useMemo(() => selectionRoots(selectionIds, baseNodes), [selectionIds, baseNodes]);
+  const visibleSelection = useMemo(() => selectedNodes.filter(node => {
+    let current: DesignNode | undefined = node; const seen = new Set<string>();
+    while (current) { if (current.hidden || seen.has(current.id)) return false; seen.add(current.id); current = current.parentId ? nodeById.get(current.parentId) : undefined; }
+    return true;
+  }), [selectedNodes, nodeById]);
+  const movableSelection = selectedRoots.length > 0 && selectedRoots.every(node => objectEditable(node,nodeById) && !['vertical','horizontal'].includes(nodeById.get(node.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(node,baseNodes,{x:0,y:0}) !== null);
   const roots = useMemo(() => nodes.filter(node => !node.parentId), [nodes]);
   const cancelGesture = useCallback(() => { gesture.current = null; setPreviewPatch(null); setDrawing(null); setSnapGuides([]); }, []);
   useLayoutEffect(() => { cancelGesture(); }, [project?.id, project?.revision, page?.id, loading, historyOpen, library, tool, modal, previewId, cancelGesture]);
-  useLayoutEffect(() => { const g=gesture.current; if(g&&(g.kind==='drag'||g.kind==='resize')&&selection!==g.node.id)cancelGesture(); }, [selection,cancelGesture]);
+  useLayoutEffect(() => { const g=gesture.current; if(g&&(g.kind==='drag'||g.kind==='resize')&&selectionKey!==g.selectionKey)cancelGesture(); }, [selectionKey,cancelGesture]);
   useEffect(() => {
     const releaseSpace = () => { space.current = false; if (stageRef.current) stageRef.current.style.cursor = ''; };
     const reset = () => { releaseSpace(); flushView(); cancelGesture(); };
@@ -276,11 +287,12 @@ export default function App() {
     undoStack.current = []; redoStack.current = []; setHistoryVersion(n => n + 1);
   }, [project?.id, page?.id]);
   useEffect(() => { if (project && page && !historyOpen) viewCache.current.set(`${project.id}/${page.id}`, view); }, [view, project?.id, page?.id, historyOpen]);
-  useEffect(() => { if (selection && !page?.nodes.some(n => n.id === selection)) setSelection(null); }, [page?.nodes, selection]);
+  useEffect(() => { const ids = new Set(page?.nodes.map(node => node.id)); setSelectionIds(previous => { const next = previous.filter(id => ids.has(id)); return next.length === previous.length ? previous : next; }); }, [page?.nodes]);
   useEffect(() => {
     if (!hydrated || loading || historyOpen || !liveProject || !board || !page || paneSelection?.projectId !== liveProject.id) return;
-    updateModelContext({ projectId: liveProject.id, projectName: liveProject.name, boardId: board.id, boardName: board.name, revision: liveProject.revision, pageId: page.id, libraryMode: library, selectedNode: selected ? { id: selected.id, name: selected.name, type: selected.type } : null, openThreadId: commentTarget?.threadId || null });
-  }, [hydrated, loading, liveProject?.id, liveProject?.revision, historyOpen, paneSelection?.projectId, board?.id, board?.name, page?.id, selection, commentTarget?.threadId, library]);
+    const selectedContext = selectedNodes.map(node => ({ id: node.id, name: node.name, type: node.type }));
+    updateModelContext({ projectId: liveProject.id, projectName: liveProject.name, boardId: board.id, boardName: board.name, revision: liveProject.revision, pageId: page.id, libraryMode: library, selectedNode: selectedContext.length === 1 ? selectedContext[0] : null, selectedNodes: selectedContext, openThreadId: commentTarget?.threadId || null });
+  }, [hydrated, loading, liveProject?.id, liveProject?.revision, historyOpen, paneSelection?.projectId, board?.id, board?.name, page?.id, selectionKey, commentTarget?.threadId, library]);
   useEffect(() => {
     if (!changeFlash || changeFlash.pageId !== page?.id) return;
     const box = stageRef.current;
@@ -330,12 +342,35 @@ export default function App() {
     for (const thread of threads) if (!projectRef.current.threads.some(t => t.id === thread.id)) operations.push({ type: 'create_thread', thread });
     if (await commit(operations)) { from.pop(); to.push(entry); setHistoryVersion(v => v + 1); }
   }, [commit, page?.id, saving, historyOpen, notify]);
-  const remove = useCallback(() => { if (selected && page && !selected.locked) { void change([{ type: 'delete_node', pageId: page.id, nodeId: selected.id }]); setSelection(null); } }, [selected, page, change]);
-  const duplicate = useCallback(() => { if (!selected || !page) return; const copies = duplicateNodes(selected.id, page.nodes); void change(copies.map(node => ({ type: 'create_node', pageId: page.id, node }))).then(next => { if (next) setSelection(copies[0].id); }); }, [selected, page, change]);
+  const remove = useCallback(() => {
+    if (!selectedRoots.length || !page || saving || loading) return;
+    const locked = selectedRoots.some(node => {
+      let current: DesignNode | undefined = node; const seen = new Set<string>();
+      while (current && !seen.has(current.id)) { if (current.locked) return true; seen.add(current.id); current = current.parentId ? nodeById.get(current.parentId) : undefined; }
+      return false;
+    });
+    if (locked) { notify('Unlock the selected layers and their parents before deleting.'); return; }
+    const isCurrent = captureNavigation();
+    void change(selectedRoots.map(node => ({ type: 'delete_node', pageId: page.id, nodeId: node.id }))).then(next => {
+      if (next && isCurrent()) setSelectionIds(current => current === selectionIds ? [] : current);
+    });
+  }, [selectedRoots, page, saving, loading, nodeById, notify, captureNavigation, change, selectionIds]);
+  const duplicate = useCallback(() => {
+    if (!selectedRoots.length || !page || saving || loading) return;
+    const copies = duplicateNodes(selectionIds, page.nodes), copyIds = new Set<string>(copies.map(node => node.id)), isCurrent = captureNavigation();
+    void change(copies.map(node => ({ type: 'create_node', pageId: page.id, node }))).then(next => {
+      if (next && isCurrent()) setSelectionIds(current => current === selectionIds ? copies.filter(node => !copyIds.has(node.parentId ?? '')).map(node => node.id) : current);
+    });
+  }, [selectedRoots, page, saving, loading, selectionIds, captureNavigation, change]);
   const zoomTo = (zoom: number) => { const width = stageRef.current?.clientWidth || 1000, height = stageRef.current?.clientHeight || 800; setView(old => { const z = clampZoom(zoom); return { zoom: z, x: width / 2 - (width / 2 - old.x) * z / old.zoom, y: height / 2 - (height / 2 - old.y) * z / old.zoom }; }); };
   const fit = () => { if (page && stageRef.current) setView(fitViewport({...page,nodes}, stageRef.current.clientWidth, stageRef.current.clientHeight)); setMenu(null); };
   const focus = useCallback((id: string) => { const n = nodeById.get(id); if (!n || !stageRef.current) return; const box = visualBounds(n,nodes), width = stageRef.current.clientWidth, height = stageRef.current.clientHeight, zoom = clampZoom(Math.min((width - 180) / Math.max(1,box.width), (height - 180) / Math.max(1,box.height), 1.5)); setView({ zoom, x: (width - box.width * zoom) / 2 - box.x * zoom, y: (height - box.height * zoom) / 2 - box.y * zoom + 20 }); setSelection(id); }, [nodeById, nodes, setView]);
-  const selectLayer = useCallback((id: string) => { setSelection(id); setCommentTarget(null); }, []);
+  const fitSelection = () => {
+    const box = selectionBounds(visibleSelection,nodes), stage = stageRef.current;
+    if (!box || !stage) return;
+    const zoom = clampZoom(Math.min((stage.clientWidth-180)/Math.max(1,box.width),(stage.clientHeight-180)/Math.max(1,box.height),1.5));
+    setView({zoom,x:(stage.clientWidth-box.width*zoom)/2-box.x*zoom,y:(stage.clientHeight-box.height*zoom)/2-box.y*zoom+20});
+  };
   const changeLayer = useCallback((operations: Operation[]) => change(operations), [change]);
   const changeLibrary = useCallback((operations: Operation[]) => change(operations, false), [change]);
   const closeInspector = useCallback(() => setInspector(false), []);
@@ -432,7 +467,7 @@ export default function App() {
     if (historyOpen) return;
     if (tool === 'comment') { const pos = point(e); setCommentTarget({ nodeId: null, ...pos }); return; }
     if (tool !== 'select') { beginDraw(e); return; }
-    setSelection(null); setCommentTarget(null);
+    if (!e.shiftKey) setSelection(null); setCommentTarget(null);
   };
   const nodeDown = (id: string, e: ReactPointerEvent) => {
     flushView();
@@ -444,9 +479,11 @@ export default function App() {
     if (!node) return;
     if (tool === 'comment') { const pos = point(e); setSelection(id); setCommentTarget({ nodeId: id, ...pos }); return; }
     if (tool !== 'select') { let frame = node; while (frame.parentId) frame = nodes.find(n => n.id === frame.parentId)!; beginDraw(e, frame.type === 'frame' ? frame.id : null); return; }
-    setSelection(id); setCommentTarget(null);
-    const parent = baseNodes.find(item => item.id === node.parentId);
-    if (objectEditable(node,nodeById) && !['vertical','horizontal'].includes(parent?.styles.layout ?? '')) gesture.current = { kind: 'drag', node, nodes: baseNodes, scene: createSnapScene(baseNodes,node), startX: e.clientX, startY: e.clientY, moved: false, pointer: {clientX:e.clientX,clientY:e.clientY} };
+    if (e.shiftKey) { cancelGesture(); selectLayer(id,true); e.preventDefault(); return; }
+    const ids = selectionIds.includes(id) ? selectionIds : [id], targets = selectionRoots(ids,baseNodes), box = selectionBounds(targets,baseNodes);
+    if (!selectionIds.includes(id)) setSelection(id);
+    setCommentTarget(null);
+    if (!saving && !loading && box && targets.every(target => objectEditable(target,nodeById) && !['vertical','horizontal'].includes(nodeById.get(target.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(target,baseNodes,{x:0,y:0}) !== null)) gesture.current = { kind: 'drag', targets, selectionKey:JSON.stringify(ids), box, nodes: baseNodes, scene: createSnapScene(baseNodes,targets[0],targets), startX: e.clientX, startY: e.clientY, moved: false, pointer: {clientX:e.clientX,clientY:e.clientY} };
   };
   const nodeDownRef = useRef(nodeDown);
   useLayoutEffect(() => { nodeDownRef.current = nodeDown; });
@@ -455,39 +492,37 @@ export default function App() {
     const zoom = viewRef.current.zoom, dx = (pointer.clientX-g.startX)/zoom, dy = (pointer.clientY-g.startY)/zoom;
     if (!g.moved && Math.hypot(pointer.clientX-g.startX,pointer.clientY-g.startY)<4) return null;
     g.moved = true; g.pointer = pointer;
-    let patch: Partial<DesignNode>;
     const west = g.corner?.includes('w'), north = g.corner?.includes('n');
-    if (g.kind === 'drag') {
-      const delta = parentLocalDelta(g.node,g.nodes,{x:dx,y:dy});
-      if (!delta) return null;
-      patch = {x:Math.round(g.node.x+delta.x),y:Math.round(g.node.y+delta.y)};
-    } else {
-      const width = Math.max(8,Math.round(g.node.width+(west?-dx:dx))), height = Math.max(8,Math.round(g.node.height+(north?-dy:dy)));
-      patch = {width,height,x:g.node.x+(west?g.node.width-width:0),y:g.node.y+(north?g.node.height-height:0)};
-    }
+    const boxes = g.targets.map(node => visualBounds(node,g.nodes));
+    const minimumWidth = g.box.width * Math.max(...g.targets.map((node,index) => (boxes[index].width-node.width+8)/Math.max(1,boxes[index].width)));
+    const minimumHeight = g.box.height * Math.max(...g.targets.map((node,index) => (boxes[index].height-node.height+8)/Math.max(1,boxes[index].height)));
+    const resize = (box: SnapBox) => {
+      const width = Math.max(minimumWidth,box.width), height = Math.max(minimumHeight,box.height);
+      return {width,height,x:g.box.x+(west?g.box.width-width:0),y:g.box.y+(north?g.box.height-height:0)};
+    };
+    let box = g.kind === 'drag' ? {...g.box,x:g.box.x+dx,y:g.box.y+dy} : resize({...g.box,width:g.box.width+(west?-dx:dx),height:g.box.height+(north?-dy:dy)});
     let guides: SnapGuide[] = [];
     if (snapping && !bypass && g.scene) {
-      const box = visualBounds({...g.node,...patch},g.nodes);
       const result = snapBox(g.scene,box,6/zoom,g.kind==='resize'?{x:west?'start':'end',y:north?'start':'end'}:undefined);
-      if (g.kind==='drag') {
-        const delta = parentLocalDelta(g.node,g.nodes,{x:result.box.x-box.x,y:result.box.y-box.y});
-        if (!delta) return null;
-        patch.x!+=delta.x; patch.y!+=delta.y;
-      } else {
-        patch.x!+=result.box.x-box.x; patch.y!+=result.box.y-box.y;
-        patch.width=Math.max(8,patch.width!+result.box.width-box.width); patch.height=Math.max(8,patch.height!+result.box.height-box.height);
-      }
+      box = g.kind === 'resize' ? resize(result.box) : result.box;
       guides = result.guides;
-      if (g.kind==='resize') {
-        const actual = visualBounds({...g.node,...patch},g.nodes);
-        guides = guides.filter(guide=>Math.abs((guide.axis==='x'?(west?actual.x:actual.x+actual.width):(north?actual.y:actual.y+actual.height))-guide.position)<1e-6);
-      }
     }
-    return {patch,guides};
+    const patches: Record<string,Partial<DesignNode>> = {};
+    for (const [index,node] of g.targets.entries()) {
+      const original = boxes[index], sx = box.width/Math.max(1,g.box.width), sy = box.height/Math.max(1,g.box.height);
+      const delta = parentLocalDelta(node,g.nodes,g.kind === 'drag' ? {x:box.x-g.box.x,y:box.y-g.box.y} : {x:box.x+(original.x-g.box.x)*sx-original.x,y:box.y+(original.y-g.box.y)*sy-original.y});
+      if (!delta) return null;
+      patches[node.id] = {x:node.x+delta.x,y:node.y+delta.y,...(g.kind==='resize'?{width:Math.max(8,node.width+original.width*(sx-1)),height:Math.max(8,node.height+original.height*(sy-1))}:{})};
+    }
+    if (g.kind==='resize') {
+      const actual = selectionBounds(g.targets.map(node=>({...node,...patches[node.id]})),g.nodes)!;
+      guides = guides.filter(guide=>Math.abs((guide.axis==='x'?(west?actual.x:actual.x+actual.width):(north?actual.y:actual.y+actual.height))-guide.position)<1e-6);
+    }
+    return {patches,guides};
   };
   const showObjectPreview = (g: ObjectGesture, pointer: {clientX:number;clientY:number}, bypass: boolean) => {
     const result = objectPreview(g,pointer,bypass);
-    if (result) { setPreviewPatch(result.patch); setSnapGuides(result.guides); }
+    if (result) { setPreviewPatch(result.patches); setSnapGuides(result.guides); }
     return result;
   };
   const canvasMove = (e: ReactPointerEvent) => {
@@ -509,7 +544,8 @@ export default function App() {
     if (stageRef.current?.hasPointerCapture(e.pointerId)) stageRef.current.releasePointerCapture(e.pointerId);
     if (g.kind === 'drag' || g.kind === 'resize') {
       const result = objectPreview(g,{clientX:e.clientX,clientY:e.clientY},e.altKey);
-      if (result && Object.entries(result.patch).some(([key,value])=>g.node[key as keyof DesignNode]!==value)) await change([{type:'update_node',pageId:page.id,nodeId:g.node.id,patch:result.patch}]);
+      const operations: Operation[] = result ? g.targets.flatMap(node => { const patch = result.patches[node.id]; return Object.entries(patch).some(([key,value])=>node[key as keyof DesignNode]!==value) ? [{type:'update_node' as const,pageId:page.id,nodeId:node.id,patch}] : []; }) : [];
+      if (operations.length) await change(operations);
       setPreviewPatch(null); return;
     }
     if (g.kind !== 'draw') return;
@@ -543,7 +579,7 @@ export default function App() {
       if ((e.target as HTMLElement).closest('input,textarea,select,[contenteditable="true"]')) return;
       const command = e.metaKey || e.ctrlKey;
       if (e.key==='Alt') { const g=gesture.current; if(g&&(g.kind==='drag'||g.kind==='resize'))showObjectPreview(g,g.pointer,true); return; }
-      if (e.key === 'Escape') { flushView(); setSnapGuides([]); gesture.current = null; setDrawing(null); setPreviewPatch(null); setMenu(null); setCommentTarget(null); setPreviewId(null); setModal(null); setTool('select'); setLibrary(null); if (historyOpen && !saving) closeHistory(); return; }
+      if (e.key === 'Escape') { if (!gesture.current&&!menu&&!commentTarget&&!previewId&&!modal&&!library&&!historyOpen) setSelection(null); flushView(); setSnapGuides([]); gesture.current = null; setDrawing(null); setPreviewPatch(null); setMenu(null); setCommentTarget(null); setPreviewId(null); setModal(null); setTool('select'); setLibrary(null); if (historyOpen && !saving) closeHistory(); return; }
       if (modal || previewId) return;
       if (library) return;
       if (e.code === 'Space') { if ((e.target as HTMLElement).closest('button')) return; e.preventDefault(); space.current = true; if (stageRef.current) stageRef.current.style.cursor = 'grab'; return; }
@@ -561,7 +597,12 @@ export default function App() {
       if (command && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicate(); return; }
       if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); remove(); return; }
       if (command && ['+','=','-'].includes(e.key)) { e.preventDefault(); zoomTo(view.zoom*(e.key==='-'?.8:1.25)); return; }
-      if (selected && objectEditable(selected,nodeById) && page && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) { e.preventDefault(); const amount=e.shiftKey?10:1, delta=parentLocalDelta(selected,nodes,{x:e.key==='ArrowLeft'?-amount:e.key==='ArrowRight'?amount:0,y:e.key==='ArrowUp'?-amount:e.key==='ArrowDown'?amount:0}); if(delta) void change([{type:'update_node',pageId:page.id,nodeId:selected.id,patch:{x:selected.x+delta.x,y:selected.y+delta.y}}]); return; }
+      if (selectedRoots.length && page && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) {
+        e.preventDefault(); cancelGesture();
+        if (saving || loading || !movableSelection) return;
+        const amount=e.shiftKey?10:1, movement={x:e.key==='ArrowLeft'?-amount:e.key==='ArrowRight'?amount:0,y:e.key==='ArrowUp'?-amount:e.key==='ArrowDown'?amount:0};
+        void change(selectedRoots.map(node => { const delta=parentLocalDelta(node,baseNodes,movement)!; return {type:'update_node',pageId:page.id,nodeId:node.id,patch:{x:node.x+delta.x,y:node.y+delta.y}}; })); return;
+      }
       if (command) return;
       const shortcuts:Record<string,Tool> = {v:'select',h:'hand',t:'text',f:'frame',r:'rectangle',o:'ellipse',l:e.shiftKey?'arrow':'line',p:'pen',c:'comment',n:'note'};
       const next = shortcuts[e.key.toLowerCase()]; if (next) { setTool(next); setMenu(null); }
@@ -569,7 +610,7 @@ export default function App() {
     };
     const keyUp = (e:KeyboardEvent)=>{if(e.key==='Alt'){const g=gesture.current;if(g&&(g.kind==='drag'||g.kind==='resize'))showObjectPreview(g,g.pointer,false);}};
     window.addEventListener('keydown',keyDown);window.addEventListener('keyup',keyUp);return()=>{window.removeEventListener('keydown',keyDown);window.removeEventListener('keyup',keyUp);};
-  }, [selected,nodes,page,view,undo,duplicate,remove,change,modal,previewId,historyOpen,saving,library,snapping]);
+  }, [selectedRoots,movableSelection,baseNodes,page,view,undo,duplicate,remove,change,modal,previewId,historyOpen,saving,loading,library,snapping,menu,commentTarget]);
 
   const openComment = (thread: CommentThread) => {
     if (!project || loading || historyOpen || library) return;
@@ -607,8 +648,8 @@ export default function App() {
     else notify('Comment saved.');
     return true;
   };
-  const selectedBox = selected && !selectedHidden ? visualBounds(selected,nodes) : null;
-  const transformedSelection = !!selected && hasTransformedAncestor(selected,nodes);
+  const selectedBox = selectionBounds(selectionRoots(visibleSelection.map(node=>node.id),nodes),nodes);
+  const resizableSelection = selectedRoots.length > 0 && selectedRoots.every(node=>objectEditable(node,nodeById)&&!hasTransformedAncestor(node,baseNodes)) && (!multiple || movableSelection);
   const hoveredNode = tool==='comment' && !commentTarget && hovered ? nodeById.get(hovered) : null;
   const hoveredBox = hoveredNode ? visualBounds(hoveredNode,nodes) : null;
   const commentPosition = commentTarget && stageRef.current ? {left:Math.max(16,Math.min(stageRef.current.clientWidth-400,view.x+commentTarget.x*view.zoom+22)),top:Math.max(90,Math.min(stageRef.current.clientHeight-330,view.y+commentTarget.y*view.zoom+12))} : {left:20,top:100};
@@ -620,9 +661,20 @@ export default function App() {
     <div className="workspace">
       <main ref={stageRef} className={`canvas-stage tool-${tool} ${grid?'show-grid':''} ${dropActive?'is-file-drop':''}`} aria-label="Infinite design canvas" aria-hidden={!!library} onPointerDown={canvasDown} onPointerMove={canvasMove} onPointerLeave={()=>setHovered(null)} onPointerUp={e=>{void canvasUp(e);}} onPointerCancel={()=>{flushView();cancelGesture();}} onLostPointerCapture={()=>{if(gesture.current)cancelGesture();}} onContextMenu={e=>e.preventDefault()} onDragOver={e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();e.dataTransfer.dropEffect=historyOpen?'none':'copy';if(!historyOpen&&!importingMedia.current)setDropActive(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDropActive(false);}} onDrop={e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();setDropActive(false);if(historyOpen){notify('Close History to add media.');return;}const target=(e.target as Element).closest('[data-node-id]')?.getAttribute('data-node-id')||null;void importMedia(Array.from(e.dataTransfer.files),point(e),nearestFrame(target));}} style={{...(grid?{backgroundPosition:`${view.x}px ${view.y}px`,backgroundSize:`${Math.max(8,40*view.zoom)}px ${Math.max(8,40*view.zoom)}px`}:{}),...(library?{display:'none'}:{})}}>
         <div className="canvas-world" style={{transform:`translate(${view.x}px,${view.y}px) scale(${view.zoom})`}}><CanvasNodes nodes={nodes} designSystem={project?.designSystem} visibleRootIds={visibleRootIds} interactive={!historyOpen&&!library} onSelect={selectNode} onTextEdit={historyOpen||library||tool==='comment'?undefined:editText}/></div>
-        {frameLabels.map(({node,left,top,width,height})=><div key={node.id} className={`canvas-frame-label${width<100?' compact':''}`} style={{left:view.x+left,top:view.y+top,width,height,lineHeight:`${height}px`}} onPointerDown={e=>{e.stopPropagation();nodeDown(node.id,e);}}><button className="frame-name" title={node.name} onDoubleClick={()=>{setSelection(node.id);setInspector(true);}}>{!historyOpen && !library && node.generation?.status === 'building' ? `Building · ${node.name}` : node.name}</button><button className="frame-play" title={`Preview ${node.name}`} aria-label={`Preview ${node.name}`} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();setPreviewId(node.id);}}><Play size={10}/><span>PLAY</span></button></div>)}
-        {selectedBox&&!selected?.hidden&&(tool!=='comment'||commentTarget?.nodeId===selected?.id)&&<div className="selection-overlay" style={{left:view.x+selectedBox.x*view.zoom,top:view.y+selectedBox.y*view.zoom,width:selectedBox.width*view.zoom,height:selectedBox.height*view.zoom}}>{tool==='select'&&!historyOpen&&!!selected&&objectEditable(selected,nodeById)&&!transformedSelection&&['nw','ne','sw','se'].map(corner=><button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize ${corner}`} onPointerDown={e=>{e.stopPropagation();const node=selected!,parent=baseNodes.find(item=>item.id===node.parentId);gesture.current={kind:'resize',node,nodes:baseNodes,scene:['vertical','horizontal'].includes(parent?.styles.layout??'')?null:createSnapScene(baseNodes,node),corner,startX:e.clientX,startY:e.clientY,moved:false,pointer:{clientX:e.clientX,clientY:e.clientY}};capture(e.pointerId);}}/>)}{tool==='select'&&<span className="size-label">{Math.round(selectedBox.width)} × {Math.round(selectedBox.height)}</span>}</div>}
-        {!inspector&&!historyOpen&&!library&&!previewId&&!modal&&!commentTarget&&!loading&&tool==='select'&&!gesture.current&&!drawing&&!previewPatch&&project&&page&&selected&&storedSelected&&!selected.hidden&&selectedBox&&selectedBox.width>0&&selectedBox.height>0&&view.x+(selectedBox.x+selectedBox.width)*view.zoom>0&&view.x+selectedBox.x*view.zoom<stageSize.width&&view.y+(selectedBox.y+selectedBox.height)*view.zoom>0&&view.y+selectedBox.y*view.zoom<stageSize.height&&<SelectionToolbar key={`${project.id}/${page.id}/${selected.id}`} project={project} pageId={page.id} node={storedSelected} effective={selected} anchor={{left:view.x+selectedBox.x*view.zoom,top:view.y+selectedBox.y*view.zoom,width:selectedBox.width*view.zoom,height:selectedBox.height*view.zoom}} viewport={stageSize} editable={objectEditable(selected,nodeById)} stackChild={!!selected.parentId&&['vertical','horizontal'].includes(nodeById.get(selected.parentId)?.styles.layout??'')} disabled={!!saving} onChange={changeLayer} onComment={()=>{setMenu(null);setShowComments(true);setCommentTarget({nodeId:selected.id,x:selectedBox.x+Math.min(selected.width,80),y:selectedBox.y});}} onInspect={()=>{setMenu(null);setInspector(true);}} onDuplicate={duplicate} onDelete={remove}/>}
+        {frameLabels.map(({node,left,top,width,height})=><div key={node.id} className={`canvas-frame-label${width<100?' compact':''}`} style={{left:view.x+left,top:view.y+top,width,height,lineHeight:`${height}px`}} onPointerDown={e=>{e.stopPropagation();nodeDown(node.id,e);}}><button className="frame-name" title={node.name} onDoubleClick={e=>{if(!e.shiftKey){setSelection(node.id);setInspector(true);}}}>{!historyOpen && !library && node.generation?.status === 'building' ? `Building · ${node.name}` : node.name}</button><button className="frame-play" title={`Preview ${node.name}`} aria-label={`Preview ${node.name}`} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();setPreviewId(node.id);}}><Play size={10}/><span>PLAY</span></button></div>)}
+        {multiple&&tool==='select'&&visibleSelection.map(node=>{const box=visualBounds(node,nodes);return <div key={node.id} className="selection-overlay selection-member" aria-hidden="true" style={{left:view.x+box.x*view.zoom,top:view.y+box.y*view.zoom,width:box.width*view.zoom,height:box.height*view.zoom}}/>;})}
+        {selectedBox&&(tool!=='comment'||commentTarget?.nodeId===selected?.id)&&<div className={`selection-overlay${multiple?' selection-group':''}`} style={{left:view.x+selectedBox.x*view.zoom,top:view.y+selectedBox.y*view.zoom,width:selectedBox.width*view.zoom,height:selectedBox.height*view.zoom}}>
+          {tool==='select'&&!historyOpen&&!saving&&!loading&&resizableSelection&&['nw','ne','sw','se'].map(corner=><button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize selection ${corner}`} title={multiple?'Resize selected bounds; child contents retain their size':`Resize ${corner}`} onPointerDown={e=>{
+            e.stopPropagation(); if(e.button!==0)return;
+            const box=selectionBounds(selectedRoots,baseNodes)!,node=selectedRoots[0],parent=nodeById.get(node.parentId??'');
+            gesture.current={kind:'resize',targets:selectedRoots,selectionKey,box,nodes:baseNodes,scene:['vertical','horizontal'].includes(parent?.styles.layout??'')?null:createSnapScene(baseNodes,node,selectedRoots),corner,startX:e.clientX,startY:e.clientY,moved:false,pointer:{clientX:e.clientX,clientY:e.clientY}};capture(e.pointerId);
+          }}/>)}
+          {tool==='select'&&<span className="size-label">{multiple?`${selectionIds.length} objects · `:''}{Math.round(selectedBox.width)} × {Math.round(selectedBox.height)}</span>}
+        </div>}
+        {multiple&&!inspector&&!historyOpen&&!library&&!previewId&&!modal&&!commentTarget&&!loading&&tool==='select'&&!gesture.current&&!drawing&&!previewPatch&&selectedBox&&stageSize.width>0&&stageSize.height>0&&view.x+(selectedBox.x+selectedBox.width)*view.zoom>0&&view.x+selectedBox.x*view.zoom<stageSize.width&&view.y+(selectedBox.y+selectedBox.height)*view.zoom>0&&view.y+selectedBox.y*view.zoom<stageSize.height&&<div ref={multiToolbar} tabIndex={-1} className="selection-toolbar multi-selection-toolbar" role="toolbar" aria-label="Selected objects" style={{left:Math.max(8,Math.min(stageSize.width-220,view.x+(selectedBox.x+selectedBox.width/2)*view.zoom-106)),top:Math.max(52,Math.min(stageSize.height-42,view.y+selectedBox.y*view.zoom-42)),maxWidth:Math.max(0,stageSize.width-16)}} onPointerDown={e=>e.stopPropagation()}>
+          <span role="status">{selectionIds.length} selected</span><IconButton label="Duplicate selection · ⌘D" disabled={!!saving} onClick={()=>{multiToolbar.current?.focus({preventScroll:true});duplicate();}}><Copy size={15}/></IconButton><IconButton label="Delete selection" disabled={!!saving} onClick={()=>{multiToolbar.current?.focus({preventScroll:true});remove();}}><Trash2 size={15}/></IconButton><IconButton label="Export selection" disabled={!!saving} onClick={()=>setModal('export')}><Download size={15}/></IconButton><IconButton label="Deselect all" onClick={()=>setSelection(null)}><X size={15}/></IconButton>
+        </div>}
+        {!multiple&&!inspector&&!historyOpen&&!library&&!previewId&&!modal&&!commentTarget&&!loading&&tool==='select'&&!gesture.current&&!drawing&&!previewPatch&&project&&page&&selected&&storedSelected&&!selected.hidden&&selectedBox&&selectedBox.width>0&&selectedBox.height>0&&view.x+(selectedBox.x+selectedBox.width)*view.zoom>0&&view.x+selectedBox.x*view.zoom<stageSize.width&&view.y+(selectedBox.y+selectedBox.height)*view.zoom>0&&view.y+selectedBox.y*view.zoom<stageSize.height&&<SelectionToolbar key={`${project.id}/${page.id}/${selected.id}`} project={project} pageId={page.id} node={storedSelected} effective={selected} anchor={{left:view.x+selectedBox.x*view.zoom,top:view.y+selectedBox.y*view.zoom,width:selectedBox.width*view.zoom,height:selectedBox.height*view.zoom}} viewport={stageSize} editable={objectEditable(selected,nodeById)} stackChild={!!selected.parentId&&['vertical','horizontal'].includes(nodeById.get(selected.parentId)?.styles.layout??'')} disabled={!!saving} onChange={changeLayer} onComment={()=>{setMenu(null);setShowComments(true);setCommentTarget({nodeId:selected.id,x:selectedBox.x+Math.min(selected.width,80),y:selectedBox.y});}} onInspect={()=>{setMenu(null);setInspector(true);}} onDuplicate={duplicate} onDelete={remove}/>}
         {!!snapGuides.length&&<svg className="snap-guides" aria-hidden="true">{snapGuides.map(guide=>{
           const vertical=guide.axis==='x',position=(vertical?view.x:view.y)+guide.position*view.zoom;
           const start=Math.max(0,(vertical?view.y:view.x)+guide.start*view.zoom-8),end=Math.min(vertical?stageSize.height:stageSize.width,(vertical?view.y:view.x)+guide.end*view.zoom+8);
@@ -641,7 +693,7 @@ export default function App() {
           {menu==='insert'&&<InsertMenu disabled={historyOpen||!!mediaProgress||!page} onPickMedia={()=>{setMenu(null);mediaRef.current?.click();}} onAddShader={shader=>{void addShader(shader);}}/>}
           {menu==='frames'&&<div className="dropdown frame-preset-menu"><div className="menu-heading">Create a frame</div>{presets.map(p=><button className="dropdown-item preset-option" key={p.name} onClick={()=>{setPreset(p);void addFrame(p);}}><p.Icon size={17}/><span>{p.name}</span><small>{p.detail}</small></button>)}<div className="menu-divider"/><button className="dropdown-item" onClick={()=>{setTool('frame');setMenu(null);notify('Drag on the canvas to draw a frame at any size.');}}><Frame size={17}/><span>Draw a custom frame</span><kbd>F</kbd></button></div>}
         </div>
-        <div className="floating-toolbar toolbar-right" onPointerDown={e=>e.stopPropagation()}><IconButton label="Preview selected screen" disabled={!screens.length} onClick={()=>setPreviewId((selected?.type==='frame'&&!selected.parentId?selected:screens[0])?.id||null)}><Play size={17}/></IconButton><span className="tool-divider"/><IconButton label="Toggle inspector" disabled={historyOpen} active={inspector} onClick={()=>setInspector(!inspector)}><PanelRight size={18}/></IconButton><span className="tool-divider"/><button className="zoom-trigger" aria-label="Canvas zoom" aria-expanded={menu==='zoom'} onClick={()=>setMenu(menu==='zoom'?null:'zoom')}>{Math.round(view.zoom*100)}%<ChevronDown size={13}/></button>{menu==='zoom'&&<div className="dropdown zoom-menu"><button className="dropdown-item" onClick={()=>{zoomTo(view.zoom*1.25);setMenu(null);}}><ZoomIn size={16}/><span>Zoom in</span><kbd>⌘ +</kbd></button><button className="dropdown-item" onClick={()=>{zoomTo(view.zoom*.8);setMenu(null);}}><ZoomOut size={16}/><span>Zoom out</span><kbd>⌘ −</kbd></button><div className="menu-divider"/><button className="dropdown-item" onClick={fit}><Maximize2 size={15}/><span>Fit all content</span><kbd>1</kbd></button><button className="dropdown-item" disabled={!selected} onClick={()=>{if(selected)focus(selected.id);setMenu(null);}}><Frame size={15}/><span>Fit selection</span></button>{[.25,.5,1,2].map(z=><button key={z} className="dropdown-item" onClick={()=>{zoomTo(z);setMenu(null);}}><span>{z*100}%</span>{Math.abs(view.zoom-z)<.005&&<Check size={14}/>}</button>)}<div className="menu-divider"/><button className="dropdown-item" aria-pressed={snapping} title="Align edges and centers within frames and across the canvas. Hold Option/Alt to bypass." onClick={()=>{setSnapping(!snapping);setSnapGuides([]);setMenu(null);}}><span>Snap to objects</span>{snapping&&<Check size={14}/>}</button><button className="dropdown-item" onClick={()=>{setGrid(!grid);setMenu(null);}}><span>Show pixel grid</span>{grid&&<Check size={14}/>}</button></div>}</div>
+        <div className="floating-toolbar toolbar-right" onPointerDown={e=>e.stopPropagation()}><IconButton label="Preview selected screen" disabled={!screens.length} onClick={()=>setPreviewId((selected?.type==='frame'&&!selected.parentId?selected:screens[0])?.id||null)}><Play size={17}/></IconButton><span className="tool-divider"/><IconButton label="Toggle inspector" disabled={historyOpen} active={inspector} onClick={()=>setInspector(!inspector)}><PanelRight size={18}/></IconButton><span className="tool-divider"/><button className="zoom-trigger" aria-label="Canvas zoom" aria-expanded={menu==='zoom'} onClick={()=>setMenu(menu==='zoom'?null:'zoom')}>{Math.round(view.zoom*100)}%<ChevronDown size={13}/></button>{menu==='zoom'&&<div className="dropdown zoom-menu"><button className="dropdown-item" onClick={()=>{zoomTo(view.zoom*1.25);setMenu(null);}}><ZoomIn size={16}/><span>Zoom in</span><kbd>⌘ +</kbd></button><button className="dropdown-item" onClick={()=>{zoomTo(view.zoom*.8);setMenu(null);}}><ZoomOut size={16}/><span>Zoom out</span><kbd>⌘ −</kbd></button><div className="menu-divider"/><button className="dropdown-item" onClick={fit}><Maximize2 size={15}/><span>Fit all content</span><kbd>1</kbd></button><button className="dropdown-item" disabled={!selectedBox} onClick={()=>{fitSelection();setMenu(null);}}><Frame size={15}/><span>Fit selection</span></button>{[.25,.5,1,2].map(z=><button key={z} className="dropdown-item" onClick={()=>{zoomTo(z);setMenu(null);}}><span>{z*100}%</span>{Math.abs(view.zoom-z)<.005&&<Check size={14}/>}</button>)}<div className="menu-divider"/><button className="dropdown-item" aria-pressed={snapping} title="Align edges and centers within frames and across the canvas. Hold Option/Alt to bypass." onClick={()=>{setSnapping(!snapping);setSnapGuides([]);setMenu(null);}}><span>Snap to objects</span>{snapping&&<Check size={14}/>}</button><button className="dropdown-item" onClick={()=>{setGrid(!grid);setMenu(null);}}><span>Show pixel grid</span>{grid&&<Check size={14}/>}</button></div>}</div>
         {loading&&<div className="loading-state"><LoaderCircle size={24} className="spin"/><p>Opening your canvas…</p></div>}
         {dropActive&&<div className="file-drop-label">Drop images or videos here</div>}
         {tool!=='select'&&tool!=='hand'&&<div className="mode-hint" onPointerDown={e=>e.stopPropagation()}>{tool==='comment'?<><MessageCircle size={14}/>Click a component to start a conversation</>:tool==='frame'?<><Frame size={14}/>Draw a frame · click for {preset.width} × {preset.height}</>:tool==='text'?<><Type size={14}/>Click or drag to place text</>:tool==='pen'?<><Pencil size={14}/>Draw on the canvas</>:<>Click or drag to place a {tool}</>}<kbd>esc</kbd></div>}
@@ -653,7 +705,7 @@ export default function App() {
       {library&&error&&<div className="error-banner" role="alert"><span>{error}</span><button className="text-button" onClick={()=>{if(project)void load(project.id);}}>Retry</button><button aria-label="Dismiss error" onClick={()=>setError('')}><X size={15}/></button></div>}
       {historyOpen&&liveProject&&<HistoryPanel key={liveProject.id} project={liveProject} saving={!!saving} onClose={closeHistory} onPreview={previewVersion} onApply={applyVersion}/> }
       {library&&project&&board&&<ProjectLibrary key={`${project.id}/${library}/${library==='inspiration'?board.id:''}`} project={project} boardId={board.id} mode={library} readOnly={historyOpen||loading} onChange={changeLibrary} onClose={()=>setLibrary(null)} onNotify={notify}/>}
-      {!historyOpen&&!library&&inspector&&project&&page&&<Inspector project={project} page={page} selectedId={selection} navigationPending={loading} onSelect={selectLayer} onChange={changeLayer} onClose={closeInspector} onDelete={remove} onDuplicate={duplicate} onFocus={focus} onOpenDesignSystem={()=>openLibrary('system')}/>}
+      {!historyOpen&&!library&&inspector&&project&&page&&<Inspector project={project} page={page} selectedIds={selectionIds} navigationPending={loading||!!saving} onSelect={selectLayer} onChange={changeLayer} onClose={closeInspector} onDelete={remove} onDuplicate={duplicate} onFocus={focus} onOpenDesignSystem={()=>openLibrary('system')}/>}
     </div>
     <input type="file" hidden ref={importRef} accept="application/json,.json,application/zip,.zip" onChange={async e => {
       const file = e.target.files?.[0]; e.target.value = '';
@@ -667,11 +719,11 @@ export default function App() {
       } catch (error) { setError((error as Error).message); }
     }}/>
     <input type="file" hidden ref={mediaRef} aria-label="Import images or videos" accept={mediaAccept} multiple onChange={e=>{const files=Array.from(e.currentTarget.files||[]);e.currentTarget.value='';void importMedia(files);}}/>
-    {modal==='export'&&project&&board&&page&&<ExportPanel key={`${project.id}/${board.id}/${page.id}`} project={project} boardId={board.id} pageId={page.id} selectedId={selection} onClose={()=>setModal(null)} onNotify={notify}/>}
+    {modal==='export'&&project&&board&&page&&<ExportPanel key={`${project.id}/${board.id}/${page.id}`} project={project} boardId={board.id} pageId={page.id} selectedIds={selectionIds} onClose={()=>setModal(null)} onNotify={notify}/>}
     {(modal==='help'||modal==='auth')&&<div className="modal-backdrop" onPointerDown={()=>{if(modal!=='auth')setModal(null);}}>
       <section className="modal" role="dialog" aria-modal="true" aria-label={modal==='help'?'Keyboard shortcuts':'Connect to workspace'} onPointerDown={e=>e.stopPropagation()}>
         <div className="modal-header"><h2>{modal==='help'?'Keyboard shortcuts':'Connect to your workspace'}</h2>{modal!=='auth'&&<IconButton label="Close dialog" onClick={()=>setModal(null)}><X size={19}/></IconButton>}</div>
-        <div className="modal-body">{modal==='auth'?<form className="auth-form" onSubmit={e=>{e.preventDefault();configureToken(token);setToken('');setModal(null);}}><p>This editor requires the access token configured on its server. It stays in this browser session.</p><label>Access token<input autoFocus aria-label="Workspace access token" type="password" value={token} onChange={e=>setToken(e.target.value)}/></label><button className="primary-button" disabled={!token.trim()}>Connect</button></form>:<div className="shortcut-list">{[['Select','V'],['Hand / pan','H or Space'],['Text','T'],['Frame','F'],['Rectangle / oval','R / O'],['Line / arrow','L / ⇧L'],['Pencil / note','P / N'],['Tag a component','C'],['Import image / video','⌘I'],['Export','⌘⇧E'],['Duplicate selection','⌘D'],['Undo / redo','⌘Z / ⇧⌘Z'],['Nudge / larger nudge','Arrows / ⇧Arrows'],['Bypass snapping','Hold Option / Alt'],['Fit all / actual size','1 / 0'],['Zoom','⌘ + scroll'],['Cancel / close','Esc']].map(([label,key])=><div key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</div>}</div>
+        <div className="modal-body">{modal==='auth'?<form className="auth-form" onSubmit={e=>{e.preventDefault();configureToken(token);setToken('');setModal(null);}}><p>This editor requires the access token configured on its server. It stays in this browser session.</p><label>Access token<input autoFocus aria-label="Workspace access token" type="password" value={token} onChange={e=>setToken(e.target.value)}/></label><button className="primary-button" disabled={!token.trim()}>Connect</button></form>:<div className="shortcut-list">{[['Select','V'],['Add / remove selection','⇧ click'],['Hand / pan','H or Space'],['Text','T'],['Frame','F'],['Rectangle / oval','R / O'],['Line / arrow','L / ⇧L'],['Pencil / note','P / N'],['Tag a component','C'],['Import image / video','⌘I'],['Export','⌘⇧E'],['Duplicate selection','⌘D'],['Undo / redo','⌘Z / ⇧⌘Z'],['Nudge / larger nudge','Arrows / ⇧Arrows'],['Bypass snapping','Hold Option / Alt'],['Fit all / actual size','1 / 0'],['Zoom','⌘ + scroll'],['Cancel / close','Esc']].map(([label,key])=><div key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</div>}</div>
       </section>
     </div>}
     {currentPreview&&<div className="preview-backdrop" role="dialog" aria-modal="true" aria-label={`Preview ${currentPreview.name}`}><div className="preview-topbar"><button className="text-button" onClick={()=>setPreviewId(null)}><ArrowLeft size={17}/>Back to canvas</button><span>{currentPreview.name}</span><IconButton label="Close preview" onClick={()=>setPreviewId(null)}><X size={20}/></IconButton></div><div className="preview-screen" style={{width:currentPreview.width*previewZoom,height:currentPreview.height*previewZoom}}><div style={{position:'relative',width:currentPreview.width,height:currentPreview.height,transform:`scale(${previewZoom})`,transformOrigin:'0 0'}}><NodeView node={{...currentPreview,x:0,y:0}} nodes={nodes} designSystem={project?.designSystem} interactive={false} preview/></div></div><div className="preview-nav"><IconButton label="Previous frame" disabled={previewIndex<=0} onClick={()=>setPreviewId(screens[previewIndex-1].id)}><ChevronLeft size={18}/></IconButton><span>{previewIndex+1} / {screens.length}</span><IconButton label="Next frame" disabled={previewIndex>=screens.length-1} onClick={()=>setPreviewId(screens[previewIndex+1].id)}><ChevronRight size={18}/></IconButton><span className="preview-size">{currentPreview.width} × {currentPreview.height}</span></div></div>}

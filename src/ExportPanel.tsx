@@ -11,7 +11,7 @@ export interface ExportPanelProps {
   project: DesignProject;
   boardId: string;
   pageId: string;
-  selectedId: string | null;
+  selectedIds: string[];
   onClose: () => void;
   onNotify: (message: string) => void;
 }
@@ -25,16 +25,16 @@ const formats: { id: ExportFormat; name: string; detail: string; description: st
   { id: 'png', name: 'PNG', detail: 'Capture unavailable', description: '', Icon: Image },
 ];
 
-export default function ExportPanel({ project, boardId, pageId, selectedId, onClose, onNotify }: ExportPanelProps) {
-  const [scope, setScope] = useState<ExportScope>(selectedId ? 'selection' : 'board');
-  const [format, setFormat] = useState<ExportFormat>(selectedId ? 'react' : 'source');
+export default function ExportPanel({ project, boardId, pageId, selectedIds, onClose, onNotify }: ExportPanelProps) {
+  const [scope, setScope] = useState<ExportScope>(selectedIds.length ? 'selection' : 'board');
+  const [format, setFormat] = useState<ExportFormat>(selectedIds.length ? 'react' : 'source');
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [copied, setCopied] = useState('');
   const [sources, setSources] = useState<ExportText[]>([]), [sourceIndex, setSourceIndex] = useState(0);
   const panel = useRef<HTMLElement>(null), busyRef = useRef(false), mounted = useRef(true), activeRequest = useRef<AbortController | null>(null);
   const page = project.pages.find(page => page.id === pageId), board = project.boards.find(board => board.id === boardId);
-  const selected = page?.nodes.find(node => node.id === selectedId);
-  const availableScope = scope === 'selection' && !selected ? 'page' : scope;
-  const target = useMemo<ExportTarget>(() => ({ scope: availableScope, boardId, pageId, ...(availableScope === 'selection' ? { nodeIds: selectedId ? [selectedId] : [] } : {}) }), [availableScope, boardId, pageId, selectedId]);
+  const selected = useMemo(() => { const ids = new Set(selectedIds); return page?.nodes.filter(node => ids.has(node.id)) ?? []; }, [page?.nodes, selectedIds]);
+  const availableScope = scope === 'selection' && !selected.length ? 'page' : scope;
+  const target = useMemo<ExportTarget>(() => ({ scope: availableScope, boardId, pageId, ...(availableScope === 'selection' ? { nodeIds: selected.map(node => node.id) } : {}) }), [availableScope, boardId, pageId, selected]);
   const details = formats.find(item => item.id === format)!;
   const scoped = useMemo(() => exportTargetProject(project, target), [project, target]);
   const layerCount = scoped.pages.reduce((count, page) => count + page.nodes.length, 0);
@@ -102,7 +102,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedId, onCl
     }}>
       <header className="export-panel-header"><h2 id="export-heading">Export</h2><span>v{project.revision}</span><button type="button" className="icon-button" aria-label="Close export" title={busy ? 'Close and cancel export' : 'Close export'} onClick={close}><X size={16}/></button></header>
       <div className="export-scope-row"><span className="export-scope-label">Scope</span><Select label="Export scope" value={availableScope} disabled={!!busy} onChange={value=>changeScope(value as ExportScope)} options={[
-        {value:'selection',label:`Selection · ${selected?.name??'Select a layer first'}`,disabled:!selected},
+        {value:'selection',label:`Selection · ${selected.length > 1 ? `${selected.length} objects` : selected[0]?.name ?? 'Select a layer first'}`,disabled:!selected.length},
         {value:'page',label:`Page · ${page?.name}`},
         {value:'board',label:`Board · ${board?.name}`},
         {value:'project',label:`Project · ${project.name}`},

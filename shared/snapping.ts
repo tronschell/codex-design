@@ -6,11 +6,11 @@ export interface SnapGuide { axis: 'x' | 'y'; position: number; start: number; e
 interface SnapCandidate { position: number; start: number; end: number; priority: number; id: string }
 export interface SnapScene { x: SnapCandidate[]; y: SnapCandidate[] }
 
-export function createSnapScene(nodes: DesignNode[], node: DesignNode): SnapScene {
+export function createSnapScene(nodes: DesignNode[], node: DesignNode, moving: DesignNode[] = [node]): SnapScene {
   const scene: SnapScene = { x: [], y: [] }, byId = new Map(nodes.map(item => [item.id, item]));
   const children = new Map<string, DesignNode[]>();
   for (const item of nodes) if (item.parentId) { const siblings = children.get(item.parentId); if (siblings) siblings.push(item); else children.set(item.parentId, [item]); }
-  const excluded = new Set<string>(), pending = [node];
+  const excluded = new Set<string>(), pending = [...moving];
   while (pending.length) {
     const current = pending.pop()!;
     if (excluded.has(current.id)) continue;

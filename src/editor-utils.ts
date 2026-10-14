@@ -1,5 +1,5 @@
 import type { DesignNode, DesignPage, Viewport } from '../shared/types';
-import { parentLocalPoint, visualBounds } from '../shared/effects';
+import { parentLocalDelta, parentLocalPoint, visualBounds } from '../shared/effects';
 
 export const uid = () => crypto.randomUUID();
 export const clampZoom = (zoom: number) => Math.min(4, Math.max(0.05, zoom));
@@ -9,9 +9,32 @@ export function subtree(nodeId: string, nodes: DesignNode[]): DesignNode[] {
   while (changed) { changed = false; for (const node of nodes) if (node.parentId && ids.has(node.parentId) && !ids.has(node.id)) { ids.add(node.id); changed = true; } }
   return nodes.filter(node => ids.has(node.id));
 }
-export function duplicateNodes(nodeId: string, nodes: DesignNode[]) {
-  const group = subtree(nodeId, nodes), ids = new Map(group.map(node => [node.id, uid()]));
-  return group.map(node => ({ ...structuredClone(node), id: ids.get(node.id)!, parentId: node.id === nodeId ? node.parentId : ids.get(node.parentId!)!, name: node.id === nodeId ? `${node.name} copy` : node.name, x: node.x + (node.id === nodeId ? 40 : 0), y: node.y + (node.id === nodeId ? 40 : 0) }));
+export function selectionRoots(nodeIds: string[], nodes: DesignNode[]) {
+  const selected = new Set(nodeIds), byId = new Map(nodes.map(node => [node.id, node]));
+  return nodes.filter(node => {
+    if (!selected.has(node.id)) return false;
+    const seen = new Set<string>();
+    let parent = node.parentId;
+    while (parent && !seen.has(parent)) {
+      if (selected.has(parent)) return false;
+      seen.add(parent); parent = byId.get(parent)?.parentId ?? null;
+    }
+    return true;
+  });
+}
+export function selectionBounds(selected: DesignNode[], nodes: DesignNode[]) {
+  const boxes = selected.map(node => visualBounds(node, nodes));
+  if (!boxes.length) return null;
+  const x = Math.min(...boxes.map(box => box.x)), y = Math.min(...boxes.map(box => box.y));
+  return { x, y, width: Math.max(...boxes.map(box => box.x + box.width)) - x, height: Math.max(...boxes.map(box => box.y + box.height)) - y };
+}
+export function duplicateNodes(nodeIds: string[], nodes: DesignNode[]) {
+  const roots = new Set(selectionRoots(nodeIds, nodes).map(node => node.id));
+  const group = [...roots].flatMap(id => subtree(id, nodes)), ids = new Map(group.map(node => [node.id, uid()]));
+  return group.map(node => {
+    const root = roots.has(node.id), offset = root ? parentLocalDelta(node,nodes,{x:40,y:40}) ?? {x:40,y:40} : {x:0,y:0};
+    return { ...structuredClone(node), id: ids.get(node.id)!, parentId: root ? node.parentId : ids.get(node.parentId!)!, name: root ? `${node.name} copy` : node.name, x: node.x + offset.x, y: node.y + offset.y };
+  });
 }
 export function bounds(nodes: DesignNode[]) {
   const roots = nodes.filter(node => !node.parentId && !node.hidden).map(node=>visualBounds(node,nodes));
