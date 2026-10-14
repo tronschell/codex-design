@@ -253,3 +253,7 @@ The existing host pane still serves cached old UI, including controls already re
 Removed every frame-label Play action and the screen-preview modal, including its navigation, scale calculation, state, event guards and dedicated responsive styles. Frame names use the full label width and retain selection, dragging and double-click inspection. The existing frame-label gutter/overlap calculation remains. History/library/source previews and exports remain available. Updated current product/design guidance and Inspector playback/link help to refer to exported output. No design document or persisted source was changed.
 
 Strict TypeScript compilation and direct caller/style inspection passed. Production build and plugin packaging passed; no tests were added or run. Live host appearance was not rechecked, and no runtime performance improvement is claimed for this UI removal.
+
+## Technology badge logos — October 14, 2026
+
+README ChatGPT/Codex and MCP Apps badges now use self-contained SVGs with their actual white logos, keeping the existing compact badge style. Source/CC0 attribution lives in SVG metadata. Rendered both through the existing bundled SVG renderer and inspected the images directly. This documentation-only change needs no application build or plugin-runtime refresh; no dependencies or tests were added or run.

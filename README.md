@@ -7,11 +7,11 @@
 
 An infinite canvas for designing interfaces and slides with your coding agent. Build desktop, web, tablet and mobile layouts; refine editable layers and source beside the conversation.
 
-[![ChatGPT + Codex](https://img.shields.io/badge/ChatGPT-%2B_Codex-171717)](https://developers.openai.com/plugins)
+[![ChatGPT + Codex](assets/badges/chatgpt-codex.svg)](https://developers.openai.com/plugins)
 [![React 19.3.0](https://img.shields.io/badge/React-19.3.0-149eca?logo=react&logoColor=white)](https://react.dev/)
 [![TypeScript 5.9.3](https://img.shields.io/badge/TypeScript-5.9.3-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-417e38?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![MCP Apps](https://img.shields.io/badge/MCP-Apps-555555)](docs/mcp.md)
+[![MCP Apps](assets/badges/mcp-apps.svg)](docs/mcp.md)
 
 ![Codex Design with mobile screens above the desktop Forma workspace](docs/screenshots/forma-workspace.jpg)
 
