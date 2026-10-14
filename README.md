@@ -1,37 +1,57 @@
-<img src="assets/icon.png" width="64" height="64" alt="Codex Design logo" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.svg" />
+  <img src="assets/icon.svg" width="64" height="64" alt="Codex Design logo" />
+</picture>
 
 # Codex Design
 
 An infinite canvas for designing interfaces and slides with your coding agent. Build desktop, web, tablet and mobile layouts; refine editable layers and source beside the conversation.
 
-`Codex plugin` · `MCP Apps` · `React` · `TypeScript` · `Design tools`
+[![ChatGPT + Codex](https://img.shields.io/badge/ChatGPT-%2B_Codex-171717)](https://developers.openai.com/plugins)
+[![React 19.3.0](https://img.shields.io/badge/React-19.3.0-149eca?logo=react&logoColor=white)](https://react.dev/)
+[![TypeScript 5.9.3](https://img.shields.io/badge/TypeScript-5.9.3-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-417e38?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![MCP Apps](https://img.shields.io/badge/MCP-Apps-555555)](docs/mcp.md)
 
-![Codex Design with the Forma workspace board](docs/screenshots/forma-workspace.jpg)
+![Codex Design with mobile screens above the desktop Forma workspace](docs/screenshots/forma-workspace.jpg)
 
 Projects contain boards, pages and frames. Each project shares one editable design system; each board keeps its own inspiration. Component conversations, media, source exports and version history stay with the document. Chats keep independent canvas selections. Generated screens appear progressively with a grey loading wipe.
 
-## Run
+## Paste this into ChatGPT to install
 
-Node.js 22+ and npm are required.
+Use ChatGPT desktop with Codex/local terminal access. A web-only chat cannot install software on your computer.
+
+```text
+Install Codex Design from https://github.com/tronschell/codex-design on this computer.
+
+Clone it into a new local folder, or reuse its existing checkout without overwriting
+local changes. Read README.md and docs/plugin.md. Check that Node.js 22+, npm, Git
+and the Codex CLI are available. Set up missing prerequisites from official sources,
+respecting any required approvals; explain any access limitation.
+
+Run npm ci and npm run build in the checkout. Register its absolute directory with
+codex plugin marketplace add <absolute-checkout-path>, then run
+codex plugin add codex-design@codex-design-local --json.
+
+Confirm it is installed and enabled with
+codex plugin list --marketplace codex-design-local --json.
+Preserve existing design data. Do not run tests or deploy anything. Tell me whether
+to reload ChatGPT/Codex. If local plugin installation is unavailable, explain that
+instead of claiming installation succeeded.
+```
+
+After installation, ask: **“Design a mobile app in Codex Design.”** The canvas opens beside the chat without a development server. See the [official local-plugin setup](https://developers.openai.com/plugins/build/plugins).
+
+## Development
+
+Requires Node.js 22+ and npm.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open the local URL printed by the server. Designs are saved in ignored `data/`. For production, run `npm run build` then `npm start`.
-
-## Install in Codex
-
-Build the checkout, then register and install its local marketplace:
-
-```sh
-npm run build
-codex plugin marketplace add /absolute/path/to/codex-design
-codex plugin add codex-design@codex-design-local
-```
-
-Reload Codex, enable the plugin, and ask: **“Design a desktop dashboard in Codex Design.”** The bundled MCP runtime opens the canvas without a development server. `npm run package:plugin` creates a portable ZIP in `releases/`; project data and environment files are excluded.
+Open the printed local URL. Designs are saved in ignored `data/`. Use `npm run build` then `npm start` for production, or `npm run package:plugin` for a portable ZIP in `releases/`.
 
 See [setup and hosting](docs/plugin.md), [MCP tools](docs/mcp.md), [product behavior](PRODUCT.md), [design guidance and host limits](skills/codex-design/references/host-runtime.md), and [measured performance](docs/performance.md). Cloud ChatGPT connections require a reachable HTTPS MCP endpoint; the local host is a single-user service.
 

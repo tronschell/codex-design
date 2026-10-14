@@ -32,12 +32,12 @@
           "Review design comments and update the current board.",
           "Find the design system in my app and reuse it across boards."
         ],
-        "brandColor": "#3c78ce",
-        "brandColorDark": "#80b5ff",
-        "composerIcon": "./assets/icon.png",
-        "composerIconDark": "./assets/icon.png",
-        "logo": "./assets/icon.png",
-        "logoDark": "./assets/icon.png"
+        "brandColor": "#171717",
+        "brandColorDark": "#f5f5f5",
+        "composerIcon": "./assets/icon.svg",
+        "composerIconDark": "./assets/icon-dark.svg",
+        "logo": "./assets/icon.svg",
+        "logoDark": "./assets/icon-dark.svg"
       }
     }
   }

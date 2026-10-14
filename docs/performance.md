@@ -458,3 +458,16 @@ This is a correctness/quality-of-life change, not a measured runtime optimizatio
 User effect: closing Export stops pending preparation instead of allowing a surprise later download or clipboard write. Revision/target changes cancel the old action and request a current export. Abort signals reach chunked media reads and FileReader conversion; completion/error notices are bounded to the active action. The MCP runtime is byte-identical, and shared source generators and persistence are unchanged.
 
 Verification uses production compilation/package and direct source inspection of every export caller and asynchronous boundary, without tests, assertions, fixtures or scripts for testing. Actual cancellation latency, bytes avoided, CPU, heap/RSS, browser RAM, load time, input latency and FPS were not measured; no improvement percentages are claimed. Real installed-host close-during-media/clipboard/download behavior was not exercised. A host RPC already in flight may complete, already dispatched side effects cannot be undone, and synchronous ZIP construction cannot yield to a close event mid-operation. No user designs were mutated.
+
+## SVG branding footprint — October 14, 2026
+
+Measured artifact comparison, not a runtime speed/memory claim. Method: Python Path.stat().st_size over the installed f09082a artifacts and the current checkout/build, on the same machine; workload is the plugin branding files, standalone favicon, compiled widget and MCP entry. Two theme SVGs replace one shared PNG.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Plugin logo assets | 167,189 B | 542 B | −166,647 B | −99.68% |
+| Standalone favicon | 4,088 B | 351 B | −3,737 B | −91.41% |
+| Canvas widget | 693,740 B | 693,740 B | 0 B | 0.00% |
+| MCP runtime | 1,030,019 B | 1,030,361 B | +342 B | +0.03% |
+
+User effect: the mark remains crisp at sidebar/icon sizes and has explicit light/dark contrast. The MCP server reads the two small packaged SVGs and exposes inline icons in initialization and canvas-resource metadata; branding no longer depends solely on manifest PNG paths. The widget is unchanged. No startup/decoding time, requests/bytes transferred, CPU, RAM, FPS or sidebar rendering improvement was measured. The SVG previews and real MCP metadata were inspected; actual host sidebar caching/rendering still needs confirmation after reload. Existing design data is separate from these artifact counts. No tests were added or run.
