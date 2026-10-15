@@ -20,8 +20,10 @@ export interface NodeViewProps {
   preview?: boolean;
   designSystem?: DesignSystem;
 }
+type LiveTarget = { nodeId: string; key: string };
 export interface CanvasNodesProps {
   nodes: DesignNode[];
+  liveTarget?: LiveTarget;
   visibleRootIds?: ReadonlySet<string>;
   onSelect?: NodeViewProps['onSelect'];
   onTextEdit?: NodeViewProps['onTextEdit'];
@@ -29,7 +31,7 @@ export interface CanvasNodesProps {
   designSystem?: DesignSystem;
 }
 
-type TreeProps = Omit<NodeViewProps, 'nodes' | 'selectedId'> & { childrenByParent: Map<string, DesignNode[]>; ancestors: ReadonlySet<string>; linkedAncestor?: boolean; inheritedPointerEvents?: 'auto' | 'none' };
+type TreeProps = Omit<NodeViewProps, 'nodes' | 'selectedId'> & { liveTarget?: LiveTarget; childrenByParent: Map<string, DesignNode[]>; ancestors: ReadonlySet<string>; linkedAncestor?: boolean; inheritedPointerEvents?: 'auto' | 'none' };
 const rootAncestors: ReadonlySet<string> = new Set();
 
 type ChildIndex = { childrenByParent: Map<string, DesignNode[]>; roots: DesignNode[] };
@@ -76,7 +78,7 @@ function ScriptedFrame({ id, name, passive, source, designSystem }: { id: string
   return <iframe key={active ? 'live' : 'passive'} ref={frame} title={name} sandbox={active ? LIVE_CODE_SANDBOX : ''} referrerPolicy="no-referrer" srcDoc={srcDoc} tabIndex={active ? 0 : -1} className={active ? 'tw:pointer-events-auto! tw:outline tw:outline-1 tw:-outline-offset-1 tw:outline-[#4c8dff]' : undefined} />;
 }
 
-const TreeNode = memo(function NodeLayer({ node, childrenByParent, ancestors, onSelect, onTextEdit, interactive = true, preview, designSystem, linkedAncestor = false, inheritedPointerEvents = 'auto' }: TreeProps) {
+const TreeNode = memo(function NodeLayer({ node, childrenByParent, ancestors, onSelect, onTextEdit, interactive = true, preview, designSystem, liveTarget, linkedAncestor = false, inheritedPointerEvents = 'auto' }: TreeProps) {
   recordCanvasWork('nodeRenders');
   const [editing, setEditing] = useState(false);
   const visible = !node.hidden && !ancestors.has(node.id);
@@ -100,6 +102,7 @@ const TreeNode = memo(function NodeLayer({ node, childrenByParent, ancestors, on
   }, [node.type, node.source, visible, designSystem]);
   if (!visible) return null;
   const canEdit = interactive && !preview && !node.locked;
+  const liveKey = liveTarget && canEdit && node.live && liveTarget.nodeId === node.id ? liveTarget.key : undefined;
   const href = node.href && isSafeLink(node.href) ? node.href : '';
   const pointerEvents = node.styles.pointerEvents ?? inheritedPointerEvents;
   const link = preview && href ? <a aria-label={node.name} href={href} target={href.startsWith('#') ? undefined : '_blank'} rel={href.startsWith('#') ? undefined : 'noopener noreferrer'} style={{...nodeLinkStyle,pointerEvents}}/> : null;
@@ -113,23 +116,23 @@ const TreeNode = memo(function NodeLayer({ node, childrenByParent, ancestors, on
     data-node-type={node.type}
     style={style}
     onPointerDown={canEdit && onSelect ? event => { event.stopPropagation(); if (!editing) onSelect(node.id, event); } : undefined}
-    onDoubleClick={canEdit && node.type === 'text' && onTextEdit ? event => { event.stopPropagation(); if (!event.shiftKey) setEditing(true); } : canEdit && node.type === 'code' && node.live ? event => { event.stopPropagation(); if (!event.shiftKey) setLiveFrame(node.id); } : undefined}
+    onDoubleClick={canEdit && node.type === 'text' && onTextEdit ? event => { event.stopPropagation(); if (!event.shiftKey) setEditing(true); } : canEdit && node.type === 'code' && liveKey ? event => { event.stopPropagation(); if (!event.shiftKey) setLiveFrame(liveKey); } : undefined}
     aria-label={node.name}
     aria-busy={building || undefined}
   >
     {node.type === 'video' && link}
-    {node.type === 'text' ? !editing && list && list !== 'none' ? <List style={{...textListStyle,listStyleType:list}}>{(node.content ?? '').split(/\r?\n/).map((line,index)=><li key={index}>{line || <br/>}</li>)}</List> : node.content ?? '' : node.type === 'code' ? code.vector ? <img alt={node.name} src={code.vector} draggable={false} style={{objectFit:node.styles.objectFit??'fill'}} /> : node.live ? <ScriptedFrame id={node.id} name={node.name} passive={code.document} source={node.source ?? ''} designSystem={designSystem} /> : <iframe title={node.name} sandbox="" referrerPolicy="no-referrer" srcDoc={code.document} tabIndex={-1} /> : node.type === 'image' || node.type === 'video' ? node.type === 'video' && preview && href ? <div style={{position:'relative',width:'100%',height:'100%'}}><MediaNode node={mediaNode} preview={preview}/></div> : <MediaNode node={mediaNode} preview={preview}/> : node.type === 'shader' ? <ShaderNode shader={node.shader} name={node.name}/> : node.type === 'arrow' ? <span className="design-arrow-head" /> : null}
+    {node.type === 'text' ? !editing && list && list !== 'none' ? <List style={{...textListStyle,listStyleType:list}}>{(node.content ?? '').split(/\r?\n/).map((line,index)=><li key={index}>{line || <br/>}</li>)}</List> : node.content ?? '' : node.type === 'code' ? code.vector ? <img alt={node.name} src={code.vector} draggable={false} style={{objectFit:node.styles.objectFit??'fill'}} /> : liveKey ? <ScriptedFrame id={liveKey} name={node.name} passive={code.document} source={node.source ?? ''} designSystem={designSystem} /> : <iframe title={node.name} sandbox="" referrerPolicy="no-referrer" srcDoc={code.document} tabIndex={-1} /> : node.type === 'image' || node.type === 'video' ? node.type === 'video' && preview && href ? <div style={{position:'relative',width:'100%',height:'100%'}}><MediaNode node={mediaNode} preview={preview}/></div> : <MediaNode node={mediaNode} preview={preview}/> : node.type === 'shader' ? <ShaderNode shader={node.shader} name={node.name}/> : node.type === 'arrow' ? <span className="design-arrow-head" /> : null}
     {node.type !== 'video' && link}
-    {(childrenByParent.get(node.id) ?? []).map(child => <TreeNode key={child.id} node={child} childrenByParent={childrenByParent} ancestors={descendants} onSelect={onSelect} onTextEdit={onTextEdit} interactive={interactive} preview={preview} designSystem={designSystem} linkedAncestor={linkedAncestor || !!href} inheritedPointerEvents={pointerEvents} />)}
+    {(childrenByParent.get(node.id) ?? []).map(child => <TreeNode key={child.id} node={child} childrenByParent={childrenByParent} ancestors={descendants} onSelect={onSelect} onTextEdit={onTextEdit} interactive={interactive} preview={preview} designSystem={designSystem} liveTarget={liveTarget} linkedAncestor={linkedAncestor || !!href} inheritedPointerEvents={pointerEvents} />)}
     {building && <FrameGeneration updatedAt={node.generation?.updatedAt}/>}
   </div>;
 }, sameLayer);
 
 // The editor supplies resolved positions, so every visible root shares one page index.
-export const CanvasNodes = memo(function CanvasScene({ nodes, visibleRootIds, onSelect, onTextEdit, interactive, designSystem }: CanvasNodesProps) {
+export const CanvasNodes = memo(function CanvasScene({ nodes, visibleRootIds, onSelect, onTextEdit, interactive, designSystem, liveTarget }: CanvasNodesProps) {
   const previous = useRef<ChildIndex>(undefined);
   const { childrenByParent, roots } = useMemo(() => previous.current = indexChildren(nodes, previous.current), [nodes]);
-  return <>{roots.filter(node => !visibleRootIds || visibleRootIds.has(node.id)).map(node => <TreeNode key={node.id} node={node} childrenByParent={childrenByParent} ancestors={rootAncestors} onSelect={onSelect} onTextEdit={onTextEdit} interactive={interactive} designSystem={designSystem} />)}</>;
+  return <>{roots.filter(node => !visibleRootIds || visibleRootIds.has(node.id)).map(node => <TreeNode key={node.id} node={node} childrenByParent={childrenByParent} ancestors={rootAncestors} onSelect={onSelect} onTextEdit={onTextEdit} interactive={interactive} designSystem={designSystem} liveTarget={liveTarget} />)}</>;
 });
 
 export function NodeView({ node, nodes, onSelect, onTextEdit, interactive, preview, designSystem }: NodeViewProps) {
