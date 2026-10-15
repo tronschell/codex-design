@@ -4,14 +4,17 @@ import { ADVANCED_STYLE_PROPERTIES, effectCss, nodeBoxSize, nodeInnerSize, nodeP
 import { isSafeLink } from './links.js';
 import { compatibleTokenKinds, designSystemMarkdown, resolveNodeTokens, resolveNodesTokens, tokenCssVariableName, tokenCssVariables } from './design-system.js';
 import { gradientCss } from './appearance.js';
+import { implementationNotesMarkdown } from './implementation-notes.js';
+import { NODE_STATES, NODE_STATE_SELECTORS, applyNodeState } from './node-states.js';
 
 export const textListStyle = { margin: 0, padding: 0, listStylePosition: 'inside' } as const;
 export const nodeLinkStyle = { position: 'absolute', inset: 0, display: 'block', borderRadius: 'inherit', pointerEvents: 'auto' } as const;
 
 export interface ExportOptions { assetUrls?: Record<string, string>; canvasSize?: { width: number; height: number }; nodeImages?: Record<string, string> }
-interface RenderOptions extends ExportOptions { system: DesignSystem; styleFallbacks: ReadonlyMap<string, DesignNode['styles']>; hasLinks: boolean; staticMap?: boolean; included?: ReadonlySet<string> }
+interface RenderOptions extends ExportOptions { system: DesignSystem; styleFallbacks: ReadonlyMap<string, DesignNode['styles']>; hasLinks: boolean; staticMap?: boolean; included?: ReadonlySet<string>; stateRules?: string[] }
 
-export function resolvedNodes(nodes: DesignNode[], system?: DesignSystem): DesignNode[] {
+// Callers holding immutable snapshots may pass a cache so stack children keep their positioned identity.
+export function resolvedNodes(nodes: DesignNode[], system?: DesignSystem, cache?: WeakMap<DesignNode, DesignNode>): DesignNode[] {
   if (system) nodes = resolveNodesTokens(nodes, system);
   const positions = new Map<string, { x: number; y: number }>();
   const children = childIndex(nodes);
@@ -35,7 +38,15 @@ export function resolvedNodes(nodes: DesignNode[], system?: DesignSystem): Desig
       cursor += (vertical ? size.height : size.width) + mainMargin * 2 + spacing;
     }
   }
-  return nodes.map(node => positions.has(node.id) ? { ...node, ...positions.get(node.id)! } : node);
+  return nodes.map(node => {
+    const position = positions.get(node.id);
+    if (!position || (position.x === node.x && position.y === node.y)) return node;
+    const cached = cache?.get(node);
+    if (cached?.x === position.x && cached.y === position.y) return cached;
+    const positioned = { ...node, ...position };
+    cache?.set(node, positioned);
+    return positioned;
+  });
 }
 
 export function nodeCss(node: DesignNode, system?: DesignSystem, fallbackStyles = node.styles): Record<string, string | number> {
@@ -92,11 +103,32 @@ export function nodeCss(node: DesignNode, system?: DesignSystem, fallbackStyles 
 
 const styleText = (css: string) => css.replaceAll('<', '\\3c ');
 
-export function safeCodeDocument(source: string, system?: DesignSystem): string {
+// CSS rules for a node's saved interaction states. Only properties that differ from the base style are emitted, so a state costs bytes only for what it changes.
+export function nodeStateRules(node: DesignNode, selector: string, important: boolean, system?: DesignSystem, fallbackStyles = node.styles, base = nodeCss(node, system, fallbackStyles)): string[] {
+  const states = node.styles.states;
+  if (!states) return [];
+  const rules: string[] = [];
+  for (const state of NODE_STATES) {
+    const override = states[state];
+    if (!override) continue;
+    // A token binding the state overrides would otherwise keep emitting its variable and win over the state value.
+    const tokenBindings = { ...node.tokenBindings };
+    for (const key of Object.keys(override)) delete tokenBindings[key as BindableStyleProperty];
+    const css = nodeCss(applyNodeState({ ...node, tokenBindings }, state), system, { ...fallbackStyles, ...override });
+    const changed = Object.entries(css).filter(([key, value]) => base[key] !== value);
+    if (changed.length) rules.push(`${selector}${NODE_STATE_SELECTORS[state]}{${changed.map(([key, value]) => `${inlineCss({ [key]: value })}${important ? '!important' : ''}`).join(';')}}`);
+  }
+  return rules;
+}
+
+export const LIVE_CODE_SANDBOX = 'allow-scripts';
+
+// live adds inline scripts only: the frame stays network-free, opaque-origin and without storage or parent access.
+export function safeCodeDocument(source: string, system?: DesignSystem, live = false): string {
   // This policy is prepended so source cannot relax it with another CSP declaration.
   const passiveSource = source.replace(/<meta\b[^>]*>/gi, '').replace(/<base\b[^>]*>/gi, '');
   // Apply current project variables after copied source token blocks, without rewriting the source.
-  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}*{box-sizing:border-box}body>svg:only-child{display:block;width:100%;height:100%}</style>${passiveSource}${system ? `<style>${styleText(tokenCssVariables(system))}</style>` : ''}`;
+  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none';${live ? " script-src 'unsafe-inline';" : ''} img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden}*{box-sizing:border-box}body>svg:only-child{display:block;width:100%;height:100%}</style>${passiveSource}${system ? `<style>${styleText(tokenCssVariables(system))}</style>` : ''}`;
 }
 
 export function vectorDataUrl(source: string): string | null {
@@ -128,6 +160,8 @@ function renderNode(node: DesignNode, children: Map<string | null, DesignNode[]>
   const style = nodeCss(node, options.system, options.styleFallbacks.get(node.id));
   const shell = options.included && !options.included.has(node.id);
   if (options.staticMap) { style.animation = 'none'; style.transition = 'none'; }
+  // Inline styles outrank selectors, so exported state rules must be !important.
+  if (options.stateRules && !shell) options.stateRules.push(...nodeStateRules(node, `[data-node-id="${node.id.replace(/["\\]/g, '\\$&')}"]`, true, options.system, options.styleFallbacks.get(node.id), style));
   if (shell) Object.assign(style, { background: 'transparent', borderColor: 'transparent', outline: 'none', mixBlendMode: 'normal', boxShadow: 'none', textShadow: 'none' });
   if (linkedAncestor && node.styles.pointerEvents === undefined) style.pointerEvents = 'none';
   const attributes = `${options.hasLinks ? `id="${escapeHtml(node.id)}" ` : ''}data-node-id="${escapeHtml(node.id)}" data-node-type="${node.type}" aria-label="${escapeHtml(node.name)}" style="${escapeHtml(inlineCss(style))}"`;
@@ -139,10 +173,10 @@ function renderNode(node: DesignNode, children: Map<string | null, DesignNode[]>
     : node.type === 'video'
       ? options.staticMap && node.media?.poster ? `<img alt="${escapeHtml(node.name)}" style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media.poster, options))}"/>` : `<video aria-label="${escapeHtml(node.media?.alt ?? node.name)}" playsinline=""${node.media?.autoplay ? ' autoplay=""' : ' controls=""'}${node.media?.loop ? ' loop=""' : ''}${node.media?.muted !== false ? ' muted=""' : ''}${node.media?.poster ? ` poster="${escapeHtml(exportMediaUrl(node.media.poster, options))}"` : ''} style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media?.src, options))}"></video>`
     : node.type === 'shader'
-      ? options.staticMap ? '' : `<canvas aria-label="${escapeHtml(node.name)}" data-shader="${escapeHtml(JSON.stringify(shaderRuntimeOptions(node.shader)))}" style="display:block;width:100%;height:100%"></canvas><span data-shader-status hidden style="position:absolute;inset:0;padding:8px;overflow:auto;color:#dddddd;background:#242424;font:11px/1.4 system-ui,sans-serif"></span>`
+      ? options.staticMap ? '' : `<canvas aria-label="${escapeHtml(node.name)}"${node.shader?.provider ? ' data-shader-provider="shaders.com"' : ''} data-shader="${escapeHtml(JSON.stringify(shaderRuntimeOptions(node.shader)))}" style="display:block;width:100%;height:100%"></canvas><span data-shader-status hidden style="position:absolute;inset:0;padding:8px;overflow:auto;color:#dddddd;background:#242424;font:11px/1.4 system-ui,sans-serif"></span>`
     : node.type === 'code'
     ? vector ? `<img alt="${escapeHtml(node.name)}" draggable="false" style="display:block;width:100%;height:100%;object-fit:${node.styles.objectFit ?? 'fill'};pointer-events:none" src="${escapeHtml(vector)}"/>`
-      : `<iframe title="${escapeHtml(node.name)}" sandbox="" referrerpolicy="no-referrer" style="display:block;width:100%;height:100%;border:0;pointer-events:none" srcdoc="${escapeHtml(safeCodeDocument(node.source ?? '', options.system))}"></iframe>`
+      : `<iframe title="${escapeHtml(node.name)}" sandbox="${node.live ? LIVE_CODE_SANDBOX : ''}" referrerpolicy="no-referrer" style="display:block;width:100%;height:100%;border:0;${node.live ? '' : 'pointer-events:none'}" srcdoc="${escapeHtml(safeCodeDocument(node.source ?? '', options.system, node.live))}"></iframe>`
     : node.type === 'arrow' ? '<span style="position:absolute;right:0;top:-5px;width:9px;height:9px;border-top:2px solid currentColor;border-right:2px solid currentColor;transform:rotate(45deg)"></span>' : '';
   const list = node.styles.listStyleType;
   if (node.type === 'text' && list && list !== 'none') {
@@ -172,9 +206,9 @@ function childIndex(nodes: DesignNode[]): Map<string | null, DesignNode[]> {
   return index;
 }
 
-function htmlDocument(title: string, body: string, background: string, system?: DesignSystem): string {
-  const shaderScript = body.includes('data-shader=') ? `<script>document.querySelectorAll('canvas[data-shader]').forEach(canvas=>{const fail=message=>{const status=canvas.nextElementSibling;if(status){status.textContent='Shader unavailable: '+message;status.hidden=false;}};try{(${shaderRuntimeSource()})(canvas,JSON.parse(canvas.dataset.shader),fail);}catch(error){fail(error.message);}});</script>` : '';
-  return `<!doctype html>\n<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title><style>${system ? styleText(tokenCssVariables(system)) : ''}html,body{margin:0;min-width:100%;min-height:100%;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}::selection{background:#4497ff;color:#fff}</style></head><body style="background:${escapeHtml(background)}">${body}${shaderScript}</body></html>`;
+function htmlDocument(title: string, body: string, background: string, system?: DesignSystem, stateCss = ''): string {
+  const shaderScript = body.includes('data-shader=') ? `<script>const createShaderRenderer=${shaderRuntimeSource(body.includes('data-shader-provider="shaders.com"')).replace(/<\/script/gi, '<\\/script')};document.querySelectorAll('canvas[data-shader]').forEach(canvas=>{const fail=message=>{const status=canvas.nextElementSibling;if(status){status.textContent='Shader unavailable: '+message;status.hidden=false;}};try{createShaderRenderer(canvas,JSON.parse(canvas.dataset.shader),fail);}catch(error){fail(error.message);}});</script>` : '';
+  return `<!doctype html>\n<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title><style>${system ? styleText(tokenCssVariables(system)) : ''}${styleText(stateCss)}html,body{margin:0;min-width:100%;min-height:100%;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}::selection{background:#4497ff;color:#fff}</style></head><body style="background:${escapeHtml(background)}">${body}${shaderScript}</body></html>`;
 }
 
 function requirePage(project: DesignProject, pageId: string): DesignPage {
@@ -203,18 +237,22 @@ export function exportPageHtml(project: DesignProject, pageId: string, options: 
   const width = options.canvasSize?.width ?? Math.max(1280, ...roots.map(node => node.x + nodeBoxSize(node).width + 80));
   const height = options.canvasSize?.height ?? Math.max(900, ...roots.map(node => node.y + nodeBoxSize(node).height + 80));
   const children = childIndex(nodes);
-  const renderOptions = { ...options, system: project.designSystem, styleFallbacks: new Map(page.nodes.map(node => [node.id, node.styles])), hasLinks: nodes.some(node => !!node.href && isSafeLink(node.href)) };
+  const stateRules: string[] = [];
+  const renderOptions = { ...options, system: project.designSystem, styleFallbacks: new Map(page.nodes.map(node => [node.id, node.styles])), hasLinks: nodes.some(node => !!node.href && isSafeLink(node.href)), stateRules };
   const label = pageLabel(project, page);
-  return htmlDocument(`${project.name} — ${label}`, `<main aria-label="${escapeHtml(label)}" style="position:relative;width:${width}px;height:${height}px">${roots.map(node => renderNode(node, children, renderOptions)).join('')}</main>`, '#171717', project.designSystem);
+  const body = `<main aria-label="${escapeHtml(label)}" style="position:relative;width:${width}px;height:${height}px">${roots.map(node => renderNode(node, children, renderOptions)).join('')}</main>`;
+  return htmlDocument(`${project.name} — ${label}`, body, '#171717', project.designSystem, stateRules.join(''));
 }
 
 export function exportNodeCode(project: DesignProject, pageId: string, nodeId: string, options: ExportOptions = {}): string {
   const page = requirePage(project, pageId);
   const nodes = resolvedNodes(page.nodes, project.designSystem), node = nodes.find(item => item.id === nodeId);
   if (!node) throw new Error(`Node not found: ${nodeId}`);
-  const renderOptions = { ...options, system: project.designSystem, styleFallbacks: new Map(page.nodes.map(node => [node.id, node.styles])), hasLinks: nodes.some(node => !!node.href && isSafeLink(node.href)) };
+  const stateRules: string[] = [];
+  const renderOptions = { ...options, system: project.designSystem, styleFallbacks: new Map(page.nodes.map(node => [node.id, node.styles])), hasLinks: nodes.some(node => !!node.href && isSafeLink(node.href)), stateRules };
   const size = nodeBoxSize(node);
-  return htmlDocument(`${project.name} — ${pageLabel(project, page)} — ${node.name}`, `<main style="position:relative;width:${size.width}px;height:${size.height}px">${renderNode({ ...node, x: 0, y: 0 }, childIndex(nodes), renderOptions)}</main>`, 'transparent', project.designSystem);
+  const body = `<main style="position:relative;width:${size.width}px;height:${size.height}px">${renderNode({ ...node, x: 0, y: 0 }, childIndex(nodes), renderOptions)}</main>`;
+  return htmlDocument(`${project.name} — ${pageLabel(project, page)} — ${node.name}`, body, 'transparent', project.designSystem, stateRules.join(''));
 }
 
 function filename(value: string): string {
@@ -222,7 +260,7 @@ function filename(value: string): string {
 }
 
 export function exportProjectBundle(project: DesignProject, options: ExportOptions = {}): { files: Record<string, string> } {
-  const files: Record<string, string> = { 'design.json': JSON.stringify(project, null, 2), 'DESIGN.md': designSystemMarkdown(project.designSystem), 'tokens.css': tokenCssVariables(project.designSystem) };
+  const files: Record<string, string> = { 'design.json': JSON.stringify(project, null, 2), 'DESIGN.md': designSystemMarkdown(project.designSystem), 'tokens.css': tokenCssVariables(project.designSystem), 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(project) };
   if (project.pages.some(page => page.nodes.some(node => node.jsx))) files['jsx/README.md'] = 'These files retain the authored JSX for source-backed components. The design.json document preserves their original markup, starter names, device presentation and compiled passive HTML. Edit through canvas_write_jsx in Codex Design. Read original starter files through canvas_read_design_reference; these JSX snippets assume those component names and are not standalone application modules. HTML screens remain viewable without executing JSX.\n';
   const pages: string[] = [];
   const screens: string[] = [];
@@ -247,6 +285,6 @@ export function exportProjectBundle(project: DesignProject, options: ExportOptio
   const boardNotes = boards.map(board => `- ${board.name}: ${board.pageCount} page(s)`).join('\n');
   const escapedName = escapeHtml(project.name);
   files['index.html'] = htmlDocument(project.name, `<main style="max-width:880px;margin:80px auto;padding:0 32px;color:#ececec"><p style="color:#ff650b;font-size:14px">CODEX DESIGN · PROJECT HANDOFF</p><h1 style="font-size:42px;margin:16px 0">${escapedName}</h1><p style="color:#a5a5a5;line-height:1.6">${escapeHtml(project.description)}</p><h2 style="margin-top:40px;font-size:22px">Included boards</h2><ul style="padding-left:20px;line-height:2.2">${boardHtml}</ul><h2 style="margin-top:40px;font-size:22px">Pages</h2><ul style="padding-left:20px;line-height:2.2">${pages.join('')}</ul><p style="margin-top:40px;color:#a5a5a5;font-size:14px">Open a page to inspect its complete canvas. Individual frames are in the screens folder. The included boards, pages, comments, source and shared project tokens are saved in design.json.</p></main><style>a{color:#ededed;text-underline-offset:4px}li span{color:#8f8f8f;font-size:13px;margin-left:12px}</style>`, '#171717');
-  files['README.md'] = `# ${project.name}\n\n${project.description}\n\nOpen index.html in a browser. This export runs locally without a build step or dependencies.\n\n## Included boards\n\n${boardNotes}\n\nThe application project name, revision and shared tokens are retained. This handoff contains the boards listed above and their pages and anchored conversations.\n\n- design.json is the complete editable document for the included boards, including source, comments, the project design system, literal style fallbacks, token bindings and viewport positions.\n- DESIGN.md contains the shared design system documentation and source provenance.\n- tokens.css contains the named CSS variables used by the generated HTML and React.\n- pages/ contains each board page at its original coordinates.\n- screens/ contains standalone HTML for each top-level frame. File names and labels include the board and page context.\n- Text and shapes are rendered as DOM elements with their original dimensions and styles. Passive vector layers remain SVG; other code layers run in script-free, network-blocked sandboxed iframes.\n\n## Screens and slides\n\n${screens.length ? screens.join('\n') : 'The included boards have no top-level frames.'}\n\n## Design system\n\nRead DESIGN.md for the shared rules, tokens and provenance. CSS variables use stable token IDs; the generated layout preserves the exported dimensions and stack geometry.\n\n\`\`\`json\n${JSON.stringify(project.designSystem, null, 2)}\n\`\`\`\n\nRevision: ${project.revision}\nExported project updated at: ${project.updatedAt}\n`;
+  files['README.md'] = `# ${project.name}\n\n${project.description}\n\nOpen index.html in a browser. This export runs locally without a build step or dependencies.\n\n## Included boards\n\n${boardNotes}\n\nThe application project name, revision and shared tokens are retained. This handoff contains the boards listed above and their pages and anchored conversations.\n\n- design.json is the complete editable document for the included boards, including source, comments, the project design system, literal style fallbacks, token bindings and viewport positions.\n- IMPLEMENTATION_NOTES.md contains saved object, ancestor and reusable component notes for behavior, native materials and preferred libraries beyond the visual reference. Read relevant notes before implementing.\n- DESIGN.md contains the shared design system documentation and source provenance.\n- tokens.css contains the named CSS variables used by the generated HTML and React.\n- pages/ contains each board page at its original coordinates.\n- screens/ contains standalone HTML for each top-level frame. File names and labels include the board and page context.\n- Text and shapes are rendered as DOM elements with their original dimensions and styles. Passive vector layers remain SVG; other code layers run in script-free, network-blocked sandboxed iframes.\n\n## Screens and slides\n\n${screens.length ? screens.join('\n') : 'The included boards have no top-level frames.'}\n\n## Design system\n\nRead DESIGN.md for the shared rules, tokens and provenance. CSS variables use stable token IDs; the generated layout preserves the exported dimensions and stack geometry.\n\n\`\`\`json\n${JSON.stringify(project.designSystem, null, 2)}\n\`\`\`\n\nRevision: ${project.revision}\nExported project updated at: ${project.updatedAt}\n`;
   return { files };
 }

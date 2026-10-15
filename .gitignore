@@ -9,3 +9,4 @@ releases/
 .DS_Store
 *.log
 .impeccable/config.local.json
+shared/shaders-com.generated.js

@@ -15,7 +15,11 @@ An infinite canvas for designing interfaces and slides with your coding agent. B
 
 [![Codex Design in four views: mobile screens, desktop workspace, design system with DESIGN.md, and Properties](docs/screenshots/codex-design-promo.png)](docs/screenshots/codex-design-promo.png)
 
-Projects contain boards, pages and frames. Each project shares one editable design system; each board keeps its own inspiration. Component conversations, media, source exports and version history stay with the document. Chats keep independent canvas selections. Generated screens appear progressively with a grey loading wipe. Export design systems and components as Markdown, React/CSS and portable libraries for another project.
+Projects contain boards, pages and frames. Each project shares one editable design system; each board keeps its own inspiration. Component conversations, media, source exports and version history stay with the document. Chats keep independent canvas selections. Generated screens appear progressively with an organic ASCII loading wipe. Export design systems and components as Markdown, React/CSS and portable libraries for another project.
+
+Editable project fields autosave after a short typing pause or when you click away. Unsent form drafts and export settings are retained in the current browser session; creating, sending, releasing, restoring and exporting still use their action buttons.
+
+Objects and reusable components also have saved implementation notes for behavior, native materials and preferred libraries the canvas cannot fully express. Edit them in Properties or the component library; notes autosave after a short typing pause or when you click away. Codex reads the notes with focused object context, and source/library exports include them as readable implementation guidance.
 
 ## Paste this into ChatGPT to install
 
@@ -46,6 +50,8 @@ After installation, ask: **“Design a mobile app in Codex Design.”** The canv
 
 ## Development
 
+New editor styling uses Tailwind utilities with the `tw:` prefix, compiled by the official Vite plugin. `src/tailwind.css` scans `src/` and omits Preflight so existing editor and canvas styles retain their appearance. Reuse the existing house controls where applicable.
+
 Requires Node.js 22+ and npm.
 
 ```sh
@@ -59,4 +65,8 @@ See [setup and hosting](docs/plugin.md), [MCP tools](docs/mcp.md), [product beha
 
 ## Credits
 
+The existing-app component discovery workflow adapts and extends [component-canvas](https://github.com/ibelick/ui-skills/blob/main/skills/component-canvas/SKILL.md) by [Julien Thibeaut (ibelick)](https://github.com/ibelick), from [ibelick/ui-skills](https://github.com/ibelick/ui-skills). It populates Codex Design's Components library with source-backed specimens and documented variant coverage. The adaptation and [upstream MIT license](skills/codex-design/skills/component-canvas/LICENSE) are bundled with the plugin.
+
 Thanks to [asgeirtj/system_prompts_leaks](https://github.com/asgeirtj/system_prompts_leaks) for the original design prompt, skills and JSX examples, preserved with the requested `claude-design` → `codex-design` rename. [Provenance](skills/codex-design/references/upstream-source.json) and the [upstream CC0 license](skills/codex-design/references/upstream-LICENSE) are included. Claude Design inspired the canvas workflow and visual direction. This is an independent project, unaffiliated with OpenAI or Anthropic.
+
+New shader effects use the official [shaders.com](https://shaders.com/) components (`shaders@4.0.4`, MIT) and require WebGPU. Their source and dependency licenses travel with HTML/React exports. Existing GLSL layers remain supported.

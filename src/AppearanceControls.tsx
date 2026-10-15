@@ -7,6 +7,7 @@ import { safeCssText, safeEffectColor } from '../shared/effects';
 import { Select } from './Select';
 import { colorParts, withOpacity } from './color-picker';
 import AngleDial from './AngleDial';
+import { AutosaveInput } from './AutosaveFields';
 import './appearance-controls.css';
 
 type Props = {
@@ -20,7 +21,7 @@ type Props = {
 type InputProps = {
   label: string;
   value: string | number;
-  onCommit: (value: string) => void;
+  onCommit: (value: string) => unknown;
   disabled: boolean;
   identity: string;
   reset: number;
@@ -38,36 +39,12 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 const colorIsValid = (value: string) => safeEffectColor(value) && CSS.supports('color', value);
 
 function DraftField({ label, value, onCommit, disabled, identity, reset, type = 'text', min, max, suffix, shortLabel, stacked, hiddenLabel, title }: InputProps) {
-  const [draft, setDraft] = useState(String(value));
-  const focused = useRef(false), dirty = useRef(false), focusIdentity = useRef(identity), latest = useRef(String(value));
-  latest.current = String(value);
-  useLayoutEffect(() => { if (!focused.current) setDraft(String(value)); }, [value]);
-  useLayoutEffect(() => { focused.current = false; dirty.current = false; setDraft(latest.current); }, [identity, reset]);
-  const cancel = () => { dirty.current = false; setDraft(latest.current); };
-  const commit = () => {
-    focused.current = false;
-    if (disabled || focusIdentity.current !== identity || !dirty.current) { cancel(); return; }
-    dirty.current = false;
-    let next = draft.trim();
-    if (type === 'number') {
-      if (!next || !Number.isFinite(Number(next))) { cancel(); return; }
-      next = String(clamp(Number(next), min ?? -Infinity, max ?? Infinity));
-    }
-    setDraft(next);
-    if (next !== latest.current) onCommit(next);
-    else setDraft(latest.current);
-  };
   return <label className={`property-field appearance-field${stacked ? ' appearance-stacked' : ''}${hiddenLabel ? ' appearance-hidden-label' : ''}`}>
-    <span>{shortLabel ?? label}</span>
-    <div className="field-input"><input aria-label={label} type={type} step={type === 'number' ? 'any' : undefined} min={min} max={max} value={draft} disabled={disabled} title={title} onFocus={() => { focused.current = true; focusIdentity.current = identity; }} onChange={event => { dirty.current = true; setDraft(event.target.value); }} onBlur={commit} onKeyDown={event => {
-      event.stopPropagation();
-      if (event.key === 'Enter') event.currentTarget.blur();
-      if (event.key === 'Escape') { event.preventDefault(); cancel(); event.currentTarget.blur(); }
-    }}/>{suffix && <span>{suffix}</span>}</div>
+    <span>{shortLabel ?? label}</span><div className="field-input"><AutosaveInput key={`${identity}/${reset}`} aria-label={label} type={type} step={type === 'number' ? 'any' : undefined} min={min} max={max} value={String(value)} disabled={disabled} title={title} onSave={onCommit} normalize={value => value.trim()} onKeyDown={event => event.stopPropagation()}/>{suffix && <span>{suffix}</span>}</div>
   </label>;
 }
 
-function ColorControl({ label, shortLabel, value, onCommit, disabled, identity, reset, stacked = false, opacity = 1 }: { label: string; shortLabel?: string; value: string; onCommit: (value: string) => void; disabled: boolean; identity: string; reset: number; stacked?: boolean; opacity?: number }) {
+function ColorControl({ label, shortLabel, value, onCommit, disabled, identity, reset, stacked = false, opacity = 1 }: { label: string; shortLabel?: string; value: string; onCommit: (value: string) => unknown; disabled: boolean; identity: string; reset: number; stacked?: boolean; opacity?: number }) {
   const input = useRef<HTMLInputElement>(null), pickerIdentity = useRef(identity), dirty = useRef(false);
   const [picker, setPicker] = useState(() => colorParts(value).hex);
   const current = useRef({ value, disabled, identity, onCommit }); current.current = { value, disabled, identity, onCommit };
@@ -154,34 +131,31 @@ export default function AppearanceControls({ node, effective, system, disabled, 
     if (gesture.current) { gesture.current = null; setReset(value => value + 1); }
     setCurrent(effective.styles);
   }, [effective.styles]);
-  useLayoutEffect(() => { if (disabled) { cancelGesture(); setReset(value => value + 1); } }, [disabled]);
+  useLayoutEffect(() => { if (disabled) cancelGesture(); }, [disabled]);
   useLayoutEffect(() => { const cancel = () => cancelGesture(); window.addEventListener('blur', cancel); return () => window.removeEventListener('blur', cancel); }, []);
 
-  const mutate = (action: () => Promise<boolean>, next = latest.current) => {
-    if (!mounted.current || context.current.disabled || context.current.id !== node.id || pending.current) return;
+  const mutate = async (action: () => Promise<boolean>, next = latest.current) => {
     const targetId = node.id, token = ++operation.current, beforeSaved = saved.current;
     pending.current = true;
-    if (panel.current?.contains(document.activeElement)) panel.current.focus({ preventScroll: true });
-    setCurrent(next); setSaving(true); setError('');
-    const complete = (success: boolean) => {
-      if (!mounted.current || operation.current !== token || context.current.id !== targetId) return;
+    if (mounted.current) { setCurrent(next); setSaving(true); setError(''); }
+    let success = false;
+    try { success = await action(); } catch { /* The autosave field retains its draft. */ }
+    if (mounted.current && operation.current === token && context.current.id === targetId) {
       pending.current = false; setSaving(false);
-      if (!success) {
-        setCurrent(saved.current); setReset(value => value + 1);
-        setError('Could not save appearance. Your saved settings have been restored.');
-      } else if (saved.current !== beforeSaved) setCurrent(saved.current);
-    };
-    try { void action().then(complete, () => complete(false)); } catch { complete(false); }
+      if (!success) { setCurrent(saved.current); setError('Could not save appearance. Your draft is kept in the field.'); }
+      else if (saved.current !== beforeSaved) setCurrent(saved.current);
+    }
+    return success;
   };
   const change = (patch: Partial<NodeStyle>) => mutate(() => onChange(patch), { ...latest.current, ...patch });
-  const reject = (message: string) => { setError(message); setReset(value => value + 1); };
+  const reject = (message: string) => { setError(message); return false; };
   const color = (label: string, patch: (value: string) => Partial<NodeStyle>) => (input: string) => {
     const value = input.trim();
-    if (!colorIsValid(value)) { reject(`Use a valid ${label.toLowerCase()}, such as #4497ff or rgb(68 151 255).`); return; }
-    change(patch(value));
+    if (!colorIsValid(value)) return reject(`Use a valid ${label.toLowerCase()}, such as #4497ff or rgb(68 151 255).`);
+    return change(patch(value));
   };
   const common = { disabled: locked, identity: node.id, reset };
-  const number = (label: string, value: number, onCommit: (value: number) => void, options: Partial<Pick<InputProps, 'min' | 'max' | 'suffix' | 'shortLabel' | 'stacked' | 'hiddenLabel' | 'title' | 'identity'>> = {}) => <DraftField {...common} label={label} value={compact(value)} type="number" onCommit={input => onCommit(Number(input))} {...options}/>;
+  const number = (label: string, value: number, onCommit: (value: number) => unknown, options: Partial<Pick<InputProps, 'min' | 'max' | 'suffix' | 'shortLabel' | 'stacked' | 'hiddenLabel' | 'title' | 'identity'>> = {}) => <DraftField {...common} label={label} value={compact(value)} type="number" onCommit={input => onCommit(Number(input))} {...options}/>;
   const tokenControl = (property: BindableStyleProperty, label: string) => {
     const tokenId = node.tokenBindings?.[property] ?? '', tokens = system.tokens.filter(token => compatibleTokenKinds(property).includes(token.kind)), linked = tokens.find(token => token.id === tokenId);
     const hint = tokenId ? `Linked to ${linked?.name ?? 'unavailable token'}. Custom edits detach this token.` : `Link ${label.toLowerCase()} to a design token.`;

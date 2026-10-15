@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Check, ChevronDown, ChevronRight, LayoutTemplate, LoaderCircle, Plus, Search, Upload } from 'lucide-react';
 import type { DesignProject, ProjectSummary } from '../shared/types';
+import { useLocalDraft } from './useLocalDraft';
 
 const batchSize = 6;
 
@@ -20,7 +21,9 @@ type Props = {
 
 export default function ProjectMenu({ project, projects, boardId, open, readOnly, onToggle, onSelectProject, onSelectBoard, onCreateProject, onCreateBoard, onImport }: Props) {
   const [view, setView] = useState<'boards' | 'projects'>('boards');
-  const [search, setSearch] = useState(''), [name, setName] = useState('');
+  const [search, setSearch] = useState('');
+  const local = useLocalDraft(view === 'boards' && project ? `${project.id}/new-board` : 'new-project', {name: ''});
+  const name = local.value.name, setName = (name: string) => local.setValue({name});
   const [visibleCount, setVisibleCount] = useState(batchSize), [busy, setBusy] = useState(false);
   const board = project?.boards.find(item => item.id === boardId);
   const showingBoards = view === 'boards' && !!project;
@@ -30,11 +33,11 @@ export default function ProjectMenu({ project, projects, boardId, open, readOnly
   const matchingProjects = projects.filter(item => item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
 
   useEffect(() => {
-    if (open) { setView(project ? 'boards' : 'projects'); setSearch(''); setName(''); setVisibleCount(batchSize); }
+    if (open) { setView(project ? 'boards' : 'projects'); setSearch(''); setVisibleCount(batchSize); }
   }, [open, project?.id]);
   useEffect(() => { setVisibleCount(batchSize); }, [search]);
 
-  const switchView = (next: 'boards' | 'projects') => { setView(next); setSearch(''); setName(''); setVisibleCount(batchSize); };
+  const switchView = (next: 'boards' | 'projects') => { setView(next); setSearch(''); setVisibleCount(batchSize); };
   const create = async (template: 'blank' | 'demo' = 'blank') => {
     if (busy) return;
     setBusy(true);
@@ -72,7 +75,7 @@ export default function ProjectMenu({ project, projects, boardId, open, readOnly
       </div>
       {showingBoards && visibleCount < boards.length && <button className="dropdown-item load-more-boards" onClick={() => setVisibleCount(count => count + batchSize)}><ChevronDown size={14}/><span>Load more</span><small>{visibleCount} of {boards.length}</small></button>}
       <div className="menu-divider"/>
-      {!readOnly && <form className="new-project-form" onSubmit={event => { event.preventDefault(); void create(); }}>
+      {!readOnly && <form className="new-project-form" onBlurCapture={local.onBlur} onCompositionStartCapture={local.onCompositionStart} onCompositionEndCapture={local.onCompositionEnd} onSubmit={event => { event.preventDefault(); void create(); }}>
         <input aria-label={showingBoards ? 'New board name' : 'New project name'} placeholder={showingBoards ? 'New board name' : 'New project name'} value={name} maxLength={160} onChange={event => setName(event.target.value)}/>
         <button className="primary-button" disabled={busy} type="submit">{busy ? <LoaderCircle size={14} className="spin"/> : <Plus size={14}/>} {busy ? 'Creating…' : showingBoards ? 'New board' : 'New project'}</button>
       </form>}

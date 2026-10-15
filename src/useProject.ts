@@ -12,6 +12,28 @@ function includeProject(list: ProjectSummary[], project: DesignProject) {
   if (existing && existing.revision > project.revision) return list;
   return [...list.filter((item) => item.id !== project.id), summary(project)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
 }
+// Reuses every unchanged subtree of the previous snapshot so memoized canvas layers and undo entries share objects.
+// Arrays of records with string ids are matched by id, so inserts and reorders keep untouched nodes.
+export function share<T>(prev: unknown, next: T): T {
+  if (prev === next || !prev || !next || typeof prev !== 'object' || typeof next !== 'object' || Array.isArray(prev) !== Array.isArray(next)) return next;
+  if (Array.isArray(next)) {
+    const old = prev as unknown[], byId = new Map(old.map(item => [(item as { id?: unknown } | null)?.id, item]));
+    let same = old.length === next.length;
+    const items = next.map((item, index) => {
+      const id = (item as { id?: unknown } | null)?.id, value = share(typeof id === 'string' ? byId.get(id) : old[index], item);
+      if (value !== old[index]) same = false;
+      return value;
+    });
+    return (same ? prev : items) as T;
+  }
+  const old = prev as Record<string, unknown>, fields: Record<string, unknown> = {};
+  let same = Object.keys(old).length === Object.keys(next).length;
+  for (const [key, item] of Object.entries(next)) {
+    const value = fields[key] = share(old[key], item);
+    if (value !== old[key] || !(key in old)) same = false;
+  }
+  return (same ? prev : fields) as T;
+}
 function rememberProject(id: string) {
   if (embedded) return;
   try { const url = new URL(location.href); url.searchParams.set('project', id); history.replaceState(null, '', url); }
@@ -59,15 +81,17 @@ export function useProject() {
     if (mounted.current) { setProject(null); setPaneSelection(null); setBoardNavigation(null); }
   }, []);
   const applySnapshot = useCallback((value: DesignProject) => {
-    if (!mounted.current || (ref.current?.id === value.id && ref.current.revision > value.revision)) return;
+    if (!mounted.current || (ref.current?.id === value.id && ref.current.revision > value.revision)) return value;
+    if (ref.current?.id === value.id) value = share(ref.current, value);
     setProjects(list => includeProject(list, value));
     if (binding.current?.projectId === value.id) {
       try {
         const next = resolveSelection(value, binding.current);
         if (selectionKey(next) !== selectionKey(binding.current)) { binding.current = next; setPaneSelection(next); }
-      } catch (error) { clearPane(); setError(errorMessage(error)); return; }
+      } catch (error) { clearPane(); setError(errorMessage(error)); return value; }
     }
     ref.current = value; setProject(value);
+    return value;
   }, [clearPane]);
   const activate = useCallback((value: DesignProject, target: CanvasTarget) => {
     const next = resolveSelection(value, target);
@@ -197,7 +221,7 @@ export function useProject() {
         return null;
       }
       if (!current()) return null;
-      applySnapshot(next); setError('');
+      next = applySnapshot(next); setError('');
       try { onApplied?.(before, next); } catch (error) { console.error('Saved design callback failed:', error); }
       return next;
     }).finally(() => { pending.current--; if (mounted.current) setSaving(pending.current); });

@@ -19,14 +19,14 @@ const commonFonts: SelectOption[] = [
   { label: 'Courier New', value: '"Courier New", Courier, monospace' },
 ];
 
-export function FontPicker({ label, value, onChange, disabled, families = [] }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; families?: string[] }) {
+export function FontPicker({ label, value, onChange, disabled, families = [], autoSave = true }: { label: string; value: string; onChange: (value: string) => unknown; autoSave?: boolean; disabled?: boolean; families?: string[] }) {
   const options = useMemo(() => {
     const saved = [...new Set([value, ...families].filter(family => family.trim()))];
     return [...saved.map(family => ({ value: family, label: family })), ...commonFonts.filter(option => !saved.includes(option.value))].map(option => ({ ...option, fontFamily: option.value }));
   }, [value, families]);
   const hint = 'Enter a CSS font stack or choose a font. Previews use installed fonts and CSS fallbacks; fonts are not installed by this control.';
   return <div className="font-picker" style={{ '--font-picker-family': value || 'inherit' } as CSSProperties} title={hint}>
-    <Field label={label} value={value} onChange={onChange} disabled={disabled} title={hint}/>
+    <Field autoSave={autoSave} label={label} value={value} onChange={onChange} disabled={disabled} title={hint}/>
     <Select className="font-picker-select" label={`Choose ${label.toLocaleLowerCase()}`} value={value} onChange={onChange} disabled={disabled} options={options} searchable triggerContent={<ChevronDown size={12} aria-hidden="true"/>}/>
   </div>;
 }

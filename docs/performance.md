@@ -1,5 +1,123 @@
 # Performance measurements
 
+## Content-addressed save history — October 14, 2026
+
+Measured on macOS arm64 with Node.js 24.19.0, using `npx tsx` against `ProjectStore` in fresh scratch data directories. No user project was read or changed. There are three generated workloads made from copies of the GaugeReel demo, with the same node styling as the canvas-scaling workload:
+
+- 3 copies on 1 page (0.42 MB of JSON)
+- 12 copies on 1 page (1.69 MB)
+- 12 copies, one per page, across 12 pages (1.69 MB)
+
+Each workload is imported once. Then 20 sequential `update_node` saves move the first root frame. The table reports:
+
+- median and p90 save time over saves 3–20
+- growth of the history directory per save, excluding the import
+- one `listVersions` call over 21 revisions
+- one `getVersion(5)` call
+
+The before and after columns are each the mean of two runs of the same script, run in the same order. Raw output is in `artifacts/history-save-before.txt` and `artifacts/history-save-after.txt`, which are ignored by Git.
+
+| Workload | Measurement | Before | After | Absolute change | Percentage change |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 3×, 1 page | Save median | 61.95 ms | 56.90 ms | −5.05 ms | −8.2% |
+| | Save p90 | 66.20 ms | 59.30 ms | −6.90 ms | −10.4% |
+| | History per save | 433 KB | 433 KB | 0 | 0% |
+| | List versions | 21.60 ms | 7.60 ms | −14.00 ms | −64.8% |
+| | Get revision | 18.00 ms | 15.45 ms | −2.55 ms | −14.2% |
+| 12×, 1 page | Save median | 142.60 ms | 86.65 ms | −55.95 ms | −39.2% |
+| | Save p90 | 149.90 ms | 91.00 ms | −58.90 ms | −39.3% |
+| | History per save | 1,729.5 KB | 1,729.5 KB | 0 | 0% |
+| | List versions | 71.55 ms | 13.55 ms | −58.00 ms | −81.1% |
+| | Get revision | 67.85 ms | 48.40 ms | −19.45 ms | −28.7% |
+| 12×, 12 pages | Save median | 144.30 ms | 83.50 ms | −60.80 ms | −42.1% |
+| | Save p90 | 147.70 ms | 88.75 ms | −58.95 ms | −39.9% |
+| | History per save | 1,730.6 KB | 146 KB | −1,584.6 KB | −91.6% |
+| | List versions | 76.20 ms | 14.45 ms | −61.75 ms | −81.0% |
+| | Get revision | 70.20 ms | 43.15 ms | −27.05 ms | −38.5% |
+
+Changes, in `server/history.ts` and `server/store.ts`:
+
+- **History format 2 stores pages as content-addressed blobs.** Each page, the design system and the comment threads are written as `history/<id>/blobs/<sha256>.json`. A blob that already exists is skipped. Each revision directory now holds a small `snapshot.json` that lists those hashes, plus the remaining project fields inline. The project file is assembled from the same JSON fragments, so each save serializes the project once.
+- **The head is verified by hash, not by reading it back.** Before, every save read the previous revision's full snapshot and compared it as JSON to the project in memory. Now the store remembers the hash of each project it committed and compares it with `version.json`. The full read-back compare runs only if the hashes differ. That can happen, for example, when a legacy document was normalized on read. A scratch check that counted `readVersion` calls on the 12-page workload found 0 read-backs over 20 warm saves, and 0 on the first save of a freshly started store. A cold store hashes its serialized project once instead.
+- **One clone per save.** `mutate` reads the cached project without cloning it, clones it once as the working copy, and caches the validated result after saving. Before, the cached read and the working copy each cost a full `structuredClone`. *Not measured separately:* the earlier 120× profile timed one clone at 27.4 ms.
+- **Retention keeps everything.** Nothing is pruned, and unreferenced blobs are never collected.
+
+User effect:
+
+- On the 1.69 MB workloads, a server-side save (`ProjectStore.mutate`) now takes about 84–87 ms instead of 143–144 ms. *Estimate, not measured in the UI:* agent edits and canvas drops should reach "All changes saved" about 60 ms sooner. Network time and client reconciliation weren't measured.
+- Server-side `listVersions` is about 5× faster. *Estimate:* the History panel opens correspondingly faster, but that wasn't timed in the browser.
+- On a project split across 12 pages, an edit to one page adds 146 KB of history instead of 1.7 MB. 20 saves now grow history by 2.9 MB instead of 34.6 MB.
+
+Limits:
+
+- An edit still writes the whole changed page as a new blob. So a single-page project gains nothing in history size, and the 3× workload (one page, little else) improves least.
+- Each save still rewrites the full `<id>.json`.
+- Fields other than pages, the design system and threads are inlined, so every revision rewrites them. That includes `boards` (up to 100) and `tokens`. On this workload `snapshot.json` is 1,703 bytes, with `boards` at 119 bytes and `tokens` at 122 bytes.
+- Integrity: the head check confirms the version record, not the blob bytes on disk. Because existing blobs are skipped, a blob corrupted on disk keeps being referenced by later revisions. The corruption only surfaces on preview or restore, and the project file stays intact. Temporary `.blob-*` files left by a crash are never cleaned up.
+- Each save still runs the full zod `projectSchema` validation, and `libraryChanges` still stringifies the design system and components twice. Both are left for phase 2.
+- The time left in the 3× save was not broken down. *Estimate, not measured:* it is mostly fixed costs such as validation, fsync calls and the write lock.
+- The get-revision result for the 12×, 1-page workload varied between runs: 52.8 ms and 44.0 ms.
+
+Compatibility:
+
+- Existing format-1 history stays readable. The first save on such a project upgrades `manifest.json` and the `.history-<id>.json` marker to format 2, then adds format-2 revisions alongside the old `project.json` revisions.
+- Older plugin builds reject format-2 history ("Saved history metadata has an invalid structure.") instead of misreading it. Don't run an older build against the same data directory after upgrading.
+
+A scratchpad script checked compatibility directly. It used the unchanged `HEAD` history module to write format-1 revisions 0–1, then confirmed the following with the new store:
+
+- new saves upgrade the manifest and marker
+- the version list spans both formats
+- format-1 previews are byte-identical
+- restoring a format-1 revision and a format-2 revision both work
+- a cold store verifies the head by hash and keeps saving
+- an interrupted save left in `pending.json` rolls back and saving resumes
+- a tampered page blob fails with a checksum error
+
+`npm run typecheck` and `npm run build` pass. No tests, dependencies or fixtures were added or run.
+
+## Large-project canvas scaling — October 14, 2026
+
+Workload: a generated project made of 12 copies of the GaugeReel demo, giving 4,944 nodes, 192 root frames, 900 vertical-stack parents and 2,448 token-bound text nodes on one page (1.77 MB of JSON). It lived in a scratch data directory; no user project was read or changed. The before and after runs each used freshly regenerated data and a fresh local dev server with React development Strict Mode and `?profile=1`, in the same 1024 × 736 stage of the built-in browser pane. That pane was hidden, which throttles `requestAnimationFrame`, so both runs mapped rAF to a MessageChannel macrotask. A step means event dispatch, two macrotasks, then a forced layout. These numbers are main-thread work per step, not frame rate. Paint and raster were not measured. Each figure comes from a single run.
+
+Sequence: fit all (`1`), 60 wheel-pan steps, 40 ctrl+wheel zoom steps, fit all again, pointerdown on empty canvas, then drag the first root frame through 60 pointer moves and drop it, timing until the status reads "All changes saved".
+
+| Measurement | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Drag: mean step | 62.16 ms | 11.43 ms | −50.73 ms | −81.6% |
+| Drag: p95 step | 125.2 ms | 22.1 ms | −103.1 ms | −82.3% |
+| Drag: worst step | 131.1 ms | 34.4 ms | −96.7 ms | −73.8% |
+| Drag: React render time, 60 moves | 2,136.7 ms | 445.0 ms | −1,691.7 ms | −79.2% |
+| Drag: design-node renders, 60 moves | 593,280 | 120 | −593,160 | −99.98% |
+| Drop to saved | 383.4 ms | 328.8 ms | −54.6 ms | −14.2% |
+| Drop: React render time | 47.4 ms | 8.3 ms | −39.1 ms | −82.5% |
+| Drop: design-node renders | 9,888 | 2 | −9,886 | −99.98% |
+| Drop: SVG parses | 1,776 | 0 | −1,776 | −100% |
+| Pan: mean step | 4.65 ms | 1.80 ms | −2.85 ms | −61.3% |
+| Pan: p95 step | 13.7 ms | 6.1 ms | −7.6 ms | −55.5% |
+| Pan: React render time | 165.7 ms | 29.4 ms | −136.3 ms | −82.3% |
+| Zoom: mean step | 8.50 ms | 8.24 ms | −0.26 ms | −3.1% |
+| Zoom: p95 step | 31.2 ms | 24.6 ms | −6.6 ms | −21.2% |
+| Zoom: React render time | 150.8 ms | 176.8 ms | +26.0 ms | +17.2% |
+| Zoom: design-node renders | 3,822 | 2,652 | −1,170 | −30.6% |
+| Fit-all mount | 222.2 ms | 237.2 ms | +15.0 ms | +6.8% |
+| Pointerdown on empty canvas | 37.8 ms | 33.6 ms | −4.2 ms | −11.1% |
+
+Changes:
+
+- **Unchanged layers keep their identity.** Each server snapshot is reconciled against the previous one (`share` in `src/useProject.ts`): records are matched by id, and every unchanged node, page, thread and token reuses its existing object. The canvas child index keeps sibling arrays when nothing beneath them changed, and memoized layers compare only their own child list. Token resolution and stack positioning take an optional WeakMap cache, which only the editor passes. The server mutates its working copy in place, so server and export paths stay uncached. Result: a drag or a save re-renders the moved frame instead of all 4,944 layers.
+- **Undo history stores references.** Entries used to hold `structuredClone` copies of the page before and after, plus its threads, and each edit ran `JSON.stringify` on both pages. Entries now point to the shared snapshots, and the staleness check uses identity first, then a structural compare. *Estimate, not measured:* on this 1.77 MB page, 60 entries previously retained up to 120 full page copies. Now each entry adds only the objects that edit changed plus new arrays of pointers. Each save also skips about 3.5 MB of stringification and four deep clones.
+- **Frame labels are culled to the stage, and comment pins look up their anchors by id instead of scanning every node per thread.** Two labels rendered for two onscreen frames at 91%, with none offscreen. `layoutFrameLabels` measured 0.56 ms per call in isolation on this workload, so its O(frames²) loop was left alone.
+
+User effect: on a corporate-scale page, the mean main-thread work per drag pointer move fell from 62 ms to 11 ms. That fits within a 16.7 ms frame budget at 60 Hz on average. The p95 step is 22.1 ms, which is still over budget. *Estimate:* the earlier drag could not exceed about 16 fps. Drops, agent edits and saves from other sessions no longer re-render the whole canvas. The before and after runs used the same script and order. Pan also measured faster, but the workload has no comment threads, it renders no frame labels at fit zoom, and no pan-path code changed, so this delta isn't attributed to any specific change. Reproduce it before relying on it. Zoom, fit-all, pointerdown and drop-to-saved (a single run that depends on the network) show no reliable change: the zoom render-time and fit-all increases are within the variance seen between earlier runs. Component-library previews already mount lazily through `IntersectionObserver`, so thousands of components do not mount at once.
+
+Checks: after the drag, the frame was saved at x = 2595. Undo restored (80, 280) and redo restored 2595, confirming that reference-based undo entries round-trip. `npm run typecheck` and `npm run build` pass. Production JS is 3,405.68 kB (965.74 kB gzip). The before bundle was not built, so no bundle-size delta is claimed.
+
+Not measured: RAM (the `performance.memory` readings of 63–125 MB were too coarse and depend on garbage-collection timing), paint, frame rate and production-build interaction timings.
+
+**Scaling ceiling (needs a product decision).** This workload is close to the current hard limits. At demo density a project caps out near 190 frames: `MAX_INPUT_BYTES` (2 MiB, `shared/validation.ts`) also bounds the API JSON body, the `/mcp` body (`2mb`) and history `snapshotLimit`, and pages and components are capped at 5,000 nodes each. A 25× copy of the demo (about 10,300 nodes) was rejected. Hundreds of frames with thousands of components will need these coupled limits raised together, and ideally paged or per-board persistence. That was left unchanged.
+
+Raw captures: `artifacts/scale-canvas-before.json` and `artifacts/scale-canvas-after.json` (ignored by Git). No tests, dependencies or fixtures were added or run.
+
 ## Progressive canvas synchronization — October 14, 2026
 
 Measured on macOS arm64 with Node.js 24.19.0, using the existing GaugeReel project at revision 4: one board, one page, 16 frames and 412 nodes. The project remained unchanged throughout both measurements. No test data was created and no design document was modified.
@@ -669,3 +787,64 @@ Production package/build and strict unused-symbol TypeScript compilation passed,
 This is a project-binding correction, not a runtime performance optimization. Before, the actual bare browser URL redirected itself to the latest Nook project without a selection; afterward the same URL stays unbound and shows the existing project chooser. A missing-project URL now stays on its error/chooser instead of falling back to a different design. Valid explicit selections/reloads remain usable in independent windows. No loading, interaction, CPU, memory or FPS gain is claimed.
 
 Exact production artifact comparison on the same machine against `adb7aeb`: widget.html 830,805→830,520 B (−285 B, −0.03430%); Python gzip level 9 with fixed mtime 237,789→237,676 B (−113 B, −0.04752%). The Codex, browser and JSX runtime bundles are byte-identical. The change removes the implicit latest-project/empty-list fallback and reuses the existing project menu; no dependency is added. All 27 recorded files in the isolated inspected store remain unchanged. Production packaging and strict TypeScript compilation are the validation method; no tests were added or run. Empty-library creation, authentication retries and installed-host context delivery remain unexercised.
+
+## Camera commits within the display frame — October 14, 2026
+
+The canvas had no fixed 60 Hz timer. Its animation-frame callback queued an asynchronous React update, leaving the camera transform and overlays unchanged until after that callback phase. The camera now commits synchronously inside its existing single queued animation-frame callback. Library panning and zooming use the same frame batching; their latest camera remains available immediately to input handlers and the per-section cache. Pointer release, cancellation, section changes and unmount flush or cancel pending work. No display settings, saved document format, rendering quality or dependencies change.
+
+Method: freeze the existing production build and its two camera source files before editing, then compare it with the completed production build in the same in-app browser. Both use the same isolated saved GaugeReel document ("Component discovery preview", revision 7, 412 native nodes, 16 root screens, five library tokens), warm resources and a 1,280 × 720 viewport. The design canvas is 1,280 × 688; the library canvas is 944 × 656 with its 336 px panel open. Culling remains enabled; 335 nodes are mounted at the design overview's resting position. This is not a large component-library or shader-heavy workload.
+
+Three rounds per build/surface alternate phase order: before/after, after/before, before/after. Each round reloads the same document, selects Hand and performs eight native drags, alternating directions. Design drags run (480, 520)↔(1,040, 520), a 560 CSS px displacement; library drags run (150, 480)↔(790, 480), a 640 CSS px displacement. Each round receives 64 pointer-move events and 64 camera transform updates. A separate wheel comparison performs eight native 0.5-page scrolls, alternating down/up at (1,000, 500), with eight events and eight updates per build.
+
+Identical temporary HTML instrumentation captures native input timestamps, camera style mutations and rAF intervals during input plus a 150 ms tail. A window bubble listener registers an additional rAF probe after the application's camera callback is queued. "Absent at frame probe" means the corresponding transform mutation had not occurred when that later callback ran. It measures callback-phase delivery, **not dropped display frames**. Input-to-DOM time ends at the transform's MutationObserver callback; it excludes compositor, paint and display presentation. Timing rows below are medians of the three round medians; late-update counts sum all three rounds. Instrumentation, frozen builds and raw captures are outside the repository and packaged widget.
+
+| Measured camera outcome | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Design hand-pan updates absent at frame probe | 192 / 192 | 0 / 192 | −192 updates | −100% |
+| Library hand-pan updates absent at frame probe | 192 / 192 | 0 / 192 | −192 updates | −100% |
+| Design hand-pan input-to-DOM median | 1.20 ms | 0.60 ms | −0.60 ms | −50.00% |
+| Library hand-pan input-to-DOM median | 0.80 ms | 0.50 ms | −0.30 ms | −37.50% |
+| Design active rAF interval median | 8.30 ms | 8.30 ms | 0.00 ms | 0.00% |
+| Library active rAF interval median | 8.30 ms | 8.30 ms | 0.00 ms | 0.00% |
+| Design active rAF interval p95 | 9.20 ms | 8.90 ms | −0.30 ms | −3.26% |
+| Library active rAF interval p95 | 8.90 ms | 8.80 ms | −0.10 ms | −1.12% |
+| Wheel updates absent at frame probe, one round | 8 / 8 | 0 / 8 | −8 updates | −100% |
+| Wheel input-to-DOM median, one round | 1.30 ms | 1.40 ms | +0.10 ms | +7.69% |
+
+User effect: the camera and its overlays are ready inside the requested browser frame instead of waiting for React to commit after the frame callback phase. The browser already supplied roughly 120 Hz callbacks in this session; this change removes the observed scheduling deferral rather than establishing a 60→120 rendered-FPS improvement. Wheel input-to-DOM time did not improve, and the small p95 differences are not a general smoothness guarantee. No ≥50 ms long-task entries were observed in the short captures; this is not CPU utilization or proof that every frame met its paint deadline.
+
+Production TypeScript compilation, widget/runtime build and direct UI inspection passed. Wheel panning, library zoom buttons, keyboard panning, section camera restoration, returning to the design canvas and selection alignment were inspected through the actual UI. No tests, assertions, fixtures or dependencies were added or run. Exact widget bytes are 3,492,877→3,493,165 B (+288 B, +0.0082%); Python gzip level 9 with fixed mtime is 970,063→970,172 B (+109 B, +0.0112%). The existing large-chunk build warning remains.
+
+Actual screen-paint FPS, GPU presentation, dropped display frames, true input-to-paint latency, app CPU/RAM, very large boards and installed-plugin-host refresh behavior remain unmeasured. Synchronous React work must still fit the browser's frame budget; this does not override browser, host, power-mode or display limits. Primary API references: [requestAnimationFrame scheduling](https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame) and [React synchronous DOM commits and caveats](https://react.dev/reference/react-dom/flushSync). Raw local captures and frozen builds: `/private/tmp/codex-pan-profile/`; summary: `summary.json` in that directory.
+
+## Hover, pressed and focus states as data — October 14, 2026
+
+Workload: a generated 4,944-node single-page project (`exportPageHtml` and `exportTargetReact`, page scope), run read-only in one Node.js 24.19.0 process with `tsx`. Each case ran 3 warmups, then 12 timed samples; the table reports medians. The "states" case adds `styles.states` (hover fill + opacity, pressed fill) to every fifth frame/rectangle, 238 layers. Same machine, same document, back to back; run-to-run noise was about ±1.5 ms.
+
+| Measurement | No states (baseline) | 238 layers with states | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| HTML page bytes | 2,327,833 B | 2,364,159 B | +36,326 B | +1.56% |
+| React + CSS bytes | 2,635,692 B | 2,658,664 B | +22,972 B | +0.87% |
+| HTML export median | 17.8 ms | 19.1 ms | +1.3 ms | +7.3% (inside noise) |
+| React export median | 18.5 ms | 19.1 ms | +0.6 ms | +3.2% (inside noise) |
+
+Projects without states: output bytes are identical to the pre-change build (2,327,833 B HTML, 2,635,692 B React) and the three baseline runs (18.5–19.2 ms HTML, 18.6–20.4 ms React medians) bracket the post-change 17.8/18.5 ms, so no export cost is measured for existing designs.
+
+User effect: states cost nothing unless authored; a design with them downloads about 1% more source and gets real `:hover`, `:active` and `:focus-within` behaviour from plain CSS, with no script. Estimates, not measurements: the editor adds one `useMemo` that returns the existing node array while no state is previewed, and previewing maps the list once and re-renders only the selected layer, because unchanged `DesignNode` objects keep their memoized subtrees. Editor pan/zoom, selection latency and memory were not measured: the browser pane's `requestAnimationFrame` was suspended during this session, so the profiler captured no frames and that baseline was discarded. The production bundle was built (JS 3,415,360 B, CSS 107,152 B after) but not built before the change, so no size delta is claimed.
+
+Browser check: an exported demo page parsed the emitted rules and, with the pane's hover simulated by swapping `:hover`/`:active` for classes, computed background rgb(51,102,255) → rgb(255,138,76) with opacity 0.9 on hover and rgb(194,77,6) when pressed, confirming the `!important` rules beat the inline styles. The pane did not deliver real pointer hover, so native `:hover` matching and the Inspector's States section were not exercised in a browser; both compile (`tsc --noEmit`, `vite build`).
+
+## Opt-in live code layers — October 14, 2026
+
+Same 4,944-node workload, method and process as the states entry above (3 warmups, 12 timed samples, medians).
+
+| Measurement | Before this change | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| HTML page bytes | 2,327,833 B | 2,327,833 B | 0 B | 0% |
+| React + CSS bytes | 2,635,692 B | 2,635,692 B | 0 B | 0% |
+| HTML export median | 17.8 ms (after-states run) | 17.4 and 18.0 ms | -0.4 / +0.2 ms | inside noise |
+| React export median | 18.5 ms | 18.4 and 18.5 ms | -0.1 / 0.0 ms | inside noise |
+
+Projects without live layers export identical bytes at the same speed. The editor path is unchanged for passive code layers: they render the same sandboxed iframe, and only layers marked `live` mount a small wrapper that subscribes by id to a single-frame store, so entering or leaving re-renders just that layer rather than the scene (design estimate, not profiled in a browser; the pane's `requestAnimationFrame` was suspended, so no editor timings exist). At most one scripted iframe runs, and leaving remounts it passive, which releases its timers and listeners. User effect: existing designs cost nothing extra; a live layer costs one running iframe only while it is being used.
+
+Exported page check: a generated page with one live and one passive layer, loaded in the browser pane, delivered exactly one message, from the live frame. Inside it, localStorage, `parent.document`, `document.cookie` and a `fetch` to a same-machine URL were all blocked; the passive frame ran nothing. A React export carried `sandbox="allow-scripts"`, the `cd-live` class and its CSS rule. The editor's double-click/Esc flow compiles (`tsc --noEmit`, `vite build`) but was not exercised in a browser because the pane would not render the canvas, and a script can still burn CPU or navigate its own frame; no CPU limit is claimed.

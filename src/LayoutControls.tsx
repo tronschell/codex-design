@@ -10,8 +10,8 @@ type Props = {
   effective: DesignNode;
   nodes: DesignNode[];
   disabled: boolean;
-  gapControl: (disabled: boolean, save: (action: () => Promise<boolean>) => void) => ReactNode;
-  paddingControl: (disabled: boolean, save: (action: () => Promise<boolean>) => void) => ReactNode;
+  gapControl: (disabled: boolean, save: (action: () => Promise<boolean>) => Promise<boolean>) => ReactNode;
+  paddingControl: (disabled: boolean, save: (action: () => Promise<boolean>) => Promise<boolean>) => ReactNode;
   onPatch: (patch: Partial<DesignNode>) => Promise<boolean>;
   onStyle: (styles: Partial<NodeStyle>) => Promise<boolean>;
 };
@@ -33,26 +33,23 @@ export default function LayoutControls({ node, effective, nodes, disabled, gapCo
   const transform = node.effects?.find((effect): effect is TransformEffect => effect.type === 'transform' && effect.enabled !== false);
   const transformAvailable = !!transform || (node.effects?.length ?? 0) < 32;
   const section = useRef<HTMLElement>(null), pending = useRef(false), mounted = useRef(false);
-  const [saving, setSaving] = useState(false), [error, setError] = useState(''), [reset, setReset] = useState(0);
+  const [saving, setSaving] = useState(false), [error, setError] = useState(''), [reset] = useState(0);
   const locked = disabled || saving;
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const save = (action: () => Promise<boolean>) => {
-    if (disabled || pending.current) return;
-    pending.current = true; setSaving(true); setError('');
-    section.current?.focus({ preventScroll: true });
-    const done = (success: boolean) => {
-      pending.current = false;
-      if (!mounted.current) return;
-      setSaving(false);
-      if (!success) { setReset(value => value + 1); setError('Could not save this change. Your saved layout has been restored.'); }
-    };
-    try { void action().then(done, () => done(false)); } catch { done(false); }
+  const save = async (action: () => Promise<boolean>) => {
+    pending.current = true;
+    if (mounted.current) { setSaving(true); setError(''); }
+    let success = false;
+    try { success = await action(); } catch { /* The autosave field retains its draft. */ }
+    pending.current = false;
+    if (mounted.current) { setSaving(false); if (!success) setError('Could not save this change. Your draft is kept in the field.'); }
+    return success;
   };
   const patchTransform = (patch: Partial<TransformEffect>) => {
     if (!transformAvailable) return;
     const next: TransformEffect = { id: crypto.randomUUID(), type: 'transform', enabled: true, rotate: 0, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, translateX: 0, translateY: 0, ...transform, ...patch };
     const effects = transform ? node.effects!.map(effect => effect.id === transform.id ? next : effect) : [...(node.effects ?? []), next];
-    save(() => onPatch({ effects }));
+    return save(() => onPatch({ effects }));
   };
   const align = (axis: 'x' | 'y', edge: 'start' | 'center' | 'end') => {
     if (!parent || stackChild) return;

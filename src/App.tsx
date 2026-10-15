@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { ArrowRight, ArrowUpRight, Check, ChevronDown, Circle, Code2, Copy, Download, Frame, Hand, HelpCircle, History, ImagePlus, LoaderCircle, Maximize2, MessageCircle, Monitor, MoreHorizontal, MousePointer2, Palette, PanelRight, Pencil, Plus, Presentation, RectangleHorizontal, Redo2, Smartphone, StickyNote, Tablet, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { CommentMessage, CommentThread, DesignNode, DesignPage, DesignProject, LibraryScope, Operation, ShaderConfig, Viewport } from '../shared/types';
 import { resolvedNodes } from '../shared/export';
 import { CanvasNodes } from './DesignNode';
 import Inspector from './Inspector';
+import { getLiveFrame, setLiveFrame } from './live-frame';
+import type { StateView } from './StateStyles';
+import { applyNodeState } from '../shared/node-states';
 import SelectionToolbar from './SelectionToolbar';
 import ProjectMenu from './ProjectMenu';
 import HistoryPanel from './HistoryPanel';
 import ExportPanel from './ExportPanel';
 import ProjectLibrary from './ProjectLibrary';
-import { resolveProjectTokens } from '../shared/design-system';
+import { resolveProjectTokens, type TokenResolutionCache } from '../shared/design-system';
+
+// Client snapshots are never mutated, so resolved nodes can keep their identity and memoized layers skip rendering.
+const tokenCache: TokenResolutionCache = new WeakMap(), stackCache = new WeakMap<DesignNode, DesignNode>();
 import { hasTransformedAncestor, parentLocalDelta, parentLocalPoint, visibleBounds, visualBounds } from '../shared/effects';
 import { createSnapScene, snapBox, type SnapBox, type SnapScene, type SnapGuide } from '../shared/snapping';
 import { importProjectFile } from './export-utils';
@@ -20,7 +27,10 @@ import { commentPrompt } from '../shared/comments';
 import { client, configureToken } from './client';
 import { embedded, sendFollowUp, updateModelContext } from './bridge';
 import { clampZoom, duplicateNodes, fitViewport, insertionBounds, layoutFrameLabels, newNode, selectionBounds, selectionRoots, uid } from './editor-utils';
-import { useProject } from './useProject';
+import { share, useProject } from './useProject';
+import { AutosaveInput } from './AutosaveFields';
+import { useLocalDraft } from './useLocalDraft';
+import { useAutosaveState } from './useAutosaveDraft';
 import { recordCanvasReady, recordCanvasView } from './canvas-profile';
 import { isMac, isShortcutDialog, isTextInput, shortcut } from './shortcuts';
 import { CLIPBOARD_MIME, preparePaste, serializeSelection } from './clipboard';
@@ -89,6 +99,7 @@ function finishCanvasTextEdit() {
 }
 
 export default function App() {
+  const fieldSaveState = useAutosaveState();
   const { project: liveProject, projects, ref: projectRef, loading, hydrated, paneSelection, bindSelection, saving, error, setError, load, refreshProjects, setSnapshot, captureNavigation, commit, restoreVersion, boardNavigation } = useProject();
   const [historyOpen, setHistoryOpen] = useState(false), [historyPreview, setHistoryPreview] = useState<DesignProject | null>(null);
   const [library, setLibrary] = useState<'system' | 'components' | 'inspiration' | null>(null);
@@ -119,7 +130,8 @@ export default function App() {
   const queueView = useCallback((next: Viewport | ((previous: Viewport) => Viewport)) => {
     viewRef.current = typeof next === 'function' ? next(viewRef.current) : next;
     if (!cameraFrame.current) cameraFrame.current = requestAnimationFrame(() => {
-      cameraFrame.current = 0; commitView(viewRef.current);
+      // Commit the camera and its overlays before this frame paints.
+      cameraFrame.current = 0; flushSync(() => commitView(viewRef.current));
     });
   }, []);
   useEffect(() => () => { if (cameraFrame.current) cancelAnimationFrame(cameraFrame.current); }, []);
@@ -133,7 +145,9 @@ export default function App() {
   const [commentNavigation, setCommentNavigation] = useState<{ projectId: string; pageId: string; threadId: string } | null>(null);
   const commentMore = useRef<HTMLButtonElement>(null);
   const [toast, setToast] = useState(''), [modal, setModal] = useState<'export' | 'help' | 'auth' | null>(null);
-  const [pageNameDraft, setPageNameDraft] = useState(''), [renamingPage, setRenamingPage] = useState(false), [newPageName, setNewPageName] = useState('');
+  const [renamingPage, setRenamingPage] = useState(false);
+  const newPageDraft = useLocalDraft(`${project?.id ?? ''}/${boardId}/new-page`, {name: ''});
+  const newPageName = newPageDraft.value.name, setNewPageName = (name: string) => newPageDraft.setValue({name});
   const [preset, setPreset] = useState(presets[0]), [token, setToken] = useState(''), [grid, setGrid] = useState(false);
   const [snapping, setSnapping] = useState(() => { try { return localStorage.getItem('codex-design:snapping') !== 'false'; } catch { return true; } });
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
@@ -167,10 +181,15 @@ export default function App() {
   useEffect(() => () => { activeCanvas.current = null; }, []);
   useLayoutEffect(() => () => { mediaController.current?.abort(); }, [project?.id, page?.id, historyOpen, loading, library]);
   useEffect(() => { if (liveProject && page) recordCanvasReady(); }, [liveProject?.id, page?.id]);
-  const renderProject = useMemo(() => project ? resolveProjectTokens(project) : null, [project]);
+  const renderProject = useMemo(() => project ? resolveProjectTokens(project, tokenCache) : null, [project]);
   const renderPage = renderProject?.pages.find(item => item.id === page?.id);
-  const baseNodes = useMemo(() => resolvedNodes(renderPage?.nodes || []), [renderPage?.nodes]);
-  const nodes = useMemo(() => previewPatch ? resolvedNodes((renderPage?.nodes || []).map(node => previewPatch[node.id] ? { ...node, ...previewPatch[node.id] } : node)) : baseNodes, [baseNodes, renderPage?.nodes, previewPatch]);
+  const baseNodes = useMemo(() => resolvedNodes(renderPage?.nodes || [], undefined, stackCache), [renderPage?.nodes]);
+  const nodes = useMemo(() => previewPatch ? resolvedNodes((renderPage?.nodes || []).map(node => previewPatch[node.id] ? { ...node, ...previewPatch[node.id] } : node), undefined, stackCache) : baseNodes, [baseNodes, renderPage?.nodes, previewPatch]);
+  // A scripted code layer stays live only while it is the single selected layer in the editable canvas.
+  useEffect(() => { if (multiple || historyOpen || library || getLiveFrame() !== selection) setLiveFrame(null); }, [selection, multiple, historyOpen, library]);
+  const [stateView, setStateView] = useState<StateView>(null);
+  // Previewing a hover/pressed/focus state restyles only the selected layer; with no state chosen the canvas list is untouched.
+  const canvasNodes = useMemo(() => stateView ? nodes.map(node => node.id === stateView.id ? applyNodeState(node, stateView.state) : node) : nodes, [nodes, stateView]);
   const nodeById = useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes]);
   const selected = selection ? nodeById.get(selection) : undefined;
   const storedSelected = useMemo(() => page?.nodes.find(node => node.id === selection), [page?.nodes, selection]);
@@ -302,7 +321,7 @@ export default function App() {
   useEffect(() => { const ids = new Set(page?.nodes.map(node => node.id)); setSelectionIds(previous => { const next = previous.filter(id => ids.has(id)); return next.length === previous.length ? previous : next; }); }, [page?.nodes]);
   useEffect(() => {
     if (!hydrated || loading || historyOpen || marquee || !liveProject || !board || !page || paneSelection?.projectId !== liveProject.id) return;
-    const selectedContext = selectedNodes.map(node => ({ id: node.id, name: node.name, type: node.type }));
+    const selectedContext = selectedNodes.map(node => ({ id: node.id, name: node.name, type: node.type, ...(node.notes?.trim() ? { notes: node.notes.slice(0, 500), notesTruncated: node.notes.length > 500 } : {}) }));
     updateModelContext({ projectId: liveProject.id, projectName: liveProject.name, boardId: board.id, boardName: board.name, revision: liveProject.revision, pageId: page.id, libraryMode: library, selectedNode: selectedContext.length === 1 ? selectedContext[0] : null, selectedNodes: selectedContext, openThreadId: commentTarget?.threadId || null });
   }, [hydrated, loading, liveProject?.id, liveProject?.revision, historyOpen, !!marquee, paneSelection?.projectId, board?.id, board?.name, page?.id, selectionKey, commentTarget?.threadId, library]);
   useEffect(() => {
@@ -330,22 +349,25 @@ export default function App() {
   useEffect(() => { if (tool !== 'comment') setHovered(null); }, [tool]);
   useEffect(() => { setMenu(current => current === 'comments' ? null : current); }, [project?.id, page?.id, loading, historyOpen, library, modal]);
 
+  const editingProjectId = project?.id;
   const change = useCallback((operations: Operation[], record = true) => {
-    if (historyOpen) return Promise.resolve(null);
+    if (historyOpen || !editingProjectId || projectRef.current?.id !== editingProjectId) return Promise.resolve(null);
     const targetPage = page?.id;
     return commit(operations, record && targetPage ? (before, after) => {
       const bp = before.pages.find(p => p.id === targetPage), ap = after.pages.find(p => p.id === targetPage);
-      if (!bp || !ap || JSON.stringify(bp) === JSON.stringify(ap)) return;
-      undoStack.current.push({ projectId: before.id, pageId: targetPage, before: structuredClone(bp), after: structuredClone(ap), beforeThreads: structuredClone(before.threads.filter(t => t.pageId === targetPage)), afterThreads: structuredClone(after.threads.filter(t => t.pageId === targetPage)) });
+      // Snapshots are structurally shared and never mutated, so entries keep references instead of copies.
+      if (!bp || !ap || bp === ap) return;
+      undoStack.current.push({ projectId: before.id, pageId: targetPage, before: bp, after: ap, beforeThreads: before.threads.filter(t => t.pageId === targetPage), afterThreads: after.threads.filter(t => t.pageId === targetPage) });
       if (undoStack.current.length > 60) undoStack.current.shift(); redoStack.current = []; setHistoryVersion(v => v + 1);
     } : undefined);
-  }, [commit, page?.id, historyOpen]);
+  }, [commit, editingProjectId, page?.id, historyOpen, projectRef]);
   const undo = useCallback(async (redo = false) => {
     const from = redo ? redoStack.current : undoStack.current, to = redo ? undoStack.current : redoStack.current;
     const entry = from.at(-1); if (!entry || !projectRef.current || saving || historyOpen) return;
     if (entry.projectId !== projectRef.current.id || entry.pageId !== page?.id) return;
     const currentPage = projectRef.current.pages.find(p => p.id === entry.pageId);
-    if (JSON.stringify(currentPage) !== JSON.stringify(redo ? entry.before : entry.after)) {
+    const expected = redo ? entry.before : entry.after;
+    if (currentPage !== expected && share(expected, currentPage) !== expected) {
       undoStack.current = []; redoStack.current = []; setHistoryVersion(v => v + 1);
       notify('This page changed in another session. Undo history was cleared to preserve those changes.');
       return;
@@ -387,7 +409,7 @@ export default function App() {
     return next;
   }, [restoreVersion]);
   const closeInspector = useCallback(() => setInspector(false), []);
-  const editText = useCallback((id: string, content: string) => { if (page) void change([{ type: 'update_node', pageId: page.id, nodeId: id, patch: { content } }]); }, [page?.id, change]);
+  const editText = useCallback((id: string, content: string) => page ? change([{ type: 'update_node', pageId: page.id, nodeId: id, patch: { content } }]) : Promise.resolve(null), [page?.id, change]);
   const nearestFrame = useCallback((id: string | null) => {
     let node = id ? nodeById.get(id) : undefined;
     while (node && node.type !== 'frame') node = node.parentId ? nodeById.get(node.parentId) : undefined;
@@ -530,7 +552,7 @@ export default function App() {
     if (e.button === 0) window.getSelection()?.removeAllRanges();
     if (e.button === 1 || space.current || tool === 'hand') { e.preventDefault(); gesture.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, view: viewRef.current }; capture(e.pointerId); return; }
     if (historyOpen) return;
-    if (tool === 'comment') { const pos = point(e); setCommentTarget({ nodeId: null, ...pos }); return; }
+    if (tool === 'comment') { e.preventDefault(); const pos = point(e); setCommentTarget({ nodeId: null, ...pos }); return; }
     if (tool !== 'select') { beginDraw(e); return; }
     beginMarquee(e);
   };
@@ -543,7 +565,7 @@ export default function App() {
     if (historyOpen) { setSelection(id); return; }
     const node = nodeById.get(id);
     if (!node) return;
-    if (tool === 'comment') { const pos = point(e); setSelection(id); setCommentTarget({ nodeId: id, ...pos }); return; }
+    if (tool === 'comment') { e.preventDefault(); const pos = point(e); setSelection(id); setCommentTarget({ nodeId: id, ...pos }); return; }
     if (tool !== 'select') { let frame = node; while (frame.parentId) frame = nodes.find(n => n.id === frame.parentId)!; beginDraw(e, frame.type === 'frame' ? frame.id : null); return; }
     if (e.shiftKey) { cancelGesture(); selectLayer(id,true); e.preventDefault(); return; }
     const ids = selectionIds.includes(id) ? selectionIds : [id], targets = selectionRoots(ids,baseNodes), box = selectionBounds(targets,baseNodes);
@@ -718,17 +740,16 @@ export default function App() {
     setCommentTarget({ nodeId: anchor?.id || null, x: anchor ? bounds.x + Math.min(anchor.width, 80) : thread.x, y: bounds.y, threadId: thread.id });
   }, [commentNavigation, project, page?.id, loading, historyOpen, library, nodeById, nodes, focus, setView]);
 
-  const sendComment = async (content:string, sendToCodex:boolean, intent?:CommentMessage['intent']) => {
+  const sendComment = async (content:string, intent?:CommentMessage['intent']) => {
     if (!project || !page || !commentTarget) return false;
     const target = commentTarget, isCurrent = captureNavigation();
     if (target.threadId && !project.threads.some(thread => thread.id === target.threadId)) { notify('This conversation is no longer available.'); return false; }
     const now=new Date().toISOString(), message={id:uid(),role:'user' as const,content,createdAt:now,...(intent?{intent}:{})};
-    const thread:CommentThread = commentTarget.threadId ? project.threads.find(t=>t.id===commentTarget.threadId)! : {id:uid(),pageId:page.id,nodeId:commentTarget.nodeId,x:commentTarget.x,y:commentTarget.y,status:'open',queued:sendToCodex,messages:[],createdAt:now};
-    const next=await change(commentTarget.threadId?[{type:'add_message',threadId:thread.id,message,queued:sendToCodex},{type:'update_thread',threadId:thread.id,patch:{status:'open'}}]:[{type:'create_thread',thread:{...thread,messages:[message]}}],false);
+    const thread:CommentThread = commentTarget.threadId ? project.threads.find(t=>t.id===commentTarget.threadId)! : {id:uid(),pageId:page.id,nodeId:commentTarget.nodeId,x:commentTarget.x,y:commentTarget.y,status:'open',queued:true,messages:[],createdAt:now};
+    const next=await change(commentTarget.threadId?[{type:'add_message',threadId:thread.id,message,queued:true},{type:'update_thread',threadId:thread.id,patch:{status:'open'}}]:[{type:'create_thread',thread:{...thread,messages:[message]}}],false);
     if(!next)return false;
     if (isCurrent() && !activeCanvas.current?.readOnly) { setCommentTarget(current => current === target ? {...target,threadId:thread.id} : current); setShowComments(true); }
-    if(sendToCodex){try{const delivered=await sendFollowUp(commentPrompt(next,next.threads.find(t=>t.id===thread.id)!));notify(delivered?'Sent to Codex. The conversation will update here.':'Comment saved and queued. Copy the request from this conversation to your connected Codex chat.');}catch{notify('Comment saved and queued. Copy the request to your connected Codex chat.');}}
-    else notify('Comment saved.');
+    try{const delivered=await sendFollowUp(commentPrompt(next,next.threads.find(t=>t.id===thread.id)!));notify(delivered?'Sent to Codex. The conversation will update here.':'Comment saved and queued. Copy the request from this conversation to your connected Codex chat.');}catch{notify('Comment saved and queued. Copy the request to your connected Codex chat.');}
     return true;
   };
   const selectedBox = useMemo(() => selectionBounds(selectionRoots(visibleSelection.map(node=>node.id),nodes),nodes), [visibleSelection, nodes]);
@@ -746,11 +767,11 @@ export default function App() {
 
   return <div className={`app ${historyOpen ? 'history-mode' : ''}`}>
     <header className="titlebar"><ProjectMenu project={project} projects={projects} readOnly={historyOpen} boardId={board?.id} open={menu==='project'} onToggle={()=>{setMenu(menu==='project'?null:'project');void refreshProjects().catch(()=>{});}} onSelectProject={id=>{if(historyOpen)return;setBoardId('');setPageId('');void load(id);setMenu(null);}} onSelectBoard={selectBoard} onCreateProject={createProject} onCreateBoard={createBoard} onImport={()=>importRef.current?.click()}/>
-    <span className="save-status">{mediaProgress?<><LoaderCircle size={12} className="spin"/><span className="media-progress-text">{mediaProgress}</span></>:historyOpen?<><History size={12}/>Preview · v{project?.revision}</>:saving?<><LoaderCircle size={12} className="spin"/>Saving…</>:project?<><Check size={12}/>All changes saved</>:null}</span><div className="titlebar-actions"><IconButton label="Project design system" active={!!library} disabled={!project||historyOpen||loading} onClick={()=>openLibrary('system')}><Palette size={17}/></IconButton><IconButton label="Version history" active={historyOpen} disabled={!liveProject||!!saving} onClick={openHistory}><History size={17}/></IconButton><div className="comment-control"><IconButton label="Tag a component · C" disabled={!project||loading||historyOpen||!!library} active={tool==='comment'} onClick={()=>{setTool(tool==='comment'?'select':'comment');setCommentTarget(null);setMenu(null);}}><MessageCircle size={17}/>{project?.threads.some(t=>t.queued)&&<span className="notification-dot"/>}</IconButton><button ref={commentMore} className="comment-more" disabled={!project||loading||historyOpen||!!library} aria-label="All comments" aria-haspopup="dialog" aria-expanded={menu==='comments'} aria-controls={menu==='comments'?'all-comments':undefined} title="More comment options · All comments" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();setMenu(null);}}} onClick={()=>{finishCanvasTextEdit();cancelGesture();setCommentTarget(null);setMenu(menu==='comments'?null:'comments');}}><ChevronDown size={12}/></button>{menu==='comments'&&project&&!loading&&!historyOpen&&!library&&<CommentList key={project.id} project={project} showPins={showComments} onTogglePins={()=>setShowComments(value=>!value)} onOpen={openComment} onClose={()=>{setMenu(null);commentMore.current?.focus({preventScroll:true});}}/>}</div><button className="share-button" title={`Export · ${shortcut('Ctrl+Shift+E')}`} disabled={!project||historyOpen||!!library} onClick={()=>setModal('export')}><Download size={13}/>Export</button></div></header>
+    <span className="save-status">{mediaProgress?<><LoaderCircle size={12} className="spin"/><span className="media-progress-text">{mediaProgress}</span></>:historyOpen?<><History size={12}/>Preview · v{project?.revision}</>:saving||fieldSaveState==='saving'?<><LoaderCircle size={12} className="spin"/>Saving…</>:fieldSaveState==='error'?<>Check unsaved fields</>:fieldSaveState==='pending'?<>Unsaved changes</>:project?<><Check size={12}/>All changes saved</>:null}</span><div className="titlebar-actions"><IconButton label="Project design system" active={!!library} disabled={!project||historyOpen||loading} onClick={()=>openLibrary('system')}><Palette size={17}/></IconButton><IconButton label="Version history" active={historyOpen} disabled={!liveProject||!!saving} onClick={openHistory}><History size={17}/></IconButton><div className="comment-control"><IconButton label="Tag a component · C" disabled={!project||loading||historyOpen||!!library} active={tool==='comment'} onClick={()=>{setTool(tool==='comment'?'select':'comment');setCommentTarget(null);setMenu(null);}}><MessageCircle size={17}/>{project?.threads.some(t=>t.queued)&&<span className="notification-dot"/>}</IconButton><button ref={commentMore} className="comment-more" disabled={!project||loading||historyOpen||!!library} aria-label="All comments" aria-haspopup="dialog" aria-expanded={menu==='comments'} aria-controls={menu==='comments'?'all-comments':undefined} title="More comment options · All comments" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();setMenu(null);}}} onClick={()=>{finishCanvasTextEdit();cancelGesture();setCommentTarget(null);setMenu(menu==='comments'?null:'comments');}}><ChevronDown size={12}/></button>{menu==='comments'&&project&&!loading&&!historyOpen&&!library&&<CommentList key={project.id} project={project} showPins={showComments} onTogglePins={()=>setShowComments(value=>!value)} onOpen={openComment} onClose={()=>{setMenu(null);commentMore.current?.focus({preventScroll:true});}}/>}</div><button className="share-button" title={`Export · ${shortcut('Ctrl+Shift+E')}`} disabled={!project||historyOpen||!!library} onClick={()=>setModal('export')}><Download size={13}/>Export</button></div></header>
     <div className="workspace">
       <main ref={stageRef} tabIndex={-1} className={`canvas-stage tool-${tool} ${grid?'show-grid':''} ${dropActive?'is-file-drop':''}`} aria-label="Infinite design canvas" aria-hidden={!!library} onPointerDown={canvasDown} onPointerMove={canvasMove} onPointerLeave={()=>setHovered(null)} onPointerUp={e=>{void canvasUp(e);}} onPointerCancel={()=>{flushView();cancelGesture();}} onLostPointerCapture={()=>{if(gesture.current)cancelGesture();}} onContextMenu={e=>e.preventDefault()} onDragOver={e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();e.dataTransfer.dropEffect=historyOpen?'none':'copy';if(!historyOpen&&!importingMedia.current)setDropActive(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDropActive(false);}} onDrop={e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();setDropActive(false);if(historyOpen){notify('Close History to add media.');return;}const target=(e.target as Element).closest('[data-node-id]')?.getAttribute('data-node-id')||null;void importMedia(Array.from(e.dataTransfer.files),point(e),nearestFrame(target));}} style={{...(grid?{backgroundPosition:`${view.x}px ${view.y}px`,backgroundSize:`${Math.max(8,40*view.zoom)}px ${Math.max(8,40*view.zoom)}px`}:{}),...(library?{display:'none'}:{})}}>
-        <div className="canvas-world" style={{transform:`translate(${view.x}px,${view.y}px) scale(${view.zoom})`}}><CanvasNodes nodes={nodes} designSystem={project?.designSystem} visibleRootIds={visibleRootIds} interactive={!historyOpen&&!library} onSelect={selectNode} onTextEdit={historyOpen||library||tool==='comment'?undefined:editText}/></div>
-        {frameLabels.map(({node,left,top,width,height})=><div key={node.id} className="canvas-frame-label" style={{left:view.x+left,top:view.y+top,width,height,lineHeight:`${height}px`}} onPointerDown={e=>{e.stopPropagation();nodeDown(node.id,e);}}><button className="frame-name" title={node.name} onDoubleClick={e=>{if(!e.shiftKey){setSelection(node.id);setInspector(true);}}}>{!historyOpen && !library && node.generation?.status === 'building' ? `Building · ${node.name}` : node.name}</button></div>)}
+        <div className="canvas-world" style={{transform:`translate(${view.x}px,${view.y}px) scale(${view.zoom})`}}><CanvasNodes nodes={canvasNodes} designSystem={project?.designSystem} visibleRootIds={visibleRootIds} interactive={!historyOpen&&!library} onSelect={selectNode} onTextEdit={historyOpen||library||tool==='comment'?undefined:editText}/></div>
+        {frameLabels.filter(label=>!stageSize.width||(view.x+label.left+label.width>=0&&view.x+label.left<=stageSize.width&&view.y+label.top+label.height>=0&&view.y+label.top<=stageSize.height)).map(({node,left,top,width,height})=><div key={node.id} className="canvas-frame-label" style={{left:view.x+left,top:view.y+top,width,height,lineHeight:`${height}px`}} onPointerDown={e=>{e.stopPropagation();nodeDown(node.id,e);}}><button className="frame-name" title={node.name} onDoubleClick={e=>{if(!e.shiftKey){setSelection(node.id);setInspector(true);}}}>{!historyOpen && !library && node.generation?.status === 'building' ? `Building · ${node.name}` : node.name}</button></div>)}
         {multiple&&tool==='select'&&visibleSelection.map(node=>{const box=visualBounds(node,nodes);return <div key={node.id} className="selection-overlay selection-member" aria-hidden="true" style={{left:view.x+box.x*view.zoom,top:view.y+box.y*view.zoom,width:box.width*view.zoom,height:box.height*view.zoom}}/>;})}
         {selectedBox&&(tool!=='comment'||commentTarget?.nodeId===selected?.id)&&<div className={`selection-overlay${multiple?' selection-group':''}`} style={{left:view.x+selectedBox.x*view.zoom,top:view.y+selectedBox.y*view.zoom,width:selectedBox.width*view.zoom,height:selectedBox.height*view.zoom}}>
           {tool==='select'&&!marquee&&!historyOpen&&!saving&&!loading&&resizableSelection&&['nw','ne','sw','se'].map(corner=><button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize selection ${corner}`} title={multiple?'Resize selected bounds; child contents retain their size':`Resize ${corner}`} onPointerDown={e=>{
@@ -775,10 +796,10 @@ export default function App() {
         {changeFlash?.pageId===page?.id&&changeFlash?.boxes.map(box=><div key={`${changeFlash.key}/${box.id}`} className={`version-change-flash ${box.removed?'removed':''}`} style={{left:view.x+box.x*view.zoom,top:view.y+box.y*view.zoom,width:Math.max(3,box.width*view.zoom),height:Math.max(3,box.height*view.zoom)}}/>)}
         {historyOpen&&<div className="history-preview-banner"><History size={13}/><span>Version {project?.revision} · Preview only</span></div>}
         {!loading&&historyOpen&&!nodes.length&&<div className="canvas-empty history-empty"><Frame size={28}/><p>This page was empty in this version.</p></div>}
-        {showComments&&project?.threads.filter(thread=>thread.pageId===page?.id&&(thread.status==='open'||thread.id===commentTarget?.threadId)).map(thread=>{const anchor=nodes.find(n=>n.id===thread.nodeId),pos=anchor?visualBounds(anchor,nodes):thread;return <button key={thread.id} disabled={historyOpen} className={`comment-pin ${thread.status==='resolved'?'resolved':''} ${thread.id===commentTarget?.threadId?'selected':''}`} style={{left:view.x+(anchor?pos.x+Math.min(anchor.width,80):thread.x)*view.zoom,top:view.y+(anchor?pos.y:thread.y)*view.zoom}} aria-label={`Open conversation on ${anchor?.name||'canvas'}`} title={thread.messages.at(-1)?.content} onPointerDown={e=>e.stopPropagation()} onClick={()=>{setMenu(null);setSelection(thread.nodeId);setCommentTarget({nodeId:thread.nodeId,x:anchor?pos.x+Math.min(anchor.width,80):thread.x,y:anchor?pos.y:thread.y,threadId:thread.id});}}>{thread.messages.at(-1)?.role==='assistant'?<Code2 size={15}/>:'Y'}{thread.queued&&<span/>}</button>;})}
+        {showComments&&project?.threads.filter(thread=>thread.pageId===page?.id&&(thread.status==='open'||thread.id===commentTarget?.threadId)).map(thread=>{const anchor=thread.nodeId?nodeById.get(thread.nodeId):undefined,pos=anchor?visualBounds(anchor,nodes):thread;return <button key={thread.id} disabled={historyOpen} className={`comment-pin ${thread.status==='resolved'?'resolved':''} ${thread.id===commentTarget?.threadId?'selected':''}`} style={{left:view.x+(anchor?pos.x+Math.min(anchor.width,80):thread.x)*view.zoom,top:view.y+(anchor?pos.y:thread.y)*view.zoom}} aria-label={`Open conversation on ${anchor?.name||'canvas'}`} title={thread.messages.at(-1)?.content} onPointerDown={e=>e.stopPropagation()} onClick={()=>{setMenu(null);setSelection(thread.nodeId);setCommentTarget({nodeId:thread.nodeId,x:anchor?pos.x+Math.min(anchor.width,80):thread.x,y:anchor?pos.y:thread.y,threadId:thread.id});}}>{thread.messages.at(-1)?.role==='assistant'?<Code2 size={15}/>:'Y'}{thread.queued&&<span/>}</button>;})}
         {commentTarget&&project&&page&&<CommentPopover key={`${project.id}/${commentTarget.threadId||`${commentTarget.nodeId}-${commentTarget.x}`}`} project={project} pageId={page.id} target={commentTarget} position={commentPosition} onClose={()=>setCommentTarget(null)} onSend={sendComment} onResolve={async thread=>!!await change([{type:'update_thread',threadId:thread.id,patch:{status:thread.status==='resolved'?'open':'resolved',queued:false}}],false)} onCopy={copy}/>}
         <div className="floating-toolbar toolbar-left" onPointerDown={e=>e.stopPropagation()}><button className="page-trigger" aria-expanded={menu==='page'} onClick={()=>setMenu(menu==='page'?null:'page')}><span>{page?.name||'Page 1'}</span><ChevronDown size={12}/></button><span className="tool-divider"/>{([{id:'select',label:'Select · V',Icon:MousePointer2},{id:'hand',label:'Hand · H',Icon:Hand},{id:'text',label:'Text · T',Icon:Type},{id:'frame',label:`Frame · F · ${preset.name}`,Icon:Frame},{id:'note',label:'Note · N',Icon:StickyNote},{id:'pen',label:'Pencil · P',Icon:Pencil}] as const).map(({id,label,Icon})=><button key={id} disabled={historyOpen} className={`tool-button ${tool===id?'active':''} ${id==='note'||id==='pen'?'secondary-tool':''}`} aria-label={label} title={label} aria-pressed={tool===id} onClick={()=>{setTool(id);setMenu(id==='frame'?(menu==='frames'?null:'frames'):null);}}><Icon size={19}/></button>)}<button disabled={historyOpen} className={`tool-button shape-trigger ${['rectangle','ellipse','line','arrow','code'].includes(tool)?'active':''}`} title="Shapes and code" aria-label="Shapes and code" aria-expanded={menu==='shapes'} onClick={()=>setMenu(menu==='shapes'?null:'shapes')}><Copy size={19}/><ChevronDown size={11}/></button><button className="tool-button" aria-label={mediaProgress ? 'Cancel media import' : 'Insert media and shaders'} title={mediaProgress ? `${mediaProgress} · Cancel import` : `Insert media and shaders · ${shortcut('Ctrl+I')} to import`} aria-expanded={mediaProgress ? undefined : menu==='insert'} disabled={historyOpen||!page||mediaController.current?.signal.aborted} onClick={()=>mediaProgress ? cancelMediaImport() : setMenu(menu==='insert'?null:'insert')}>{mediaProgress ? <X size={19}/> : <ImagePlus size={19}/>}</button>
-          {menu==='page'&&<div className="dropdown page-menu">{boardPages.map(p=><div key={p.id} className="page-menu-row"><button className="dropdown-item" onClick={()=>{selectPage(p.id);setMenu(null);}}><span>{p.name}</span>{p.id===page?.id&&<Check size={16}/>}</button><button className="icon-button" aria-label={`Rename ${p.name}`} disabled={historyOpen} onClick={()=>{selectPage(p.id);setPageNameDraft(p.name);setRenamingPage(!renamingPage);}}><MoreHorizontal size={17}/></button></div>)}{renamingPage&&page&&<form className="menu-form" onSubmit={e=>{e.preventDefault();void change([{type:'update_page',pageId:page.id,patch:{name:pageNameDraft.trim()||page.name}}],false);setRenamingPage(false);}}><input autoFocus aria-label="Page name" value={pageNameDraft} onChange={e=>setPageNameDraft(e.target.value)} maxLength={160}/><button className="icon-button" aria-label="Save page name" type="submit"><Check size={16}/></button><button className="icon-button danger" type="button" disabled={boardPages.length<2} aria-label="Delete current page" title="Delete current page" onClick={()=>{void change([{type:'delete_page',pageId:page.id}],false);setRenamingPage(false);setMenu(null);}}><Trash2 size={14}/></button></form>}<div className="menu-divider"/><form className="menu-form new-page" onSubmit={e=>{e.preventDefault();void createPage();}}><Plus size={17}/><input disabled={historyOpen} aria-label="New page name" placeholder="New page" value={newPageName} onChange={e=>setNewPageName(e.target.value)} maxLength={160}/><button disabled={historyOpen} aria-label="Create page" className="icon-button" type="submit"><ArrowRight size={16}/></button></form></div>}
+          {menu==='page'&&<div className="dropdown page-menu">{boardPages.map(p=><div key={p.id} className="page-menu-row"><button className="dropdown-item" onClick={()=>{selectPage(p.id);setMenu(null);}}><span>{p.name}</span>{p.id===page?.id&&<Check size={16}/>}</button><button className="icon-button" aria-label={`Rename ${p.name}`} disabled={historyOpen} onClick={()=>{selectPage(p.id);setRenamingPage(!renamingPage);}}><MoreHorizontal size={17}/></button></div>)}{renamingPage&&page&&<div className="menu-form"><AutosaveInput key={`${project?.id}/${page.id}`} autoFocus aria-label="Page name" value={page.name} required normalize={value=>value.trim()} onSave={name=>change([{type:'update_page',pageId:page.id,patch:{name}}],false)} maxLength={160}/><button className="icon-button danger" type="button" disabled={boardPages.length<2} aria-label="Delete current page" title="Delete current page" onClick={()=>{void change([{type:'delete_page',pageId:page.id}],false);setRenamingPage(false);setMenu(null);}}><Trash2 size={14}/></button></div>}<div className="menu-divider"/><form className="menu-form new-page" onBlurCapture={newPageDraft.onBlur} onCompositionStartCapture={newPageDraft.onCompositionStart} onCompositionEndCapture={newPageDraft.onCompositionEnd} onSubmit={e=>{e.preventDefault();void createPage();}}><Plus size={17}/><input disabled={historyOpen} aria-label="New page name" placeholder="New page" value={newPageName} onChange={e=>setNewPageName(e.target.value)} maxLength={160}/><button disabled={historyOpen} aria-label="Create page" className="icon-button" type="submit"><ArrowRight size={16}/></button></form></div>}
           {menu==='shapes'&&<div className="dropdown shape-menu">{([{id:'rectangle',name:'Rectangle',key:'R',Icon:RectangleHorizontal},{id:'ellipse',name:'Oval',key:'O',Icon:Circle},{id:'arrow',name:'Arrow',key:shortcut('Shift+L'),Icon:ArrowUpRight},{id:'line',name:'Line',key:'L',Icon:ArrowRight},{id:'code',name:'Code component',key:'',Icon:Code2}] as const).map(item=><button key={item.id} className="dropdown-item" onClick={()=>{setTool(item.id);setMenu(null);}}><item.Icon size={18}/><span>{item.name}</span><kbd>{item.key}</kbd></button>)}</div>}
           {menu==='insert'&&<InsertMenu disabled={historyOpen||!!mediaProgress||!page} onPickMedia={()=>{setMenu(null);mediaRef.current?.click();}} onAddShader={shader=>{void addShader(shader);}}/>}
           {menu==='frames'&&<div className="dropdown frame-preset-menu"><div className="menu-heading">Create a frame</div>{presets.map(p=><button className="dropdown-item preset-option" key={p.name} onClick={()=>{setPreset(p);void addFrame(p);}}><p.Icon size={17}/><span>{p.name}</span><small>{p.detail}</small></button>)}<div className="menu-divider"/><button className="dropdown-item" onClick={()=>{setTool('frame');setMenu(null);notify('Drag on the canvas to draw a frame at any size.');}}><Frame size={17}/><span>Draw a custom frame</span><kbd>F</kbd></button></div>}
@@ -795,7 +816,7 @@ export default function App() {
       {library&&error&&<div className="error-banner" role="alert"><span>{error}</span><button className="text-button" onClick={()=>{if(project)void load(project.id);}}>Retry</button><button aria-label="Dismiss error" onClick={()=>setError('')}><X size={15}/></button></div>}
       {historyOpen&&liveProject&&<HistoryPanel key={liveProject.id} project={liveProject} saving={!!saving} onClose={closeHistory} onPreview={previewVersion} onApply={applyVersion}/> }
       {library&&project&&board&&<ProjectLibrary key={project.id} project={project} boardId={board.id} mode={library} pageId={page?.id} selectedNodeId={selectionIds.length===1?selectionIds[0]:undefined} insertionPosition={{x:((stageRef.current?.clientWidth||800)/2-view.x)/view.zoom,y:((stageRef.current?.clientHeight||600)/2-view.y)/view.zoom}} onModeChange={setLibrary} onApply={applyLibraryVersion} onInserted={nodeId=>{setLibrary(null);setSelection(nodeId);}} readOnly={historyOpen||loading} onChange={changeLibrary} onClose={()=>setLibrary(null)} onNotify={notify}/>}
-      {!historyOpen&&!library&&inspector&&project&&page&&<Inspector project={project} page={page} selectedIds={selectionIds} navigationPending={loading||!!saving} onSelect={selectLayer} onChange={changeLayer} onClose={closeInspector} onDelete={remove} onDuplicate={duplicate} onFocus={focus} onOpenDesignSystem={()=>openLibrary('system')}/>}
+      {!historyOpen&&!library&&inspector&&project&&page&&<Inspector project={project} page={page} selectedIds={selectionIds} navigationPending={loading} onSelect={selectLayer} onChange={changeLayer} onClose={closeInspector} onDelete={remove} onDuplicate={duplicate} onFocus={focus} onOpenDesignSystem={()=>openLibrary('system')} onStateView={setStateView}/>}
     </div>
     <input type="file" hidden ref={importRef} accept="application/json,.json,application/zip,.zip" onChange={async e => {
       const file = e.target.files?.[0]; e.target.value = '';

@@ -11,6 +11,7 @@ export interface MediaConfig {
 }
 
 export interface ShaderConfig {
+  provider?: 'shaders.com';
   preset: 'mesh' | 'waves' | 'grain' | 'custom';
   colors?: string[];
   speed?: number;
@@ -68,6 +69,10 @@ export interface GradientFill {
   stops: GradientStop[];
 }
 
+export type NodeInteractionState = 'hover' | 'active' | 'focus';
+// Visual keys only; each is applied as a CSS rule in exports and never changes the saved base style.
+export type NodeStateStyle = Pick<NodeStyle, 'fill' | 'color' | 'borderColor' | 'opacity' | 'shadow' | 'outlineColor' | 'textDecorationLine'>;
+
 export interface NodeStyle {
   fill?: string;
   fillMode?: 'solid' | 'gradient' | 'none';
@@ -117,13 +122,14 @@ export interface NodeStyle {
   aspectRatio?: number | string;
   transition?: string;
   animation?: string;
+  states?: Partial<Record<NodeInteractionState, NodeStateStyle>>;
 }
 
 export type BindableStyleProperty = 'fill' | 'color' | 'borderColor' | 'fontFamily' | 'fontSize' | 'fontWeight' | 'lineHeight' | 'letterSpacing' | 'gap' | 'padding' | 'radius' | 'borderWidth' | 'opacity' | 'shadow';
 export type DesignSystemTokenKind = 'color' | 'fontFamily' | 'fontSize' | 'fontWeight' | 'lineHeight' | 'letterSpacing' | 'spacing' | 'radius' | 'borderWidth' | 'opacity' | 'shadow' | 'duration' | 'easing' | 'breakpoint' | 'zIndex';
 export interface DesignSystemToken { id: string; name: string; kind: DesignSystemTokenKind; value: string | number; description?: string }
 export interface DesignSystemSource { path: string; kind: 'design-md' | 'component' | 'stylesheet' | 'config' | 'canvas'; notes: string; confidence: 'observed' | 'inferred' }
-export interface DesignSystemRequest { id: string; mode: 'generate' | 'find'; brief: string; repository: string; createdAt: string; queued: boolean }
+export interface DesignSystemRequest { id: string; mode: 'generate' | 'find' | 'components'; brief: string; repository: string; createdAt: string; queued: boolean }
 export interface NativeComponentDefinition { id: string; name: string; description: string; rootNodeId: string; nodes: DesignNode[]; version: number; releaseLabel?: string }
 export interface ComponentInstance { componentId: string; version: number; nodeMap: Record<string, string>; overrides: Record<string, string[]> }
 export interface DesignSystem { name: string; description: string; documentation: string; tokens: DesignSystemToken[]; sources: DesignSystemSource[]; components: NativeComponentDefinition[]; request?: DesignSystemRequest }
@@ -139,8 +145,10 @@ export interface DesignNode {
   width: number;
   height: number;
   content?: string;
+  notes?: string;
   href?: string;
   source?: string;
+  live?: boolean;
   jsx?: { source: string; starters: string[]; deviceChrome?: 'safe-area' | 'device' };
   generation?: { status: 'building' | 'ready'; updatedAt?: string };
   media?: MediaConfig;
@@ -208,15 +216,19 @@ export type Operation =
   | { type: 'update_design_system'; patch: Partial<Pick<DesignSystem, 'name' | 'description' | 'documentation' | 'sources'>> }
   | { type: 'apply_design_system_document'; markdown: string }
   | { type: 'upsert_design_token'; token: DesignSystemToken }
+  | { type: 'update_design_token'; tokenId: string; patch: Partial<Omit<DesignSystemToken, 'id'>> }
   | { type: 'delete_design_token'; tokenId: string }
   | { type: 'set_design_system_request'; request: DesignSystemRequest | null }
   | { type: 'release_design_system'; label: string }
   | { type: 'capture_component'; pageId: string; nodeId: string; componentId: string; name: string; description?: string }
+  | { type: 'upsert_component'; component: NativeComponentDefinition }
+  | { type: 'set_component_notes'; componentId: string; notes: string }
   | { type: 'instantiate_component'; componentId: string; pageId: string; nodeId: string; x: number; y: number; parentId?: string | null }
   | { type: 'release_component'; pageId: string; nodeId: string; componentId?: string; label?: string }
   | { type: 'update_component_instance'; pageId: string; nodeId: string; resetOverrides?: boolean }
   | { type: 'detach_component_instance'; pageId: string; nodeId: string }
   | { type: 'upsert_inspiration'; boardId: string; item: InspirationItem }
+  | { type: 'update_inspiration'; boardId: string; itemId: string; patch: Partial<Pick<InspirationItem, 'name' | 'notes' | 'usage'>> & { sourceUrl?: string | null } }
   | { type: 'delete_inspiration'; boardId: string; itemId: string }
   | { type: 'set_tokens'; tokens: Partial<DesignTokens> };
 

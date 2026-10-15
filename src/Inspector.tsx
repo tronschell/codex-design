@@ -4,7 +4,7 @@ import { shortcut } from './shortcuts';
 import type { BindableStyleProperty, DesignNode, DesignPage, DesignProject, DesignSystem, MediaConfig, NodeStyle, Operation, ShaderConfig } from '../shared/types';
 import { exportNodeCode, resolvedNodes } from '../shared/export';
 import { compatibleTokenKinds } from '../shared/design-system';
-import { defaultShader, shaderFragmentSource, shaderPresets } from '../shared/shaders';
+import { defaultShader, shaderCodeSource, shaderFragmentSource, shaderPresets } from '../shared/shaders';
 import { ASSET_MIME_TYPES } from '../shared/media';
 import { isSafeLink } from '../shared/links';
 import { client } from './client';
@@ -13,14 +13,18 @@ import { Field, ColorField } from './InspectorFields';
 import { Select } from './Select';
 import { FontPicker } from './FontPicker';
 import { usePanelResize } from './usePanelResize';
+import ImplementationNotes from './ImplementationNotes';
+import { AutosaveTextarea } from './AutosaveFields';
 import { Effects } from './Effects';
+import { setLiveFrame } from './live-frame';
+import StateStyles, { type StateView } from './StateStyles';
 import Advanced from './Advanced';
 import LayoutControls from './LayoutControls';
 import AppearanceControls from './AppearanceControls';
 import './inspector.css';
 export { Field } from './InspectorFields';
 
-type Props = { project: DesignProject; page: DesignPage; selectedIds: string[]; navigationPending: boolean; onSelect: (id: string, additive?: boolean) => void; onChange: (ops: Operation[]) => Promise<DesignProject | null>; onClose: () => void; onDelete: () => void; onDuplicate: () => void; onFocus: (id: string) => void; onOpenDesignSystem?: () => void };
+type Props = { project: DesignProject; page: DesignPage; selectedIds: string[]; navigationPending: boolean; onSelect: (id: string, additive?: boolean) => void; onChange: (ops: Operation[]) => Promise<DesignProject | null>; onClose: () => void; onDelete: () => void; onDuplicate: () => void; onFocus: (id: string) => void; onOpenDesignSystem?: () => void; onStateView: (view: StateView) => void };
 
 function readableSource(html: string) {
   recordCanvasWork('codeFormats');
@@ -50,7 +54,7 @@ function ToggleField({ label, value, onChange }: { label: string; value: boolean
   return <label className="property-toggle"><span>{label}</span><input type="checkbox" checked={value} onChange={event => onChange(event.target.checked)}/></label>;
 }
 
-function Inspector({ project, page, selectedIds, navigationPending, onSelect, onChange, onClose, onDelete, onDuplicate, onFocus, onOpenDesignSystem }: Props) {
+function Inspector({ project, page, selectedIds, navigationPending, onSelect, onChange, onClose, onDelete, onDuplicate, onFocus, onOpenDesignSystem, onStateView }: Props) {
   const selectedId = selectedIds.at(-1) ?? null, multiple = selectedIds.length > 1;
   const selectionSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const panel = usePanelResize('codex-design:inspector-width');
@@ -118,7 +122,8 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
     else if (selected.bottom > bottom) tree.scrollTop += selected.bottom - bottom;
     revealedSelection.current = revealKey;
   }, [selectedId, project.id, page.id, byId, revealRequest, expanded, matchingIds]);
-  useEffect(() => { setSource(node?.type === 'shader' ? shaderFragmentSource(node.shader) : node?.source || ''); }, [node?.id, node?.source, node?.type, node?.shader?.preset, node?.shader?.fragment]);
+  const savedSource = node?.type === 'shader' ? shaderCodeSource(node.shader) : node?.source || '';
+  useEffect(() => { setSource(savedSource); }, [node?.id, savedSource]);
   useEffect(() => { setAssetError(''); }, [node?.id]);
   useEffect(() => { setLinkError(''); }, [node?.id, node?.href]);
   const patch = (value: Partial<DesignNode>) => node ? onChange([{ type: 'update_node', pageId: page.id, nodeId: node.id, patch: value }]) : Promise.resolve(null);
@@ -129,23 +134,23 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
     for (const property of Object.keys(value) as BindableStyleProperty[]) if (tokenBindings[property]) { delete tokenBindings[property]; detached = true; }
     return patch({ styles: value, ...(detached ? { tokenBindings } : {}) });
   };
-  const tokenField = (property: BindableStyleProperty, label: string, fallback: string | number, options: { type?: 'text' | 'number' | 'color'; suffix?: string; min?: number; max?: number; disabled?: boolean; save?: (action: () => Promise<boolean>) => void } = {}) => {
+  const tokenField = (property: BindableStyleProperty, label: string, fallback: string | number, options: { type?: 'text' | 'number' | 'color'; suffix?: string; min?: number; max?: number; disabled?: boolean; save?: (action: () => Promise<boolean>) => Promise<boolean> } = {}) => {
     if (!node) return null;
     const value = effective?.styles[property] ?? fallback;
     const { save, ...fieldOptions } = options;
-    const commit = (action: () => Promise<DesignProject | null>) => save ? save(() => action().then(Boolean)) : void action();
+    const commit = (action: () => Promise<DesignProject | null>) => save ? save(() => action().then(Boolean)) : action().then(Boolean);
     return <TokenField label={label} property={property} node={node} system={project.designSystem} value={value} disabled={navigationPending} {...fieldOptions} onChange={input => {
       const literal = options.type === 'number' ? Math.max(options.min ?? -Infinity, Math.min(options.max ?? Infinity, Number(input))) : input;
-      commit(() => style({ [property]: literal }));
+      return commit(() => style({ [property]: literal }));
     }} onBind={id => commit(() => id ? patch({ tokenBindings: { ...node.tokenBindings, [property]: id } }) : style({ [property]: value }))}/>;
   };
   const link = (input: string) => {
     const href = input.trim();
-    if (!isSafeLink(href)) { setLinkError('Use an HTTP(S), mailto:, tel: or # link.'); return; }
-    setLinkError(''); patch({ href });
+    if (!isSafeLink(href)) { setLinkError('Use an HTTP(S), mailto:, tel: or # link.'); return false; }
+    setLinkError(''); return patch({ href });
   };
-  const shader = (value: Partial<ShaderConfig>) => { if (node) patch({ shader: { ...defaultShader(), ...node.shader, ...value } }); };
-  const media = (value: Partial<MediaConfig>) => { if (node?.media) patch({ media: { ...node.media, ...value } }); };
+  const shader = (value: Partial<ShaderConfig>) => { if (node) return patch({ shader: { preset: 'mesh', ...node.shader, ...value } }); };
+  const media = (value: Partial<MediaConfig>) => { if (node?.media) return patch({ media: { ...node.media, ...value } }); };
   const importMedia = async (file: File | undefined, poster = false) => {
     if (!file || !node || navigationPending || uploadController.current || (node.type !== 'image' && node.type !== 'video')) return;
     const target = node, targetPageId = page.id, targetProjectId = project.id;
@@ -161,7 +166,7 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
     finally { uploadController.current = null; if (mounted.current) setUploadState(null); }
   };
   const changeToken = (key: 'accent' | 'background' | 'foreground' | 'fontFamily', value: string) => {
-    onChange([{ type: 'set_tokens', tokens: { [key]: value } }]);
+    return onChange([{ type: 'set_tokens', tokens: { [key]: value } }]);
   };
   const renderRow = (n: DesignNode, depth = 0): React.ReactNode => {
     recordCanvasWork('inspectorRows');
@@ -175,24 +180,26 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
   const generated = useMemo(() => tab === 'Code' && !multiple && node && node.type !== 'code' && node.type !== 'shader' ? (recordCanvasWork('codeExports'), exportNodeCode(project, page.id, node.id)) : '', [tab, multiple, project, page.id, node?.id, node?.type]);
   const displayCode = useMemo(() => generated ? readableSource(generated) : '', [generated]);
   const shaderColors = node?.shader?.colors ?? defaultShader().colors!;
+  const officialShader = node?.shader?.provider === 'shaders.com';
   const codePanel = node && <>
-    {node.jsx && <details className="inspector-section"><summary>JSX authoring source</summary><pre className="code-preview"><code>{node.jsx.source}</code></pre><p className="inspector-hint">Codex can edit this JSX with canvas_write_jsx. Applying HTML below detaches the JSX source.</p></details>}
-    <div className="code-heading"><Code2 size={15}/><span>{node.type === 'code' ? 'Editable HTML / CSS' : node.type === 'shader' ? 'Fragment shader · GLSL' : `${node.type} · generated source`}</span><button className="icon-button" aria-label="Copy element code" onClick={() => { void navigator.clipboard.writeText(node.type === 'code' || node.type === 'shader' ? source : generated).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); }}>{copied ? <Check size={14}/> : <Copy size={14}/>}</button></div>
+    {node.jsx && <details className="inspector-section"><summary>JSX authoring source</summary><pre className="code-preview"><code>{node.jsx.source}</code></pre><p className="inspector-hint">Codex can edit this JSX with canvas_write_jsx. Editing the HTML below detaches the JSX source when autosaved.</p></details>}
+    <div className="code-heading"><Code2 size={15}/><span>{node.type === 'code' ? 'Editable HTML / CSS' : node.type === 'shader' ? officialShader ? 'Shaders.com · JavaScript' : 'Fragment shader · GLSL' : `${node.type} · generated source`}</span><button className="icon-button" aria-label="Copy element code" onClick={() => { void navigator.clipboard.writeText(node.type === 'code' || node.type === 'shader' ? source : generated).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); }}>{copied ? <Check size={14}/> : <Copy size={14}/>}</button></div>
     {node.type === 'code' || (node.type === 'shader' && node.shader?.preset === 'custom') ? <>
-      <textarea aria-label={node.type === 'shader' ? 'Fragment shader source' : 'Component source'} className="source-editor" spellCheck={false} maxLength={node.type === 'shader' ? 30000 : undefined} value={source} onChange={event => setSource(event.target.value)}/>
-      <button className="primary-button save-source" disabled={source === (node.type === 'shader' ? shaderFragmentSource(node.shader) : node.source || '')} onClick={() => node.type === 'shader' ? shader({ fragment: source }) : patch({ source })}>{node.type === 'shader' ? 'Apply shader' : 'Apply code'}</button>
-      <p className="inspector-hint source-hint">{node.type === 'shader' ? 'Uniforms: u_resolution (vec2), u_time, u_scale, u_seed (float), u_color1–4 (vec4). Compiler errors appear on the layer.' : 'HTML and CSS render in an isolated preview. Scripts are disabled.'}</p>
-    </> : node.type === 'shader' ? <><pre className="code-preview shader-code-preview"><code>{source}</code></pre><button className="secondary-button save-source" onClick={() => shader({ preset: 'custom', fragment: shaderFragmentSource(node.shader) })}>Customize shader</button></> : <pre className="code-preview"><code>{displayCode}</code></pre>}
+      <AutosaveTextarea aria-label={node.type === 'shader' ? 'Fragment shader source' : 'Component source'} className="source-editor" spellCheck={false} maxLength={node.type === 'shader' ? 30000 : undefined} value={node.type === 'shader' ? shaderFragmentSource(node.shader) : node.source || ''} onInput={event => setSource(event.currentTarget.value)} onSave={source => node.type === 'shader' ? shader({ fragment: source }) : patch({ source })}/>
+      <p className="inspector-hint source-hint">{node.type === 'shader' ? 'Uniforms: u_resolution (vec2), u_time, u_scale, u_seed (float), u_color1–4 (vec4). Compiler errors appear on the layer.' : node.live ? 'Inline scripts run in a sandbox with no network, storage or parent access. Double-click the selected layer to interact; Esc or selecting elsewhere ends it. HTML and React exports run the scripts.' : 'HTML and CSS render in an isolated preview. Scripts are disabled.'}</p>
+      {node.type === 'code' && <ToggleField label="Run scripts (live)" value={!!node.live} onChange={live => { setLiveFrame(null); void patch({ live: live ? true : false }); }}/>}
+    </> : node.type === 'shader' ? <><pre className="code-preview shader-code-preview"><code>{source}</code></pre>{!officialShader && <button className="secondary-button save-source" onClick={() => shader({ preset: 'custom', fragment: shaderFragmentSource(node.shader) })}>Customize shader</button>}</> : <pre className="code-preview"><code>{displayCode}</code></pre>}
   </>;
   return <aside ref={panel.ref} style={panel.style} className="inspector" aria-label="Design inspector">
     <div {...panel.handleProps}/>
     <div className="inspector-tabs" role="tablist">{(['Properties', 'Code', 'Tweaks'] as const).map(name => <button key={name} role="tab" aria-selected={name === tab} className={name === tab ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}<button className="icon-button close-inspector" aria-label="Close inspector" onClick={onClose}><X size={17}/></button></div>
     <div className="layer-filter"><Search size={13} aria-hidden="true"/><input aria-label="Filter layers" placeholder="Filter layers" value={query} onChange={event => setQuery(event.target.value)}/>{query && <button className="icon-button" aria-label="Clear layer filter" onClick={() => setQuery('')}><X size={12}/></button>}<button className="icon-button" aria-label="Reveal selected layer" title={query ? 'Clear filter and reveal selected layer' : 'Reveal selected layer'} disabled={!node} onClick={() => { setQuery(''); setRevealRequest(request => request + 1); }}><LocateFixed size={13}/></button></div>
     <div ref={layerTree} className="layer-tree" aria-label="Layers">{roots.filter(root => !matchingIds || matchingIds.has(root.id)).map(n => renderRow(n))}{!page.nodes.length ? <div className="tree-empty"><Layers size={21}/><p>Your layers will appear here.</p></div> : matchingIds?.size === 0 && <div className="layer-filter-empty">No matching layers.</div>}</div>
-    <div className="inspector-content">
+    <div className="inspector-content" key={`${project.id}/${page.id}/${tab}/${node?.id ?? ''}`}>
       {tab === 'Tweaks' ? <><Section title="Project"><Field label="Name" value={project.name} onChange={name => onChange([{ type: 'rename_project', name }])}/><p className="inspector-hint">Linked tokens update across every board. Custom values remain custom.</p>{onOpenDesignSystem && <button className="secondary-button" onClick={onOpenDesignSystem}><Layers size={13}/>Open design system</button>}</Section><Section title="Colors"><ColorField label="Accent" value={project.tokens.accent} onChange={value => changeToken('accent', value)}/><ColorField label="Background" value={project.tokens.background} onChange={value => changeToken('background', value)}/><ColorField label="Foreground" value={project.tokens.foreground} onChange={value => changeToken('foreground', value)}/></Section><Section title="Typography"><FontPicker label="Font family" value={project.tokens.fontFamily} onChange={value => changeToken('fontFamily', value)} disabled={navigationPending} families={project.designSystem.tokens.filter(token => token.kind === 'fontFamily').map(token => String(token.value))}/></Section><Section title="Design context"><p className="inspector-hint">{project.pages.length} pages · {project.pages.reduce((sum,p) => sum + p.nodes.filter(n => n.type === 'frame' && !n.parentId).length,0)} screens</p><p className="inspector-hint">All elements, code, tokens and component conversations are available to Codex through this plugin.</p><code className="project-id">{project.id}</code></Section></> : multiple ? <section className="inspector-section"><h3>{selectedIds.length} objects selected</h3><p className="inspector-hint">Shift-click to add or remove layers. Select one layer to edit its properties or source.</p><div className="selection-actions" role="toolbar" aria-label="Selected objects" tabIndex={-1}><button className="secondary-button" disabled={navigationPending} onClick={event=>{event.currentTarget.parentElement?.focus({preventScroll:true});onDuplicate();}}><Copy size={13}/>Duplicate</button><button className="secondary-button" disabled={navigationPending} onClick={event=>{event.currentTarget.parentElement?.focus({preventScroll:true});onDelete();}}><Trash2 size={13}/>Delete</button></div><p className="inspector-hint">Locked or hidden layers and stack positions stay protected. Free-positioned layers move together; nested selections are handled once.</p></section> : !node ? <div className="nothing-selected"><MouseIcon/><h3>Select something to inspect</h3><p>Click an element on the canvas or choose a layer above.</p><span>Double-click text to edit it.</span></div> : tab === 'Code' ? codePanel : <>
         <div className="selection-heading"><Field label="Layer name" value={node.name} onChange={name => patch({ name })}/><div className="selection-actions"><button className="icon-button" title={`Duplicate layer · ${shortcut('Ctrl+D')}`} aria-label="Duplicate layer" onClick={onDuplicate}><Copy size={14}/></button><button className="icon-button" aria-label={node.hidden ? 'Show layer' : 'Hide layer'} onClick={() => patch({ hidden: !node.hidden })}>{node.hidden ? <EyeOff size={15}/> : <Eye size={15}/>}</button><button className="icon-button" aria-label={node.locked ? 'Unlock layer' : 'Lock layer'} onClick={() => patch({ locked: !node.locked })}>{node.locked ? <LockKeyhole size={14}/> : <Unlock size={14}/>}</button><button className="icon-button danger" aria-label="Delete layer" onClick={onDelete}><Trash2 size={14}/></button></div></div>
         {node.type === 'frame' && node.generation?.status === 'building' && <Section title="Generation"><p className="inspector-hint">Codex is building this screen. Stopping the indicator keeps all saved content.</p><button className="secondary-button" disabled={navigationPending} onClick={() => patch({ generation: { status: 'ready' } })}>Stop loading indicator</button></Section>}
+        <Section title="Implementation notes"><ImplementationNotes key={`${project.id}/${page.id}/${node.id}`} value={node.notes} disabled={navigationPending} onSave={notes => patch({ notes }).then(Boolean)}/></Section>
         <LayoutControls key={'layout/'+project.id+'/'+page.id+'/'+node.id} node={node} effective={effective ?? node} nodes={resolved} disabled={navigationPending} gapControl={(disabled,save) => tokenField('gap', 'Gap', 0, { type: 'number', min: 0, max: 100_000, suffix: 'px', disabled, save })} paddingControl={(disabled,save) => tokenField('padding', 'Padding', 0, { type: 'number', min: 0, max: 100_000, suffix: 'px', disabled, save })} onPatch={value => patch(value).then(Boolean)} onStyle={value => style(value).then(Boolean)}/>
         {(node.type === 'image' || node.type === 'video') && <Section title={node.type === 'video' ? 'Video' : 'Image'}>
           <input ref={mediaInput} type="file" hidden accept={ASSET_MIME_TYPES.filter(type => type.startsWith(node.type === 'video' ? 'video/' : 'image/')).join(',')} onChange={event => { void importMedia(event.target.files?.[0]); event.target.value = ''; }}/>
@@ -202,12 +209,12 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
             {node.type === 'video' && <><input ref={posterInput} type="file" hidden accept={ASSET_MIME_TYPES.filter(type => type.startsWith('image/')).join(',')} onChange={event => { void importMedia(event.target.files?.[0], true); event.target.value = ''; }}/><div className="asset-source-row"><span>Poster</span><div><button className="secondary-button" disabled={uploading || navigationPending} onClick={() => posterInput.current?.click()}>{node.media.poster ? 'Replace' : 'Choose image'}</button>{node.media.poster && <button className="icon-button" aria-label="Remove video poster" disabled={uploading || navigationPending} onClick={() => media({ poster: undefined })}><X size={13}/></button>}</div></div><ToggleField label="Autoplay" value={node.media.autoplay === true} onChange={autoplay => media({ autoplay })}/><ToggleField label="Loop" value={node.media.loop === true} onChange={loop => media({ loop })}/><ToggleField label="Muted" value={node.media.muted !== false} onChange={muted => media({ muted })}/><p className="inspector-hint">Playback controls appear in HTML exports. Muted video supports autoplay in more browsers.</p></>}
           </>}
         </Section>}
-        {node.type === 'shader' && <Section title="Shader"><label className="select-field"><span>Effect</span><Select label="Shader effect" value={node.shader?.preset??'mesh'} options={shaderPresets.map(preset=>({value:preset.id,label:preset.name}))} onChange={value=>{const preset=value as ShaderConfig['preset'];shader({preset,...(preset==='custom'&&node.shader?.fragment===undefined?{fragment:shaderFragmentSource(defaultShader('custom'))}:{})});}}/></label>
+        {node.type === 'shader' && <Section title="Shader"><label className="select-field"><span>Effect</span><Select label="Shader effect" value={officialShader ? node.shader!.preset : 'legacy'} options={[...shaderPresets.filter(preset=>preset.id!=='custom').map(preset=>({value:preset.id,label:preset.name})),...(!officialShader?[{value:'legacy',label:'Legacy GLSL'}]:[])]} onChange={value=>{if(value!=='legacy')shader({preset:value as ShaderConfig['preset'],provider:'shaders.com'});}}/></label>
           {shaderColors.map((color, index) => <div key={index} className="shader-color-row"><ColorField label={`Color ${index + 1}`} value={color} onChange={value => shader({ colors: shaderColors.map((current, i) => i === index ? value : current) })}/>{shaderColors.length > 2 && <button className="icon-button" aria-label={`Remove shader color ${index + 1}`} onClick={() => shader({ colors: shaderColors.filter((_color, i) => i !== index) })}><X size={12}/></button>}</div>)}
           {shaderColors.length < 4 && <div className="shader-controls-actions"><button className="secondary-button" onClick={() => shader({ colors: [...shaderColors, '#e8eaed'] })}><Plus size={12}/>Add color</button></div>}
-          <Field label="Scale" type="number" value={node.shader?.scale ?? 1} min={0.1} max={10} onChange={value => shader({ scale: Math.max(0.1, Math.min(10, Number(value))) })}/><Field label="Speed" type="number" value={node.shader?.speed ?? 1} min={0} max={5} onChange={value => shader({ speed: Math.max(0, Math.min(5, Number(value))) })}/><Field label="Seed" type="number" value={node.shader?.seed ?? 1} min={0} max={10000} onChange={value => shader({ seed: Math.max(0, Math.min(10000, Number(value))) })}/><ToggleField label="Animate" value={node.shader?.animate === true} onChange={animate => shader({ animate })}/><p className="inspector-hint">{node.shader?.preset === 'custom' ? 'Edit fragment GLSL in the Code tab. ' : ''}Animation respects reduced motion and pauses when hidden.</p>
+          {(!officialShader || node.shader?.preset !== 'grain') && <><Field label="Scale" type="number" value={node.shader?.scale ?? 1} min={0.1} max={10} onChange={value => shader({ scale: Math.max(0.1, Math.min(10, Number(value))) })}/><Field label="Speed" type="number" value={node.shader?.speed ?? 1} min={0} max={5} onChange={value => shader({ speed: Math.max(0, Math.min(5, Number(value))) })}/></>}{(!officialShader || node.shader?.preset === 'mesh') && <Field label="Seed" type="number" value={node.shader?.seed ?? 1} min={0} max={officialShader ? 100 : 10000} onChange={value => shader({ seed: Math.max(0, Math.min(officialShader ? 100 : 10000, Number(value))) })}/>}<ToggleField label="Animate" value={node.shader?.animate === true} onChange={animate => shader({ animate })}/><p className="inspector-hint">{officialShader ? 'From shaders.com. ' : node.shader?.preset === 'custom' ? 'Edit fragment GLSL in the Code tab. ' : ''}Animation respects reduced motion and pauses when hidden.</p>
         </Section>}
-        {node.type === 'text' && <Section title="Text"><textarea className="content-editor" aria-label="Text content" key={`${node.id}-${node.content}`} defaultValue={node.content} onBlur={e => { if (e.target.value !== node.content) patch({ content: e.target.value }); }}/>
+        {node.type === 'text' && <Section title="Text"><AutosaveTextarea className="content-editor" aria-label="Text content" value={node.content ?? ''} onSave={content => patch({ content })}/>
           {tokenField('fontFamily', 'Font', project.tokens.fontFamily)}
           {tokenField('fontWeight', 'Weight', 400, { type: 'number', min: 1, max: 1000 })}
           <label className="select-field"><span>Style</span><Select label="Font style" value={node.styles.fontStyle ?? 'normal'} disabled={navigationPending} onChange={value => style({ fontStyle: value as NodeStyle['fontStyle'] })} options={[{value:'normal',label:'Normal'},{value:'italic',label:'Italic'}]}/></label>
@@ -223,6 +230,7 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
           return value === undefined ? Promise.resolve(true) : style({ [property]: value }).then(Boolean);
         }}/>
         <Effects key={`${project.id}/${page.id}/${node.id}`} node={node} disabled={navigationPending} onChange={effects=>patch({effects}).then(Boolean)}/>
+        <StateStyles key={`states/${project.id}/${page.id}/${node.id}`} node={node} disabled={navigationPending} onChange={states=>style({states})} onView={onStateView}/>
         <Advanced key={`advanced/${project.id}/${page.id}/${node.id}`} node={effective??node} disabled={navigationPending} onChange={style}/>
         <details className="inspector-section inspector-link"><summary>Link<ChevronDown size={13}/></summary>
           <Field key={node.id} label="URL" value={node.href ?? ''} disabled={navigationPending} title="HTTP(S), mailto:, tel: and # links open in HTML and React exports." onChange={link}/>

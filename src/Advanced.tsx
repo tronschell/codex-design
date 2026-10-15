@@ -5,13 +5,13 @@ import { nodeStyleSchema } from '../shared/validation';
 import { ColorField, Field } from './InspectorFields';
 import { Select } from './Select';
 
-export default function Advanced({ node, disabled, onChange }: { node: DesignNode; disabled?: boolean; onChange: (patch: Partial<NodeStyle>) => void }) {
+export default function Advanced({ node, disabled, onChange }: { node: DesignNode; disabled?: boolean; onChange: (patch: Partial<NodeStyle>) => unknown }) {
   const [error, setError] = useState('');
   const s = node.styles;
   const update = (patch: Partial<NodeStyle>) => {
     const parsed = nodeStyleSchema.safeParse({ ...s, ...patch });
-    if (!parsed.success) { setError(parsed.error.issues[0]?.message || 'Use a valid CSS value.'); return; }
-    setError(''); onChange(patch);
+    if (!parsed.success) { setError(parsed.error.issues[0]?.message || 'Use a valid CSS value.'); return false; }
+    setError(''); return onChange(patch);
   };
   const choice = <K extends keyof NodeStyle>(property: K, label: string, fallback: string, values: readonly string[]) => <div className="select-field"><span>{label}</span><Select label={label} disabled={disabled} value={String(s[property] ?? fallback)} options={values.map(value=>({value,label:value}))} onChange={value=>update({[property]:value})}/></div>;
   const clips = ['frame', 'code', 'image', 'video', 'shader'].includes(node.type);

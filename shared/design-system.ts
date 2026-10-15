@@ -35,23 +35,31 @@ export function resolveNodesTokens(nodes: DesignNode[], system: DesignSystem): D
   return nodes.map(node => resolveWithTokens(node, tokens));
 }
 
-function resolveWithTokens(node: DesignNode, tokens: Map<string, DesignSystemToken>): DesignNode {
+// Callers holding immutable snapshots may pass a cache so a bound node keeps its resolved identity while its tokens are unchanged.
+export type TokenResolutionCache = WeakMap<DesignNode, { tokens: (DesignSystemToken | undefined)[]; node: DesignNode }>;
+function resolveWithTokens(node: DesignNode, tokens: Map<string, DesignSystemToken>, cache?: TokenResolutionCache): DesignNode {
+  if (!node.tokenBindings) return node;
+  const bindings = Object.entries(node.tokenBindings), bound = bindings.map(([, id]) => id ? tokens.get(id) : undefined);
+  const cached = cache?.get(node);
+  if (cached && cached.tokens.length === bound.length && cached.tokens.every((token, index) => token === bound[index])) return cached.node;
   let styles = node.styles;
-  for (const [key, id] of Object.entries(node.tokenBindings ?? {})) {
+  for (const [index, [key]] of bindings.entries()) {
     const property = key as BindableStyleProperty;
-    const token = tokens.get(id);
+    const token = bound[index];
     if (!token || !bindingKinds[property]?.includes(token.kind)) continue;
     if (styles === node.styles) styles = { ...node.styles };
     Object.assign(styles, { [property]: token.value });
   }
-  return styles === node.styles ? node : { ...node, styles };
+  const resolved = styles === node.styles ? node : { ...node, styles };
+  cache?.set(node, { tokens: bound, node: resolved });
+  return resolved;
 }
 
-export function resolveProjectTokens(project: DesignProject): DesignProject {
+export function resolveProjectTokens(project: DesignProject, cache?: TokenResolutionCache): DesignProject {
   const tokens = new Map(project.designSystem.tokens.map(token => [token.id, token]));
   let changed = false;
   const pages = project.pages.map(page => {
-    const nodes = page.nodes.map(node => resolveWithTokens(node, tokens));
+    const nodes = page.nodes.map(node => resolveWithTokens(node, tokens, cache));
     if (nodes.every((node, index) => node === page.nodes[index])) return page;
     changed = true;
     return { ...page, nodes };

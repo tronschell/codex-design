@@ -1,9 +1,11 @@
 import type { ShaderConfig } from './types.js';
+import type { ComponentConfig } from 'shaders/core';
+import { shadersComLicense, shadersComRuntime } from './shaders-com.generated.js';
 
 export const shaderPresets = [
-  { id: 'mesh', name: 'Mesh', description: 'Soft flowing color fields' },
-  { id: 'waves', name: 'Waves', description: 'Layered ribbons of color' },
-  { id: 'grain', name: 'Grain', description: 'A fine, seeded color texture' },
+  { id: 'mesh', name: 'Mesh Gradient', description: 'Flowing color fields · shaders.com' },
+  { id: 'waves', name: 'Sine Waves', description: 'Layered color waves · shaders.com' },
+  { id: 'grain', name: 'Film Grain', description: 'Textured gradient · shaders.com' },
   { id: 'custom', name: 'Custom GLSL', description: 'Your own fragment shader' },
 ] as const;
 
@@ -71,7 +73,7 @@ void main() {
 };
 
 export function defaultShader(preset: ShaderConfig['preset'] = 'mesh'): ShaderConfig {
-  return { preset, colors: ['#4497ff', '#a58eff', '#f2a986'], speed: 1, scale: 1, seed: 1, animate: false, ...(preset === 'custom' ? { fragment: fragments.custom } : {}) };
+  return { preset, colors: ['#4497ff', '#a58eff', '#f2a986'], speed: 1, scale: 1, seed: 1, animate: false, ...(preset === 'custom' ? { fragment: fragments.custom } : { provider: 'shaders.com' }) };
 }
 
 export function shaderFragmentSource(shader?: ShaderConfig): string {
@@ -80,6 +82,8 @@ export function shaderFragmentSource(shader?: ShaderConfig): string {
 }
 
 export interface ShaderRuntimeOptions {
+  provider?: 'shaders.com';
+  components?: ComponentConfig[];
   fragmentSource: string;
   colors: string[];
   speed: number;
@@ -90,15 +94,41 @@ export interface ShaderRuntimeOptions {
 }
 
 export function shaderRuntimeOptions(shader?: ShaderConfig): ShaderRuntimeOptions {
-  return {
+  const options: ShaderRuntimeOptions = {
     fragmentSource: shaderFragmentSource(shader), colors: shader?.colors ?? defaultShader().colors!,
     speed: Math.max(0, Math.min(5, shader?.speed ?? 1)), scale: Math.max(0.1, Math.min(10, shader?.scale ?? 1)),
     seed: Math.max(0, Math.min(10000, shader?.seed ?? 1)), animate: shader?.animate === true,
   };
+  if (shader?.provider === 'shaders.com') {
+    options.provider = shader.provider;
+    const stops = options.colors.map((color, index) => ({ color, position: index / (options.colors.length - 1) }));
+    const gradient: ComponentConfig = { type: 'LinearGradient', props: { stops } };
+    options.components = shader.preset === 'mesh'
+      ? [{ type: 'MeshGradient', props: { stops, speed: options.speed, seed: options.seed % 101, transform: { scale: 1 / options.scale } } }]
+      : shader.preset === 'grain'
+      ? [{ type: 'FilmGrain', props: { strength: .25, bias: 0, animated: options.animate }, children: [gradient] }]
+      : [gradient, ...options.colors.map((color, index) => ({ type: 'SineWave', props: { color, speed: options.speed, frequency: 1.5 * options.scale, position: { x: .5, y: .25 + index * .2 }, thickness: .3, softness: .5 } }))];
+  }
+  return options;
+}
+
+export function shaderCodeSource(shader?: ShaderConfig): string {
+  if (shader?.provider !== 'shaders.com') return shaderFragmentSource(shader);
+  const options = shaderRuntimeOptions(shader);
+  return `// https://shaders.com · shaders@4.0.4 (MIT)\nimport { createShader } from 'shaders/js';\n\nlet effect;\neffect = await createShader(canvas, ${JSON.stringify({ components: options.components }, null, 2)}, { disableTelemetry: true${!options.animate || !options.speed ? ', onReady: () => effect?.pause()' : ''} });`;
+}
+
+export interface ShaderRenderer { dispose: () => void; ready?: Promise<void> }
+let officialRenderer: ReturnType<typeof shadersComRuntime> | undefined;
+
+export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderRuntimeOptions, onError?: (message: string) => void): ShaderRenderer {
+  return options.provider === 'shaders.com'
+    ? (officialRenderer ??= shadersComRuntime())(canvas, options, onError)
+    : createLegacyShaderRenderer(canvas, options, onError);
 }
 
 // Keep this runtime self-contained: source exports embed this fixed function, never user JavaScript.
-export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderRuntimeOptions, onError?: (message: string) => void): { dispose: () => void } {
+function createLegacyShaderRenderer(canvas: HTMLCanvasElement, options: ShaderRuntimeOptions, onError?: (message: string) => void): ShaderRenderer {
   const doc = canvas.ownerDocument, win = doc.defaultView!;
   const motion = win.matchMedia('(prefers-reduced-motion: reduce)');
   let gl: WebGLRenderingContext | null = null, program: WebGLProgram | null = null, buffer: WebGLBuffer | null = null;
@@ -204,8 +234,10 @@ export function createShaderRenderer(canvas: HTMLCanvasElement, options: ShaderR
   } };
 }
 
-export function shaderRuntimeSource(): string {
-  const source = createShaderRenderer.toString();
+export function shaderRuntimeSource(includeShadersCom = false): string {
+  const source = createLegacyShaderRenderer.toString();
   // tsx preserves nested function names through a helper absent from a standalone export.
-  return source.includes('__name(') ? `((__name)=>(${source}))((value)=>value)` : `(${source})`;
+  const legacy = source.includes('__name(') ? `((__name)=>(${source}))((value)=>value)` : `(${source})`;
+  if (!includeShadersCom) return legacy;
+  return `/* ${shadersComLicense.replaceAll('*/', '* /')} */\n((__name)=>((legacy,official)=>(canvas,options,onError)=>options.provider==='shaders.com'?official(canvas,options,onError):legacy(canvas,options,onError))(${legacy},(${shadersComRuntime.toString()})()))((value)=>value)`;
 }

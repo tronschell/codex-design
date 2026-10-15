@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
-import { ArrowLeft, ArrowUpRight, Check, Clock3, Copy, Download, Hand, ImagePlus, LoaderCircle, Maximize2, PanelRight, Plus, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import type { DesignNode, DesignProject, DesignSystemToken, DesignSystemTokenKind, InspirationItem, LibraryScope, Operation, Viewport } from '../shared/types';
+import { flushSync } from 'react-dom';
+import { ArrowLeft, ArrowUpRight, Clock3, Copy, Download, Hand, ImagePlus, LoaderCircle, Maximize2, PanelRight, Plus, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import type { DesignNode, DesignProject, DesignSystemRequest, DesignSystemToken, DesignSystemTokenKind, InspirationItem, LibraryScope, Operation, Viewport } from '../shared/types';
 import { designSystemMarkdown, LEGACY_TOKEN_IDS, tokenCssVariables } from '../shared/design-system';
 import { designSystemRequestPrompt } from '../shared/design-system-workflow';
 import { sendFollowUp } from './bridge';
@@ -17,6 +18,11 @@ import ComponentEditor from './ComponentLibrary';
 import ComponentPreview from './ComponentPreview';
 import LibraryVersions from './LibraryVersions';
 import { downloadExport, exportLibraryFile } from './export-utils';
+import { useAutosaveDraft } from './useAutosaveDraft';
+import { AutosaveStatus } from './AutosaveFields';
+import { useLocalDraft } from './useLocalDraft';
+import { designSystemTokenSchema } from '../shared/validation';
+import { parseDesignSystemDocument } from '../shared/design-system-document';
 
 export interface ProjectLibraryProps {
   project: DesignProject;
@@ -68,45 +74,10 @@ const initialView: Viewport = { x: 32, y: 76, zoom: 1 };
 const emptyToken = () => ({ id: '', name: '', kind: 'color' as DesignSystemTokenKind, value: '', description: '' });
 const emptyReference = () => ({ name: '', notes: '', usage: '', sourceUrl: '' });
 type Current = () => boolean;
-type DraftState<T> = { key: string; value: T; base: T; conflicts: (keyof T)[]; deleted: boolean; hadSaved: boolean };
-
-function useLibraryDraft<T extends Record<string, string>>(key: string, saved: T | null, blank: () => T) {
-  const [state, setState] = useState<DraftState<T>>(() => ({ key, value: saved ?? blank(), base: saved ?? blank(), conflicts: [], deleted: false, hadSaved: !!saved }));
-  const latest = useRef(state), signature = JSON.stringify(saved);
-  const reset = (value = saved ?? blank()) => {
-    const next: DraftState<T> = { key, value, base: value, conflicts: [], deleted: false, hadSaved: !!saved };
-    latest.current = next; setState(next);
-  };
-  useLayoutEffect(() => {
-    const previous = latest.current;
-    if (previous.key !== key) { reset(); return; }
-    if (!saved) {
-      if (previous.hadSaved) { const next = { ...previous, deleted: true }; latest.current = next; setState(next); }
-      return;
-    }
-    const value = { ...saved }, conflicts = new Set(previous.conflicts);
-    for (const field of Object.keys(saved) as (keyof T)[]) {
-      if (previous.value[field] !== previous.base[field]) {
-        value[field] = previous.value[field];
-        if (saved[field] !== previous.base[field] && value[field] !== saved[field]) conflicts.add(field);
-      }
-      if (value[field] === saved[field]) conflicts.delete(field);
-    }
-    const next: DraftState<T> = { key, value, base: saved, conflicts: [...conflicts], deleted: false, hadSaved: true };
-    latest.current = next; setState(next);
-  }, [key, signature]);
-  const setValue = (patch: Partial<T>) => {
-    const previous = latest.current, value = { ...previous.value, ...patch };
-    const next = { ...previous, value, conflicts: previous.conflicts.filter(field => value[field] !== previous.base[field]) };
-    latest.current = next; setState(next);
-  };
-  return { ...state, setValue, reset };
-}
-
 const draftFieldLabels: Record<string, string> = { name: 'name', description: 'description', documentation: 'documentation', markdown: 'DESIGN.md', kind: 'type', value: 'value', notes: 'what you like', usage: 'intended use', sourceUrl: 'source link' };
 function DraftConflicts({ fields, saved }: { fields: string[]; saved: Record<string, string> }) {
   if (!fields.length) return null;
-  return <details className="library-draft-warning"><summary>Changed elsewhere: {fields.map(field => draftFieldLabels[field] ?? field).join(', ')}. Your edits are kept.</summary><p className="library-field-note">Review the saved values below; Save keeps your edited fields and the latest untouched fields.</p>{fields.map(field => <label key={field}>Saved {draftFieldLabels[field] ?? field}<textarea readOnly rows={3} value={saved[field]}/></label>)}</details>;
+  return <details className="library-draft-warning"><summary>Changed elsewhere: {fields.map(field => draftFieldLabels[field] ?? field).join(', ')}. Your edits are kept.</summary><p className="library-field-note">Autosave is paused. Review the saved values below and choose which edits to keep.</p>{fields.map(field => <label key={field}>Saved {draftFieldLabels[field] ?? field}<textarea readOnly rows={3} value={saved[field]}/></label>)}</details>;
 }
 
 function displayValue(token: DesignSystemToken) {
@@ -169,10 +140,47 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   const [selectedComponentId, setSelectedComponentId] = useState(() => project.pages.flatMap(page => page.nodes).find(node => node.componentInstance && Object.values(node.componentInstance.nodeMap).includes(selectedNodeId ?? ''))?.componentInstance?.componentId ?? '');
   const [selectedTokenId, setSelectedTokenId] = useState(''), [selectedReferenceId, setSelectedReferenceId] = useState('');
   const selectedToken = system.tokens.find(token => token.id === selectedTokenId), selectedReference = inspiration.find(item => item.id === selectedReferenceId);
-  const tokenState = useLibraryDraft(`${project.id}/token/${selectedTokenId}`, selectedToken ? { id: selectedToken.id, name: selectedToken.name, kind: selectedToken.kind, value: String(selectedToken.value), description: selectedToken.description ?? '' } : null, emptyToken);
-  const referenceState = useLibraryDraft(`${project.id}/${boardId}/reference/${selectedReferenceId}`, selectedReference ? { name: selectedReference.name, notes: selectedReference.notes, usage: selectedReference.usage, sourceUrl: selectedReference.sourceUrl ?? '' } : null, emptyReference);
+  const newTokenDraft = useLocalDraft(`${project.id}/new-token`, emptyToken());
+  const existingTokenState = useAutosaveDraft(`${project.id}/token/${selectedTokenId}`, selectedToken ? { id: selectedToken.id, name: selectedToken.name, kind: selectedToken.kind, value: String(selectedToken.value), description: selectedToken.description ?? '' } : null, emptyToken, {
+    enabled: !readOnly && !!selectedToken,
+    normalize: draft => {
+      const raw = draft.value.trim(), value = stringKinds.has(draft.kind) ? raw : raw ? Number(raw) : NaN;
+      const token = designSystemTokenSchema.safeParse({ ...draft, name: draft.name.trim(), value });
+      if (!token.success) throw new Error(token.error.issues[0]?.message || 'Enter a valid token.');
+      if (system.tokens.some(item => item.id !== draft.id && item.name.toLowerCase() === token.data.name.toLowerCase())) throw new Error('Use a unique token name.');
+      return { ...draft, name: token.data.name, value: String(token.data.value) };
+    },
+    onSave: (draft, base) => {
+      const patch: Partial<Omit<DesignSystemToken, 'id'>> = {};
+      if (draft.name !== base.name) patch.name = draft.name;
+      if (draft.kind !== base.kind) patch.kind = draft.kind;
+      if (draft.value !== base.value || draft.kind !== base.kind) patch.value = stringKinds.has(draft.kind) ? draft.value : Number(draft.value);
+      if (draft.description !== base.description) patch.description = draft.description;
+      return autosave([{ type: 'update_design_token', tokenId: draft.id, patch }]);
+    },
+  });
+  const tokenState = selectedTokenId ? existingTokenState : newTokenDraft;
+  const referenceState = useAutosaveDraft(`${project.id}/${boardId}/reference/${selectedReferenceId}`, selectedReference ? { name: selectedReference.name, notes: selectedReference.notes, usage: selectedReference.usage, sourceUrl: selectedReference.sourceUrl ?? '' } : null, emptyReference, {
+    enabled: !readOnly && !!selectedReference,
+    normalize: draft => {
+      const name = draft.name.trim(), sourceUrl = draft.sourceUrl.trim();
+      if (!name) throw new Error('Give this reference a name.');
+      if (sourceUrl) { let url: URL; try { url = new URL(sourceUrl); } catch { throw new Error('Use a complete HTTP or HTTPS source link.'); } if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS source link.'); }
+      return { ...draft, name, sourceUrl };
+    },
+    onSave: (draft, base) => {
+      const patch: Extract<Operation, { type: 'update_inspiration' }>['patch'] = {};
+      for (const field of ['name', 'notes', 'usage'] as const) if (draft[field] !== base[field]) patch[field] = draft[field];
+      if (draft.sourceUrl !== base.sourceUrl) patch.sourceUrl = draft.sourceUrl || null;
+      return autosave([{ type: 'update_inspiration', boardId, itemId: selectedReferenceId, patch }]);
+    },
+  });
   const markdown = useMemo(() => designSystemMarkdown(system), [system]);
-  const documentState = useLibraryDraft(`${project.id}/document`, { markdown }, () => ({ markdown: '' }));
+  const documentState = useAutosaveDraft(`${project.id}/document`, { markdown }, () => ({ markdown: '' }), {
+    enabled: !readOnly,
+    normalize: draft => ({ markdown: designSystemMarkdown({ ...system, ...parseDesignSystemDocument(draft.markdown, system) }) }),
+    onSave: draft => autosave([{ type: 'apply_design_system_document', markdown: draft.markdown }]),
+  });
   const { value: tokenDraft, setValue: setTokenDraft } = tokenState, { value: referenceDraft, setValue: setReferenceDraft } = referenceState;
   const fontTokens = useMemo(() => system.tokens.filter(token => token.kind === 'fontFamily'), [system.tokens]);
   const fontFamilies = useMemo(() => fontTokens.map(token => String(token.value)), [fontTokens]);
@@ -180,17 +188,28 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   if (retainedReference.current.key !== `${project.id}/${boardId}/reference/${selectedReferenceId}`) retainedReference.current = { key: `${project.id}/${boardId}/reference/${selectedReferenceId}`, item: selectedReference ?? null };
   else if (selectedReference) retainedReference.current.item = selectedReference;
   const editableReference = selectedReference ?? (referenceState.deleted ? retainedReference.current.item : null);
-  const [requestMode, setRequestMode] = useState<'generate' | 'find'>(system.request?.mode ?? 'generate');
-  const [brief, setBrief] = useState(system.request?.brief ?? project.description), [repository, setRepository] = useState(system.request?.repository ?? '');
+  const requestDraft = useLocalDraft(`${project.id}/request/${system.request?.id || 'new'}`, {
+    mode: system.request?.mode === 'components' ? 'find' : system.request?.mode ?? 'generate',
+    componentScope: system.request?.mode === 'components' ? system.request.brief : '',
+    brief: system.request?.mode === 'components' ? project.description : system.request?.brief ?? project.description,
+    repository: system.request?.repository ?? '',
+  });
+  const requestMode = requestDraft.value.mode === 'generate' ? 'generate' : 'find', componentScope = requestDraft.value.componentScope, brief = requestDraft.value.brief, repository = requestDraft.value.repository;
+  const setRequestMode = (mode: 'generate' | 'find') => requestDraft.setValue({mode}), setComponentScope = (componentScope: string) => requestDraft.setValue({componentScope}), setBrief = (brief: string) => requestDraft.setValue({brief}), setRepository = (repository: string) => requestDraft.setValue({repository});
   const [delivery, setDelivery] = useState(''), [showRequest, setShowRequest] = useState(false);
   const [hand, setHand] = useState(false), [spacePan, setSpacePan] = useState(false), [panning, setPanning] = useState(false), [dropTarget, setDropTarget] = useState<'canvas' | 'panel' | null>(null);
   const [busy, setBusy] = useState(''), [stopping, setStopping] = useState(false), [error, setError] = useState('');
   const root = useRef<HTMLElement>(null), stage = useRef<HTMLElement>(null), fileInput = useRef<HTMLInputElement>(null), tokenName = useRef<HTMLInputElement>(null), queuedPrompt = useRef<HTMLTextAreaElement>(null);
-  const viewRef = useRef(view), mounted = useRef(true), busyRef = useRef(false), focusName = useRef(false), suppressClick = useRef(false);
+  const viewRef = useRef(view), cameraFrame = useRef(0), mounted = useRef(true), busyRef = useRef(false), focusName = useRef(false), suppressClick = useRef(false);
   const libraryExport = useRef<{ controller: AbortController; revision: number } | null>(null);
   const gesture = useRef<{ pointerId: number; x: number; y: number; view: Viewport; moved: boolean } | null>(null), upload = useRef<AbortController | null>(null);
   const context = useRef({ key: scopeKey, readOnly, project, onChange });
   context.current = { key: scopeKey, readOnly, project, onChange };
+  async function autosave(operations: Operation[]) {
+    const next = await onChange(operations);
+    if (next && context.current.project.id === next.id) context.current.project = next;
+    return next;
+  }
   const working = !!busy, disabled = readOnly || working;
   useLayoutEffect(() => () => libraryExport.current?.controller.abort(), [scopeKey, readOnly]);
   useLayoutEffect(() => { if (libraryExport.current && libraryExport.current.revision !== project.revision) libraryExport.current.controller.abort(); }, [project.revision]);
@@ -225,8 +244,17 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   const modeLabel = mode === 'system' ? 'Design system' : mode === 'components' ? 'Components' : 'Inspiration';
   const contentSize = { width: Math.max(0, ...content.map(box => box.x + box.width)), height: Math.max(0, ...content.map(box => box.y + box.height)) };
 
+  const flushView = useCallback(() => {
+    if (!cameraFrame.current) return;
+    cancelAnimationFrame(cameraFrame.current); cameraFrame.current = 0;
+    setView(viewRef.current);
+  }, []);
   const moveView = useCallback((next: Viewport) => {
-    viewRef.current = next; views.set(context.current.key, next); setView(next);
+    viewRef.current = next; views.set(context.current.key, next);
+    if (!cameraFrame.current) cameraFrame.current = requestAnimationFrame(() => {
+      // Coalesce input without deferring the camera past this frame's paint.
+      cameraFrame.current = 0; flushSync(() => setView(viewRef.current));
+    });
   }, []);
   const zoomAt = useCallback((zoom: number, x?: number, y?: number) => {
     const element = stage.current;
@@ -242,10 +270,11 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   };
 
   const cancelPan = useCallback(() => {
+    flushView();
     const active = gesture.current; gesture.current = null;
     if (active && stage.current?.hasPointerCapture(active.pointerId)) stage.current.releasePointerCapture(active.pointerId);
     setPanning(false); setSpacePan(false);
-  }, []);
+  }, [flushView]);
   useEffect(() => {
     const hidden = () => { if (document.hidden) cancelPan(); };
     window.addEventListener('blur', cancelPan);
@@ -262,11 +291,11 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
     mounted.current = true;
     const previous = document.activeElement;
     stage.current?.focus({ preventScroll: true });
-    return () => { mounted.current = false; upload.current?.abort(); if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true }); };
+    return () => { mounted.current = false; upload.current?.abort(); if (cameraFrame.current) cancelAnimationFrame(cameraFrame.current); if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
   useEffect(() => { if (readOnly) upload.current?.abort(); }, [readOnly]);
   useEffect(() => {
-    setRequestMode(system.request?.mode ?? 'generate'); setBrief(system.request?.brief ?? project.description); setRepository(system.request?.repository ?? ''); setDelivery(''); setShowRequest(false);
+    setDelivery(''); setShowRequest(false);
   }, [system.request?.id, project.id]);
   useEffect(() => { if (focusName.current && panelOpen && tab === 'tokens') { tokenName.current?.focus(); focusName.current = false; } }, [selectedTokenId, panelOpen, tab, tokenDraft.id]);
   useEffect(() => {
@@ -307,7 +336,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   const close = () => { upload.current?.abort(); libraryExport.current?.controller.abort(); onClose(); };
   const addToken = () => {
     if (disabled) return;
-    focusName.current = true; setSelectedTokenId(''); tokenState.reset(emptyToken()); setTab('tokens'); setPanelOpen(true);
+    focusName.current = true; setSelectedTokenId(''); setTab('tokens'); setPanelOpen(true);
     requestAnimationFrame(() => { if (mounted.current) tokenName.current?.focus(); });
   };
   const saveToken = () => void run('Saving token…', async current => {
@@ -316,14 +345,11 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
     if (system.tokens.some(token => token.id !== tokenDraft.id && token.name.toLowerCase() === name.toLowerCase())) throw new Error('Use a unique token name.');
     const token: DesignSystemToken = { id: tokenDraft.id || uid(), name, kind: tokenDraft.kind, value, ...(tokenDraft.description.trim() ? { description: tokenDraft.description.trim() } : {}) };
     const next = await persist([{ type: 'upsert_design_token', token }], current);
-    if (next) { tokenState.reset({ ...token, value: String(token.value), description: token.description ?? '' }); setSelectedTokenId(token.id); onNotify('Design token saved.'); }
+    if (next) { tokenState.reset({ ...token, value: String(token.value), description: token.description ?? '' }); setSelectedTokenId(token.id); if (!tokenDraft.id) newTokenDraft.setValue(emptyToken()); onNotify('Design token saved.'); }
   });
-  const saveDocument = async (current: Current) => {
-    if (!documentChanged) return context.current.project;
-    if (documentState.conflicts.length) throw new Error('DESIGN.md changed elsewhere. Review the saved document and use the latest version before applying your edits.');
-    const next = await persist([{ type: 'apply_design_system_document', markdown: documentState.value.markdown }], current);
-    if (next) documentState.reset({ markdown: designSystemMarkdown(next.designSystem) });
-    return next;
+  const saveDocument = async (_current: Current) => {
+    if (!await documentState.flush()) throw new Error(documentState.error || 'DESIGN.md could not be saved. Review the draft and try again.');
+    return context.current.project;
   };
   const exportSystem = (action: 'copy' | 'download' | 'css') => void run(action === 'download' ? 'Preparing DESIGN.md…' : 'Copying…', async current => {
     const latest = documentChanged && !readOnly ? await saveDocument(current) : context.current.project;
@@ -407,9 +433,11 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
     };
     window.addEventListener('paste', paste); return () => window.removeEventListener('paste', paste);
   }, [mode]);
-  const queueRequest = () => void run('Saving request…', async current => {
-    if (!brief.trim()) throw new Error('Describe the app so Codex has context for this design system.');
-    const request = { id: uid(), mode: requestMode, brief: brief.trim(), repository: repository.trim(), createdAt: new Date().toISOString(), queued: true };
+  const queueRequest = (mode: DesignSystemRequest['mode'] = requestMode) => void run('Saving request…', async current => {
+    if (system.request?.queued && (mode === 'components') !== (system.request.mode === 'components')) throw new Error('Finish or remove the queued request below before starting a different discovery.');
+    const requestBrief = mode === 'components' ? componentScope.trim() || 'Show all existing UI components and their supported named variants.' : brief.trim();
+    if (!requestBrief) throw new Error('Describe the app so Codex has context for this design system.');
+    const request = { id: uid(), mode, brief: requestBrief, repository: repository.trim(), createdAt: new Date().toISOString(), queued: true };
     const next = await persist([{ type: 'set_design_system_request', request }], current);
     if (!next || !current()) return;
     setBusy('Sending request…');
@@ -417,7 +445,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
     let delivered = false;
     try { delivered = await sendFollowUp(prompt); } catch { /* The saved request remains available for a manual handoff. */ }
     if (!current()) return;
-    if (delivered) { setDelivery('Sent to Codex. The request stays queued until Codex updates the project.'); onNotify('Design system request sent to Codex.'); return; }
+    if (delivered) { setDelivery('Sent to Codex. The request stays queued until Codex updates the project.'); onNotify(mode === 'components' ? 'Component discovery sent to Codex.' : 'Design system request sent to Codex.'); return; }
     setShowRequest(true);
     try { await copy(prompt); if (current()) { setDelivery('Saved and copied. Paste the request into Codex to begin.'); onNotify('Request saved and copied. Paste it into Codex to begin.'); } }
     catch { if (current()) { setDelivery('Saved and queued. Copy the request below into Codex to begin.'); onNotify('Request saved and queued. Copy it into Codex to begin.'); } }
@@ -426,17 +454,33 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   const pointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0 && event.button !== 1) return;
     if (!hand && !spacePan && event.button !== 1 && (event.target as Element).closest('button, a, input, textarea, select, summary')) return;
+    flushView();
     event.preventDefault(); stage.current?.focus({ preventScroll: true }); stage.current?.setPointerCapture(event.pointerId);
     gesture.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, view: viewRef.current, moved: false }; setPanning(true);
   };
   const finishPan = (event: ReactPointerEvent<HTMLElement>) => {
     const active = gesture.current;
     if (!active || active.pointerId !== event.pointerId) return;
+    flushView();
     suppressClick.current = event.type !== 'pointercancel' && (active.moved || hand || spacePan || event.button === 1);
     if (stage.current?.hasPointerCapture(event.pointerId)) stage.current.releasePointerCapture(event.pointerId);
     gesture.current = null; setPanning(false);
   };
   const savedPrompt = system.request ? designSystemRequestPrompt(project, system.request) : '';
+  const requestStatus = system.request && <section className="library-section library-request-status"><h3><span><Clock3 size={13}/>{system.request.queued ? 'Queued request' : 'Saved request'}</span><button type="button" className="library-icon library-delete" disabled={disabled} title="Remove saved request" aria-label="Remove saved request" onClick={() => void run('Removing request…', async current => { if (await persist([{ type: 'set_design_system_request', request: null }], current)) onNotify('Saved request removed.'); })}><Trash2 size={13}/></button></h3><p className="library-request-meta">{system.request.mode === 'components' ? 'App components' : system.request.mode === 'find' ? 'Find existing' : 'Generate'} · {new Date(system.request.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p><p className="library-field-note" role="status">{delivery || 'Codex updates this project when it handles the request. A queued request does not mean work has started.'}</p><div className="library-button-row"><button type="button" className="library-button" disabled={working} onClick={() => void run('Copying request…', async current => { setShowRequest(true); try { await copy(savedPrompt); if (current()) onNotify('Request copied.'); } catch (failure) { if (current()) requestAnimationFrame(() => { queuedPrompt.current?.focus(); queuedPrompt.current?.select(); }); throw failure; } })}><Copy size={13}/>Copy request</button><button type="button" className="library-button" aria-expanded={showRequest} onClick={() => setShowRequest(!showRequest)}>{showRequest ? 'Hide prompt' : 'View prompt'}</button></div>{showRequest && <textarea ref={queuedPrompt} className="library-queued-prompt" rows={10} readOnly spellCheck={false} aria-label="Saved request prompt" value={savedPrompt}/>}</section>;
+
+  const componentDiscovery = <>
+    <form className="library-section library-editor-form" onBlurCapture={requestDraft.onBlur} onCompositionStartCapture={requestDraft.onCompositionStart} onCompositionEndCapture={requestDraft.onCompositionEnd} onSubmit={event => { event.preventDefault(); queueRequest('components'); }}>
+      <h3>Existing app components</h3>
+      <p className="library-field-note">Ask Codex to inspect your app and populate this library with its components and supported variants.</p>
+      <label>Application repository · optional<input maxLength={2000} readOnly={disabled} value={repository} placeholder="Use the app established in your Codex chat" onChange={event => setRepository(event.target.value)}/></label>
+      <label>Component scope · optional<textarea maxLength={20000} rows={2} readOnly={disabled} value={componentScope} placeholder="All existing UI components and named variants" onChange={event => setComponentScope(event.target.value)}/></label>
+      <button type="submit" className="library-button library-primary" disabled={disabled}><ArrowUpRight size={13}/>Find app components</button>
+      <p className="library-field-note">The request is saved for your connected Codex agent. Existing application source stays intact.</p>
+    </form>
+    {requestStatus}
+  </>;
+
 
   return <section ref={root} className="project-library" aria-label="Project design library" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !(event.target as Element).closest('input, textarea, select, [contenteditable="true"]')) { event.preventDefault(); close(); } }} onKeyUp={event => { if (event.code === 'Space') setSpacePan(false); event.stopPropagation(); }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setSpacePan(false); }}>
     <nav className="library-workspace-tabs" aria-label="Project design library sections">
@@ -486,40 +530,40 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
           {tab === 'versions' && <LibraryVersions project={project} scope="system" disabled={disabled} onChange={onChange} onApply={onApply} onNotify={onNotify}/>}
           {tab === 'tokens' && <>
             <div className="library-token-picker"><Select label="Select design token" value={selectedToken || tokenState.deleted ? selectedTokenId : ''} onChange={setSelectedTokenId} options={[{value:'',label:'New token'},...(tokenState.deleted?[{value:selectedTokenId,label:`Deleted · ${tokenDraft.name}`}]:[]),...groups.flatMap(group=>system.tokens.filter(token=>group.kinds.includes(token.kind)).map(token=>({value:token.id,label:`${group.name} · ${token.name}${token.kind==='color'?` · ${token.value}`:''}`,...(token.kind==='color'?{color:String(token.value)}:token.kind==='fontFamily'?{fontFamily:String(token.value)}:token.kind==='fontWeight'?{fontWeight:Number(token.value)}:{})})))]}/><button type="button" className="library-icon" aria-label="Add design token" title="Add design token" disabled={disabled} onClick={addToken}><Plus size={16}/></button></div>
-            <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); saveToken(); }}>
+            <form className="library-section library-editor-form" onBlurCapture={tokenState.onBlur} onCompositionStartCapture={tokenState.onCompositionStart} onCompositionEndCapture={tokenState.onCompositionEnd} onSubmit={event => { event.preventDefault(); if (selectedToken) void tokenState.flush(); else saveToken(); }}>
               <h3>{tokenState.deleted ? 'Deleted token draft' : selectedToken ? 'Edit token' : 'New token'}{selectedToken && <button type="button" className="library-icon library-delete" aria-label="Delete selected token" title="Delete token; saved versions retain it" disabled={disabled} onClick={() => void run('Deleting token…', async current => { if (await persist([{ type: 'delete_design_token', tokenId: selectedToken.id }], current)) { setSelectedTokenId(''); onNotify('Design token deleted. Earlier versions retain it.'); } })}><Trash2 size={13}/></button>}</h3>
               <DraftConflicts fields={tokenState.conflicts} saved={tokenState.base}/>{tokenState.deleted && <p className="library-draft-warning">Deleted elsewhere. Your draft is retained. Restore token adds it back; old layer bindings remain detached. Changing selection discards this draft.</p>}
               <label>Name<input ref={tokenName} required maxLength={160} readOnly={disabled} value={tokenDraft.name} placeholder="color.action.primary" onChange={event => setTokenDraft({ ...tokenDraft, name: event.target.value })}/></label>
               <label title={compatibilityToken ? 'Compatibility tokens keep their original type.' : undefined}>Type<Select label="Token type" disabled={disabled || compatibilityToken} value={tokenDraft.kind} onChange={kind=>setTokenDraft({...tokenDraft,kind:kind as DesignSystemTokenKind,value:''})} options={groups.flatMap(group=>group.kinds.map(kind=>({value:kind,label:`${group.name} · ${tokenFields[kind].label.split(' · ')[0]}`})))}/></label>
-              {tokenDraft.kind === 'fontFamily' ? <FontPicker label="Font family" value={tokenDraft.value} families={fontFamilies} disabled={disabled} onChange={value => setTokenDraft({ ...tokenDraft, value })}/> : tokenDraft.kind === 'color' ? <div className="library-token-color"><ColorField label="Color" value={tokenDraft.value} disabled={disabled} onChange={value => setTokenDraft({ ...tokenDraft, value })}/></div> : <label>{field.label}<input required type={numericInput ? 'number' : 'text'} step={field.step ?? 'any'} min={field.min} max={field.max} maxLength={2000} readOnly={disabled} value={tokenDraft.value} placeholder={field.placeholder} onChange={event => setTokenDraft({ ...tokenDraft, value: event.target.value })}/></label>}
+              {tokenDraft.kind === 'fontFamily' ? <FontPicker autoSave={false} label="Font family" value={tokenDraft.value} families={fontFamilies} disabled={disabled} onChange={value => setTokenDraft({ ...tokenDraft, value })}/> : tokenDraft.kind === 'color' ? <div className="library-token-color"><ColorField autoSave={false} label="Color" value={tokenDraft.value} disabled={disabled} onChange={value => setTokenDraft({ ...tokenDraft, value })}/></div> : <label>{field.label}<input required type={numericInput ? 'number' : 'text'} step={field.step ?? 'any'} min={field.min} max={field.max} maxLength={2000} readOnly={disabled} value={tokenDraft.value} placeholder={field.placeholder} onChange={event => setTokenDraft({ ...tokenDraft, value: event.target.value })}/></label>}
               {tokenDraft.kind === 'fontFamily' && <p className="library-font-specimen" style={{fontFamily:tokenDraft.value || undefined}}>Aa Bb Cc · 0123456789</p>}
               <label>Description<textarea maxLength={5000} rows={3} readOnly={disabled} value={tokenDraft.description} placeholder="Where and why to use this token" onChange={event => setTokenDraft({ ...tokenDraft, description: event.target.value })}/></label>
-              <button type="submit" className="library-button library-primary" disabled={disabled || !tokenDraft.name.trim() || !tokenDraft.value.trim()}><Check size={13}/>{tokenState.deleted ? 'Restore token' : 'Save token'}</button>
+              {selectedToken ? <AutosaveStatus state={tokenState}/> : <button type="submit" className="library-button library-primary" disabled={disabled || !tokenDraft.name.trim() || !tokenDraft.value.trim()}><Plus size={13}/>{tokenState.deleted ? 'Restore token' : 'Create token'}</button>}
             </form>
             <p className="library-note">Named tokens are shared by every board in this project.</p>
           </>}
           {tab === 'docs' && <>
             {!!fontTokens.length && <section className="library-section">
               <h3>Project fonts</h3><p className="library-field-note">Font choices save immediately and update linked text across every board. Previews use available fonts and CSS fallbacks.</p>
-              {documentChanged && <p className="library-field-note">Save or discard the Markdown draft before changing fonts here.</p>}
-              {fontTokens.map(token => <div className="library-typography-row" key={token.id}><FontPicker label={token.name} value={String(token.value)} families={fontFamilies} disabled={disabled || documentChanged} onChange={value => void run('Saving project font…', async current => { if (await persist([{type:'upsert_design_token',token:{...token,value}}], current)) onNotify(`${token.name} updated across linked styles.`); })}/><p className="library-font-specimen" style={{fontFamily:String(token.value)}}>Aa Bb Cc · 0123456789</p></div>)}
+              {documentChanged && <p className="library-field-note">The Markdown draft autosaves before project fonts become available here.</p>}
+              {fontTokens.map(token => <div className="library-typography-row" key={token.id}><FontPicker label={token.name} value={String(token.value)} families={fontFamilies} disabled={disabled || documentChanged} onChange={value => autosave([{type:'update_design_token',tokenId:token.id,patch:{value}}])}/><p className="library-font-specimen" style={{fontFamily:String(token.value)}}>Aa Bb Cc · 0123456789</p></div>)}
             </section>}
-            <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); void run('Saving DESIGN.md…', async current => { if (await saveDocument(current)) onNotify('DESIGN.md saved. Linked styles updated across the project.'); }); }}>
-              <h3>DESIGN.md{documentChanged && <span>Unsaved</span>}</h3>
+            <form className="library-section library-editor-form" onBlurCapture={documentState.onBlur} onCompositionStartCapture={documentState.onCompositionStart} onCompositionEndCapture={documentState.onCompositionEnd} onSubmit={event => { event.preventDefault(); void documentState.flush(); }}>
+              <h3>DESIGN.md</h3>
               <p className="library-field-note">Edit guidance and token rows here. Keep stable CSS variable IDs and section comments; component and source catalogs are generated. Custom layer styles stay independent.</p>
-              {!!documentState.conflicts.length && <details className="library-draft-warning"><summary>DESIGN.md changed elsewhere. Your draft is kept.</summary><p className="library-field-note">Review the latest saved document below. Use latest to replace your draft, then reapply your edits before saving.</p><textarea readOnly rows={8} aria-label="Latest saved DESIGN.md" value={documentState.base.markdown}/></details>}
+              {!!documentState.conflicts.length && <details className="library-draft-warning"><summary>DESIGN.md changed elsewhere. Your draft is kept.</summary><p className="library-field-note">Review the latest saved document below. Use latest to replace your draft, then reapply your edits for autosave.</p><textarea readOnly rows={8} aria-label="Latest saved DESIGN.md" value={documentState.base.markdown}/></details>}
               <label className="library-document-label">Project document<textarea aria-label="Project DESIGN.md" className="library-documentation library-document-editor" maxLength={2_097_152} rows={26} spellCheck={false} readOnly={disabled} value={documentState.value.markdown} onChange={event => documentState.setValue({markdown:event.target.value})}/></label>
-              <div className="library-button-row"><button type="submit" className="library-button library-primary" disabled={disabled || !documentChanged || !!documentState.conflicts.length}><Check size={13}/>Save DESIGN.md</button>{documentChanged && <button type="button" className="library-button" disabled={working} onClick={() => documentState.reset({markdown})}>{documentState.conflicts.length ? 'Use latest' : 'Discard draft'}</button>}</div>
+              <AutosaveStatus state={documentState}/>{documentChanged && !documentState.conflicts.length && <button type="button" className="library-button" disabled={working || documentState.busy} onClick={() => documentState.reset({markdown})}>Discard draft</button>}
             </form>
             <section className="library-section"><h3>Export reference</h3><p className="library-field-note">Exports use current tokens and guidance. A writable Markdown draft is saved first.</p><div className="library-button-row"><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('copy')}><Copy size={13}/>Copy</button><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('download')}><Download size={13}/>Download DESIGN.md</button><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportBundle()}><Download size={13}/>Download library</button></div><p className="library-field-note">Markdown, component code and editable JSON. Import the ZIP from the project menu to start another project.</p><details className="library-details"><summary>CSS variables</summary><textarea readOnly rows={8} spellCheck={false} aria-label="Generated CSS variables" value={tokenCssVariables(system)}/><button type="button" className="library-button" disabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onClick={() => exportSystem('css')}><Copy size={12}/>Copy CSS</button></details></section>
             {!!system.sources.length && <details className="library-section library-sources"><summary>Evidence sources <span>{system.sources.length}</span></summary><ul>{system.sources.map((source, index) => <li key={`${source.path}/${index}`}><div><code>{source.path}</code><small>{source.confidence}</small></div><span>{source.kind}</span>{source.notes && <p>{source.notes}</p>}</li>)}</ul></details>}
           </>}
           {tab === 'requests' && <>
-            <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); queueRequest(); }}><h3>Design system with Codex</h3><div className="library-request-mode" role="group" aria-label="Design system request mode"><button type="button" disabled={disabled} aria-pressed={requestMode === 'generate'} onClick={() => setRequestMode('generate')}>Generate</button><button type="button" disabled={disabled} aria-pressed={requestMode === 'find'} onClick={() => setRequestMode('find')}>Find existing</button></div><p className="library-field-note">{requestMode === 'generate' ? 'Ask Codex to propose a system for this app and save its tokens and guidance here.' : 'Ask Codex to inspect an existing repository for DESIGN.md, components, styles and configuration.'}</p><label>App brief<textarea required maxLength={20000} rows={6} readOnly={disabled} value={brief} placeholder="What the app does, who uses it and the interface it needs" onChange={event => setBrief(event.target.value)}/></label><label>Repository path · optional<input maxLength={2000} readOnly={disabled} value={repository} placeholder="Application repository" onChange={event => setRepository(event.target.value)}/></label><p className="library-field-note">Leave blank to use the application repository established in your Codex chat. Codex asks if the target repository is unknown. The request is saved before it is sent.</p><button type="submit" className="library-button library-primary" disabled={disabled || !brief.trim()}><ArrowUpRight size={13}/>{requestMode === 'generate' ? 'Request generation' : 'Request discovery'}</button></form>
-            {system.request && <section className="library-section library-request-status"><h3><span><Clock3 size={13}/>{system.request.queued ? 'Queued request' : 'Saved request'}</span><button type="button" className="library-icon library-delete" disabled={disabled} title="Remove saved request" aria-label="Remove saved design system request" onClick={() => void run('Removing request…', async current => { if (await persist([{ type: 'set_design_system_request', request: null }], current)) onNotify('Saved request removed.'); })}><Trash2 size={13}/></button></h3><p className="library-request-meta">{system.request.mode === 'find' ? 'Find existing' : 'Generate'} · {new Date(system.request.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p><p className="library-field-note" role="status">{delivery || 'Codex updates this project when it handles the request. A queued request does not mean work has started.'}</p><div className="library-button-row"><button type="button" className="library-button" disabled={working} onClick={() => void run('Copying request…', async current => { setShowRequest(true); try { await copy(savedPrompt); if (current()) onNotify('Design system request copied.'); } catch (failure) { if (current()) requestAnimationFrame(() => { queuedPrompt.current?.focus(); queuedPrompt.current?.select(); }); throw failure; } })}><Copy size={13}/>Copy request</button><button type="button" className="library-button" aria-expanded={showRequest} onClick={() => setShowRequest(!showRequest)}>{showRequest ? 'Hide prompt' : 'View prompt'}</button></div>{showRequest && <textarea ref={queuedPrompt} className="library-queued-prompt" rows={10} readOnly spellCheck={false} aria-label="Saved design system request prompt" value={savedPrompt}/>}</section>}
+            <form className="library-section library-editor-form" onBlurCapture={requestDraft.onBlur} onCompositionStartCapture={requestDraft.onCompositionStart} onCompositionEndCapture={requestDraft.onCompositionEnd} onSubmit={event => { event.preventDefault(); queueRequest(); }}><h3>Design system with Codex</h3><div className="library-request-mode" role="group" aria-label="Design system request mode"><button type="button" disabled={disabled} aria-pressed={requestMode === 'generate'} onClick={() => setRequestMode('generate')}>Generate</button><button type="button" disabled={disabled} aria-pressed={requestMode === 'find'} onClick={() => setRequestMode('find')}>Find existing</button></div><p className="library-field-note">{requestMode === 'generate' ? 'Ask Codex to propose a system for this app and save its tokens and guidance here.' : 'Ask Codex to inspect an existing repository for DESIGN.md, components, styles and configuration.'}</p><label>App brief<textarea required maxLength={20000} rows={6} readOnly={disabled} value={brief} placeholder="What the app does, who uses it and the interface it needs" onChange={event => setBrief(event.target.value)}/></label><label>Repository path · optional<input maxLength={2000} readOnly={disabled} value={repository} placeholder="Application repository" onChange={event => setRepository(event.target.value)}/></label><p className="library-field-note">Leave blank to use the application repository established in your Codex chat. Codex asks if the target repository is unknown. The request is saved before it is sent.</p><button type="submit" className="library-button library-primary" disabled={disabled || !brief.trim()}><ArrowUpRight size={13}/>{requestMode === 'generate' ? 'Request generation' : 'Request discovery'}</button></form>
+            {requestStatus}
           </>}
         </div>
-      </> : mode === 'components' ? <ComponentEditor key={`${project.id}/${boardId}`} project={project} pageId={pageId} selectedNodeId={selectedNodeId} componentId={selectedComponentId} disabled={disabled} position={insertionPosition} onSelect={setSelectedComponentId} onExport={exportBundle} exportDisabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onChange={onChange} onApply={onApply} onNotify={onNotify} onReturn={close} onInserted={onInserted}/> : <div className="library-panel-scroll">
+      </> : mode === 'components' ? <ComponentEditor discovery={componentDiscovery} key={`${project.id}/${boardId}`} project={project} pageId={pageId} selectedNodeId={selectedNodeId} componentId={selectedComponentId} disabled={disabled} position={insertionPosition} onSelect={setSelectedComponentId} onExport={exportBundle} exportDisabled={working || !readOnly && documentChanged && !!documentState.conflicts.length} onChange={onChange} onApply={onApply} onNotify={onNotify} onReturn={close} onInserted={onInserted}/> : <div className="library-panel-scroll">
         <section className="library-section">
           <div className={`library-image-dropzone${dropTarget === 'panel' ? ' is-file-drop' : ''}`} onDragOver={event => imageDragOver(event, 'panel')} onDragLeave={imageDragLeave} onDrop={imageDrop}>
             <button type="button" disabled={importDisabled} aria-label="Browse inspiration images" title={inspiration.length >= 100 ? 'Board full · 100 images' : undefined} onClick={() => fileInput.current?.click()}>
@@ -529,7 +573,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
           </div>
           {upload.current && <button type="button" className="library-button library-import-cancel" disabled={stopping} onClick={() => { upload.current?.abort(); setStopping(true); setBusy('Stopping import…'); }}><X size={13}/>Cancel import</button>}
           {(!!inspiration.length || referenceState.deleted) && <label className="library-reference-picker">Reference<Select label="Select inspiration image" value={editableReference?.id??''} onChange={setSelectedReferenceId} options={[{value:'',label:'Select an image'},...(referenceState.deleted?[{value:selectedReferenceId,label:`Deleted · ${referenceDraft.name}`}]:[]),...inspiration.map(item=>({value:item.id,label:item.name}))]}/></label>}</section>
-        {editableReference ? <form className="library-section library-editor-form" onSubmit={event => { event.preventDefault(); saveReference(); }}><h3>{referenceState.deleted ? 'Deleted reference draft' : 'Reference details'}{selectedReference && <button type="button" className="library-icon library-delete" disabled={disabled} title="Delete reference; saved versions retain it" aria-label="Delete selected inspiration image" onClick={() => void run('Deleting reference…', async current => { if (await persist([{ type: 'delete_inspiration', boardId, itemId: selectedReference.id }], current)) { setSelectedReferenceId(''); onNotify('Inspiration deleted. Earlier versions retain the image.'); } })}><Trash2 size={13}/></button>}</h3><DraftConflicts fields={referenceState.conflicts} saved={referenceState.base}/>{referenceState.deleted && <p className="library-draft-warning">Deleted elsewhere. Your edits and the saved image reference are retained. Restore reference adds it back to this board. Changing selection discards this draft.</p>}<label>Name<input required maxLength={160} readOnly={disabled} value={referenceDraft.name} onChange={event => setReferenceDraft({ ...referenceDraft, name: event.target.value })}/></label><label>What you like<textarea maxLength={5000} rows={5} readOnly={disabled} value={referenceDraft.notes} placeholder="Layout, typography, color, hierarchy or interaction details" onChange={event => setReferenceDraft({ ...referenceDraft, notes: event.target.value })}/></label><label>Intended use<textarea maxLength={5000} rows={4} readOnly={disabled} value={referenceDraft.usage} placeholder="Where this reference should inform the board" onChange={event => setReferenceDraft({ ...referenceDraft, usage: event.target.value })}/></label><label>Source link · optional<input type="url" maxLength={2000} readOnly={disabled} value={referenceDraft.sourceUrl} placeholder="https://…" onChange={event => setReferenceDraft({ ...referenceDraft, sourceUrl: event.target.value })}/></label><div className="library-reference-meta"><span>{editableReference.width} × {editableReference.height}</span>{editableReference.sourceUrl && <a href={editableReference.sourceUrl} target="_blank" rel="noopener noreferrer">Open source<ArrowUpRight size={11}/></a>}</div><button type="submit" className="library-button library-primary" disabled={disabled || !referenceDraft.name.trim()}><Check size={13}/>{referenceState.deleted ? 'Restore reference' : 'Save reference'}</button></form> : !!inspiration.length && <p className="library-note">Select an image to add notes.</p>}
+        {editableReference ? <form className="library-section library-editor-form" onBlurCapture={referenceState.onBlur} onCompositionStartCapture={referenceState.onCompositionStart} onCompositionEndCapture={referenceState.onCompositionEnd} onSubmit={event => { event.preventDefault(); if (referenceState.deleted) saveReference(); else void referenceState.flush(); }}><h3>{referenceState.deleted ? 'Deleted reference draft' : 'Reference details'}{selectedReference && <button type="button" className="library-icon library-delete" disabled={disabled} title="Delete reference; saved versions retain it" aria-label="Delete selected inspiration image" onClick={() => void run('Deleting reference…', async current => { if (await persist([{ type: 'delete_inspiration', boardId, itemId: selectedReference.id }], current)) { setSelectedReferenceId(''); onNotify('Inspiration deleted. Earlier versions retain the image.'); } })}><Trash2 size={13}/></button>}</h3><DraftConflicts fields={referenceState.conflicts} saved={referenceState.base}/>{referenceState.deleted && <p className="library-draft-warning">Deleted elsewhere. Your edits and the saved image reference are retained. Restore reference adds it back to this board. Changing selection discards this draft.</p>}<label>Name<input required maxLength={160} readOnly={disabled} value={referenceDraft.name} onChange={event => setReferenceDraft({ ...referenceDraft, name: event.target.value })}/></label><label>What you like<textarea maxLength={5000} rows={5} readOnly={disabled} value={referenceDraft.notes} placeholder="Layout, typography, color, hierarchy or interaction details" onChange={event => setReferenceDraft({ ...referenceDraft, notes: event.target.value })}/></label><label>Intended use<textarea maxLength={5000} rows={4} readOnly={disabled} value={referenceDraft.usage} placeholder="Where this reference should inform the board" onChange={event => setReferenceDraft({ ...referenceDraft, usage: event.target.value })}/></label><label>Source link · optional<input type="url" maxLength={2000} readOnly={disabled} value={referenceDraft.sourceUrl} placeholder="https://…" onChange={event => setReferenceDraft({ ...referenceDraft, sourceUrl: event.target.value })}/></label><div className="library-reference-meta"><span>{editableReference.width} × {editableReference.height}</span>{editableReference.sourceUrl && <a href={editableReference.sourceUrl} target="_blank" rel="noopener noreferrer">Open source<ArrowUpRight size={11}/></a>}</div>{referenceState.deleted ? <button type="submit" className="library-button library-primary" disabled={disabled || !referenceDraft.name.trim()}>Restore reference</button> : <AutosaveStatus state={referenceState}/>}</form> : !!inspiration.length && <p className="library-note">Select an image to add notes.</p>}
       </div>}
     </aside>}
     </div>

@@ -1,6 +1,6 @@
 import type { ComponentInstance, DesignNode, NativeComponentDefinition } from './types.ts';
 
-export const COMPONENT_NODE_PROPERTIES = ['type', 'name', 'x', 'y', 'width', 'height', 'content', 'href', 'source', 'jsx', 'media', 'shader', 'effects', 'locked', 'hidden'] as const;
+export const COMPONENT_NODE_PROPERTIES = ['type', 'name', 'x', 'y', 'width', 'height', 'content', 'notes', 'href', 'source', 'live', 'jsx', 'media', 'shader', 'effects', 'locked', 'hidden'] as const;
 
 export function componentSubtree(nodes: DesignNode[], rootId: string): DesignNode[] {
   const children = new Map<string, string[]>();

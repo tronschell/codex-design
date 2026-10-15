@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { watch, type FSWatcher } from 'node:fs';
+import { watch, type BigIntStats, type FSWatcher } from 'node:fs';
 import { lstat, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -32,6 +32,7 @@ function serialize(input: unknown): string {
   return json;
 }
 
+const fileVersion = (info: BigIntStats) => `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
 const isMissing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
 
 function touchGeneration(project: DesignProject, operation: Operation, now: string) {
@@ -78,15 +79,19 @@ function changeLabel(project: DesignProject, operation: Operation): string {
     case 'set_tokens': return 'Updated project styles';
     case 'update_design_system': return 'Updated project design system';
     case 'apply_design_system_document': return 'Applied project DESIGN.md';
+    case 'update_design_token': return `Updated design token “${project.designSystem.tokens.find(token => token.id === operation.tokenId)?.name ?? operation.tokenId}”`;
     case 'upsert_design_token': return `Updated design token “${operation.token.name}”`;
     case 'delete_design_token': return `Deleted design token “${project.designSystem.tokens.find(token => token.id === operation.tokenId)?.name ?? operation.tokenId}”`;
-    case 'set_design_system_request': return operation.request ? `Requested design system ${operation.request.mode === 'find' ? 'discovery' : 'generation'}` : 'Cleared design system request';
+    case 'set_design_system_request': return operation.request ? operation.request.mode === 'components' ? 'Requested app component discovery' : `Requested design system ${operation.request.mode === 'find' ? 'discovery' : 'generation'}` : 'Cleared design system request';
     case 'release_design_system': return `Design system release: ${operation.label}`;
     case 'capture_component': return `Created reusable component “${operation.name}”`;
+    case 'upsert_component': return `Saved component definition “${operation.component.name}”`;
+    case 'set_component_notes': return `Updated component notes “${project.designSystem.components.find(item => item.id === operation.componentId)?.name ?? operation.componentId}”`;
     case 'instantiate_component': return `Inserted reusable component “${project.designSystem.components.find(item => item.id === operation.componentId)?.name ?? operation.componentId}”`;
     case 'release_component': return `Component release: ${operation.label ?? node?.name ?? operation.nodeId}`;
     case 'update_component_instance': return `${operation.resetOverrides ? 'Reset and updated' : 'Updated'} component instance “${node?.name ?? operation.nodeId}”`;
     case 'detach_component_instance': return `Detached component instance “${node?.name ?? operation.nodeId}”`;
+    case 'update_inspiration': return `Updated inspiration on “${board?.name ?? operation.boardId}”`;
     case 'upsert_inspiration': return `Updated inspiration “${operation.item.name}” on “${board?.name ?? operation.boardId}”`;
     case 'delete_inspiration': return `Removed inspiration from “${board?.name ?? operation.boardId}”`;
   }
@@ -327,7 +332,8 @@ export class ProjectStore {
     const changes = parse(operationsSchema, operations);
     await this.init();
     return this.withWriteLock(async () => {
-      const previous = await this.read(projectId);
+      // previous is the cached document and stays untouched; operations apply to the single working clone.
+      const previous = await this.read(projectId, false, true);
       this.checkRevision(previous, expectedRevision);
       const project = structuredClone(previous);
       const now = new Date().toISOString();
@@ -348,6 +354,8 @@ export class ProjectStore {
       const mainLabel = namedRelease ? changeLabel(previous, namedRelease) : labels[0];
       const label = labels.length === 1 ? mainLabel : `${mainLabel} · ${labels.length - 1} more ${labels.length === 2 ? 'change' : 'changes'}`;
       await this.history.save(validated, label, previous, undefined, libraryChanges(previous, validated, changes.some(operation => operation.type === 'release_design_system')));
+      // Cache the saved document (callers only read it) so the next save skips re-reading and re-validating the file.
+      this.cachedProject = { id: projectId, version: fileVersion(await stat(path.join(this.dataDir, `${projectId}.json`), { bigint: true })), project: validated };
       this.emit(projectId);
       return validated;
     });
@@ -493,16 +501,18 @@ export class ProjectStore {
 
   private async read(id: string): Promise<DesignProject>;
   private async read(id: string, summaryOnly: true): Promise<ProjectSummary>;
-  private async read(id: string, summaryOnly = false): Promise<DesignProject | ProjectSummary> {
+  // shared returns the cached document itself; the caller must treat it as read-only.
+  private async read(id: string, summaryOnly: false, shared: true): Promise<DesignProject>;
+  private async read(id: string, summaryOnly = false, shared = false): Promise<DesignProject | ProjectSummary> {
     const filename = path.join(this.dataDir, `${id}.json`);
     try {
       const info = await stat(filename, { bigint: true });
       if (info.size > MAX_INPUT_BYTES) throw new StoreError(500, 'corrupt_project', `Saved project ${id} exceeds the size limit`);
       // Check the file on every read so atomic saves and edits from other processes remain visible.
-      const version = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+      const version = fileVersion(info);
       const cachedSummary = this.summaries.get(id);
       if (summaryOnly && cachedSummary?.version === version) return { ...cachedSummary.summary };
-      if (!summaryOnly && this.cachedProject?.id === id && this.cachedProject.version === version) return structuredClone(this.cachedProject.project);
+      if (!summaryOnly && this.cachedProject?.id === id && this.cachedProject.version === version) return shared ? this.cachedProject.project : structuredClone(this.cachedProject.project);
       let input: unknown;
       try { input = JSON.parse(await readFile(filename, 'utf8')); }
       catch (error) { if (error instanceof SyntaxError) throw new StoreError(500, 'corrupt_project', `Saved project ${id} is not valid JSON`); throw error; }
@@ -517,7 +527,7 @@ export class ProjectStore {
       if (summaryOnly) return { ...summary };
       // Keep one full document; callers receive independent objects without retaining an entire library.
       this.cachedProject = { id, version, project: parsed.data };
-      return structuredClone(parsed.data);
+      return shared ? parsed.data : structuredClone(parsed.data);
     } catch (error) {
       if (isMissing(error)) throw new StoreError(404, 'project_not_found', `Project ${id} does not exist`);
       throw error;
@@ -681,8 +691,10 @@ export class ProjectStore {
           }
         }
         const styles = { ...node.styles, ...operation.patch.styles };
+        if (styles.states) { for (const [state, value] of Object.entries(styles.states)) if (!Object.keys(value).length) delete styles.states[state as keyof typeof styles.states]; if (!Object.keys(styles.states).length) delete styles.states; }
         if ((operation.patch.source !== undefined && operation.patch.jsx === undefined) || (operation.patch.type !== undefined && operation.patch.type !== 'code')) delete node.jsx;
         Object.assign(node, operation.patch, { styles });
+        if (!node.live || node.type !== 'code') delete node.live;
         recordComponentOverrides(target.nodes, before, node);
         break;
       }
@@ -760,6 +772,12 @@ export class ProjectStore {
         Object.assign(project.designSystem, next);
         break;
       }
+      case 'update_design_token': {
+        const token = project.designSystem.tokens.find(token => token.id === operation.tokenId);
+        if (!token) throw new StoreError(404, 'token_not_found', `Design token ${operation.tokenId} does not exist`);
+        this.apply(project, { type: 'upsert_design_token', token: { ...token, ...operation.patch } }, now, touchedBoards);
+        break;
+      }
       case 'upsert_design_token': {
         for (const nodes of [...project.pages.map(page => page.nodes), ...project.designSystem.components.map(component => component.nodes)]) for (const node of nodes) for (const [property, tokenId] of Object.entries(node.tokenBindings ?? {})) if (tokenId === operation.token.id && !compatibleTokenKinds(property as BindableStyleProperty).includes(operation.token.kind)) throw new StoreError(400, 'incompatible_token_kind', `Design token ${operation.token.id} is bound to ${property}. Detach its bindings before changing its kind.`);
         const index = project.designSystem.tokens.findIndex(token => token.id === operation.token.id);
@@ -793,6 +811,22 @@ export class ProjectStore {
         else project.designSystem.request = operation.request;
         break;
       case 'release_design_system': break;
+      case 'upsert_component': {
+        const definition = { ...structuredClone(operation.component), version: project.revision + 1 };
+        const index = project.designSystem.components.findIndex(component => component.id === definition.id);
+        if (index < 0) project.designSystem.components.push(definition);
+        else project.designSystem.components[index] = definition;
+        break;
+      }
+      case 'set_component_notes': {
+        const definition = project.designSystem.components.find(component => component.id === operation.componentId);
+        if (!definition) throw new StoreError(404, 'component_not_found', `Component ${operation.componentId} does not exist`);
+        const root = definition.nodes.find(node => node.id === definition.rootNodeId);
+        if (!root) throw new StoreError(404, 'node_not_found', 'The component root no longer exists.');
+        root.notes = operation.notes;
+        definition.version = project.revision + 1;
+        break;
+      }
       case 'capture_component': {
         const target = page(operation.pageId), root = target.nodes.find(node => node.id === operation.nodeId);
         if (project.designSystem.components.some(item => item.id === operation.componentId)) throw new StoreError(400, 'component_exists', 'Use a new component ID, or release a revision of the existing component.');
@@ -852,6 +886,15 @@ export class ProjectStore {
         const target = page(operation.pageId), root = componentInstanceRoot(target.nodes, operation.nodeId);
         if (!root) throw new StoreError(400, 'component_root_required', 'This node is not part of a linked component instance.');
         delete root.componentInstance;
+        break;
+      }
+      case 'update_inspiration': {
+        const item = board(operation.boardId).inspiration?.find(item => item.id === operation.itemId);
+        if (!item) throw new StoreError(404, 'inspiration_not_found', `Inspiration ${operation.itemId} does not exist on this board`);
+        const { sourceUrl, ...patch } = operation.patch;
+        Object.assign(item, patch);
+        if (sourceUrl === null) delete item.sourceUrl;
+        else if (sourceUrl !== undefined) item.sourceUrl = sourceUrl;
         break;
       }
       case 'upsert_inspiration': {

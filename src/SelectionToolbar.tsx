@@ -2,12 +2,12 @@ import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Re
 import { createPortal } from 'react-dom';
 import { AlignCenter, AlignLeft, AlignRight, Bold, Check, ChevronDown, Radius, Italic, Link, List, MessageCirclePlus, MoreVertical, SquareDashed, Type, Underline, X } from 'lucide-react';
 import type { BindableStyleProperty, DesignNode, DesignProject, NodeStyle, Operation } from '../shared/types';
-import { safeColor } from '../shared/effects';
 import { gradientCss } from '../shared/appearance';
 import { isSafeLink } from '../shared/links';
 import { Field, ColorField } from './InspectorFields';
 import { Select } from './Select';
 import { FontPicker } from './FontPicker';
+import { AutosaveInput } from './AutosaveFields';
 import './selection-toolbar.css';
 
 type Menu = 'type' | 'color' | 'radius' | 'spacing' | 'link';
@@ -26,8 +26,8 @@ export default function SelectionToolbar({ project, pageId, node, effective, anc
   const mounted = useRef(true), pending = useRef(false);
   const [size, setSize] = useState({ width: 0, height: 32 }), [menu, setMenu] = useState<Menu | null>(null);
   const [tab, setTab] = useState<'theme' | 'custom'>('theme'), [query, setQuery] = useState('');
-  const [color, setColor] = useState(''), [href, setHref] = useState(node.href ?? ''), [error, setError] = useState(''), [saving, setSaving] = useState(false);
-  const [fieldVersion, setFieldVersion] = useState(0);
+  const [error, setError] = useState(''), [saving, setSaving] = useState(false);
+  const fieldVersion = 0;
   const [popupPosition, setPopupPosition] = useState<CSSProperties>({ visibility: 'hidden' });
   const locked = disabled || saving, blocked = locked || !editable, text = node.type === 'text', s = effective.styles;
   const colorProperty = text ? 'color' : 'fill', currentColor = s[colorProperty] ?? (text ? '#e8eaed' : 'transparent');
@@ -53,23 +53,22 @@ export default function SelectionToolbar({ project, pageId, node, effective, anc
   };
   const open = (next: Menu) => {
     if (menu === next) { close(); return; }
-    setMenu(next); setTab('theme'); setQuery(''); setError(''); setColor(String(currentColor)); setHref(node.href ?? ''); setPopupPosition({ visibility: 'hidden' });
+    setMenu(next); setTab('theme'); setQuery(''); setError(''); setPopupPosition({ visibility: 'hidden' });
   };
   const save = async (patch: Partial<DesignNode>, finish = false) => {
-    if (disabled || pending.current) return false;
-    pending.current = true; (popup.current ?? toolbar.current)?.focus({ preventScroll: true }); setSaving(true); setError('');
+    pending.current = true; if (mounted.current) { setSaving(true); setError(''); }
     let success = false;
     try { success = !!await onChange([{ type: 'update_node', pageId, nodeId: node.id, patch }]); }
     catch { /* The saved document stays authoritative after a rejected edit. */ }
-    finally { pending.current = false; if (mounted.current) { setSaving(false); if (!success) { setFieldVersion(value => value + 1); setError('Could not save. Review the current settings and try again.'); } else if (finish) close(); } }
+    finally { pending.current = false; if (mounted.current) { setSaving(false); if (!success) { setError('Could not save. Your draft is kept in the field.'); } else if (finish) close(); } }
     return success;
   };
   const style = (value: Partial<NodeStyle>, finish = false) => {
-    if (!editable) return;
+    if (!editable) return Promise.resolve(false);
     value = { ...value, ...(Object.hasOwn(value,'fill') ? { fillMode: 'solid' as const } : {}), ...(Object.hasOwn(value,'radius') ? { radiusMode: 'uniform' as const } : {}) };
     const tokenBindings = { ...node.tokenBindings }; let detached = false;
     for (const property of Object.keys(value) as BindableStyleProperty[]) if (tokenBindings[property]) { delete tokenBindings[property]; detached = true; }
-    void save({ styles: value, ...(detached ? { tokenBindings } : {}) }, finish);
+    return save({ styles: value, ...(detached ? { tokenBindings } : {}) }, finish);
   };
   const bind = (property: BindableStyleProperty, id: string, finish = true) => { if (editable) void save({ tokenBindings: { ...node.tokenBindings, [property]: id }, ...(property === 'fill' ? { styles: { fillMode: 'solid' } } : property === 'radius' ? { styles: { radiusMode: 'uniform' } } : {}) }, finish); };
 
@@ -84,7 +83,7 @@ export default function SelectionToolbar({ project, pageId, node, effective, anc
       const maxHeight = upwards ? above : below, panelHeight = Math.min(panel.scrollHeight, maxHeight);
       setPopupPosition({ position: 'fixed', left: Math.max(x + 8, Math.min(rect.left, x + width - panelWidth - 8)), top: Math.max(y + 8, upwards ? rect.top - panelHeight - 6 : rect.bottom + 6), width: panelWidth, maxHeight, visibility: 'visible' });
     };
-    const outside = (event: PointerEvent) => { const target = event.target as HTMLElement; if (!toolbar.current?.contains(target) && !panel.contains(target) && !target.closest('.select-popup')) close(false); };
+    const outside = (event: PointerEvent) => { const target = event.target as HTMLElement; if (!toolbar.current?.contains(target) && !panel.contains(target) && !target.closest('.select-popup, [data-autosave-feedback]')) close(false); };
     place();
     const observer = new ResizeObserver(place); observer.observe(panel); observer.observe(control);
     window.addEventListener('pointerdown', outside, true); window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
@@ -135,10 +134,10 @@ export default function SelectionToolbar({ project, pageId, node, effective, anc
         const property = menu === 'color' ? colorProperty : token.kind as BindableStyleProperty;
         const preview = menu === 'color' ? undefined : { fontFamily: token.kind === 'fontFamily' ? String(token.value) : s.fontFamily ?? project.tokens.fontFamily, fontWeight: token.kind === 'fontWeight' ? Number(token.value) : undefined };
         return <button type="button" className="quick-token" key={token.id} disabled={blocked} onClick={() => bind(property,token.id)}><span><strong style={preview}>{token.name}</strong><small style={{ fontFamily: preview?.fontFamily }}>{menu === 'color' ? token.value : names[property as keyof typeof names] + ' · ' + token.value + (property === 'fontSize' || property === 'letterSpacing' ? ' px' : '')}</small></span>{node.tokenBindings?.[property] === token.id && <Check size={13} aria-label="Linked"/>}{menu === 'color' && <span className="quick-swatch" aria-hidden="true"><span style={{background:String(token.value)}}/></span>}</button>;
-      })}{!themeTokens.length && <p className="inspector-hint">No matching {menu === 'color' ? 'colors' : 'typography tokens'}. Use Custom or add tokens in the project design system.</p>}</div></> : menu === 'color' ? <form className="quick-fields" onSubmit={event => { event.preventDefault(); const value = color.trim(); if (!safeColor(value) || !CSS.supports('color',value)) { setError('Enter a valid CSS color.'); return; } style({[colorProperty]:value},true); }}><ColorField label="Color" value={color} onChange={setColor} disabled={blocked}/><button type="submit" className="secondary-button" disabled={blocked}>Apply color</button></form> : <div className="quick-fields" key={fieldVersion}><FontPicker label="Font" value={s.fontFamily ?? project.tokens.fontFamily} disabled={blocked} families={project.designSystem.tokens.filter(token => token.kind === 'fontFamily').map(token => String(token.value))} onChange={value => style({fontFamily:value})}/>{number('Size','fontSize',16,1,1024)}{number('Weight','fontWeight',400,1,1000)}<Field label="Line height" type="number" min={0.1} max={10} value={s.lineHeight ?? 1.24} disabled={blocked} onChange={value => style({lineHeight:Number(value)})}/>{number('Tracking','letterSpacing',(s.fontSize ?? 16) * ((s.fontSize ?? 16) >= 24 ? -0.035 : -0.01),-1000,1000)}</div>}</>}
+      })}{!themeTokens.length && <p className="inspector-hint">No matching {menu === 'color' ? 'colors' : 'typography tokens'}. Use Custom or add tokens in the project design system.</p>}</div></> : menu === 'color' ? <div className="quick-fields"><ColorField label="Color" value={String(currentColor)} onChange={value => style({[colorProperty]:value})} disabled={blocked}/></div> : <div className="quick-fields" key={fieldVersion}><FontPicker label="Font" value={s.fontFamily ?? project.tokens.fontFamily} disabled={blocked} families={project.designSystem.tokens.filter(token => token.kind === 'fontFamily').map(token => String(token.value))} onChange={value => style({fontFamily:value})}/>{number('Size','fontSize',16,1,1024)}{number('Weight','fontWeight',400,1,1000)}<Field label="Line height" type="number" min={0.1} max={10} value={s.lineHeight ?? 1.24} disabled={blocked} onChange={value => style({lineHeight:Number(value)})}/>{number('Tracking','letterSpacing',(s.fontSize ?? 16) * ((s.fontSize ?? 16) >= 24 ? -0.035 : -0.01),-1000,1000)}</div>}</>}
       {menu === 'radius' && <div className="quick-fields" key={fieldVersion}>{number('Radius','radius',0)}{radiusTokens.length > 0 && <Select label="Radius token" value={node.tokenBindings?.radius ?? ''} disabled={blocked} options={[{value:'',label:'Custom'},...radiusTokens.map(token => ({value:token.id,label:token.name+' · '+token.value+' px'}))]} onChange={id => id ? bind('radius',id,false) : style({radius:s.radius ?? 0})}/>}</div>}
       {menu === 'spacing' && <div className="quick-fields" key={fieldVersion}><strong>Padding</strong><div className="two-fields" role="group" aria-label="Padding">{number('H','paddingX',s.padding ?? 0)}{number('V','paddingY',s.padding ?? 0)}</div><strong>Margin</strong><div className="two-fields" role="group" aria-label="Margin">{number('H','marginX',0,0,100000,!stackChild)}{number('V','marginY',0,0,100000,!stackChild)}</div>{!stackChild && <p className="inspector-hint">Margins apply inside a parent stack.</p>}{s.layout && s.layout !== 'free' && <>{number('Gap','gap',0)}<Select label="Stack alignment" value={s.align ?? 'start'} disabled={blocked} options={[{value:'start',label:'Align start'},{value:'center',label:'Align center'},{value:'end',label:'Align end'}]} onChange={value => style({align:value as NodeStyle['align']})}/><Select label="Stack distribution" value={s.justify ?? 'start'} disabled={blocked} options={[{value:'start',label:'Distribute start'},{value:'center',label:'Distribute center'},{value:'end',label:'Distribute end'},{value:'space-between',label:'Space between'}]} onChange={value => style({justify:value as NodeStyle['justify']})}/></>}</div>}
-      {menu === 'link' && <form className="quick-fields" onSubmit={event => { event.preventDefault(); const value = href.trim(); if (!isSafeLink(value)) { setError('Use https://, http://, mailto:, tel: or a # fragment.'); return; } void save({href:value},true); }}><label className="quick-link-label">URL<input type="text" aria-label="Link URL" value={href} maxLength={2048} placeholder="https://example.com" disabled={blocked} onChange={event => setHref(event.target.value)}/></label><div className="quick-form-actions"><button type="submit" className="secondary-button" disabled={blocked}>Apply link</button>{node.href && <button type="button" className="text-button" disabled={blocked} onClick={() => { void save({href:''},true); }}>Remove link</button>}</div><p className="inspector-hint">Links work in preview and exported interfaces.</p></form>}
+      {menu === 'link' && <div className="quick-fields"><label className="quick-link-label">URL<AutosaveInput type="text" aria-label="Link URL" value={node.href ?? ''} maxLength={2048} placeholder="https://example.com" disabled={blocked} showStatus normalize={value => { const href = value.trim(); if (!isSafeLink(href)) throw new Error('Use HTTPS, HTTP, mailto:, tel: or a # fragment.'); return href; }} onSave={href => save({href})}/></label>{node.href && <button type="button" className="text-button" disabled={blocked} onClick={() => { void save({href:''}); }}>Remove link</button>}<p className="inspector-hint">Links work in preview and exported interfaces.</p></div>}
       {error && <p className="quick-popup-error" role="alert">{error}</p>}
     </div>,document.body)}
   </div>;

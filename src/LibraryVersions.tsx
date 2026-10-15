@@ -1,3 +1,4 @@
+import { useLocalDraft } from './useLocalDraft';
 import { useEffect, useRef, useState } from 'react';
 import { Check, Download, History, LoaderCircle } from 'lucide-react';
 import type { DesignProject, LibraryScope, LibraryVersion, Operation, ProjectVersionSummary } from '../shared/types';
@@ -17,7 +18,8 @@ interface LibraryVersionsProps {
 export default function LibraryVersions({ project, scope, componentId, disabled, onChange, onApply, onNotify }: LibraryVersionsProps) {
   const [versions, setVersions] = useState<ProjectVersionSummary[]>([]), [count, setCount] = useState(8);
   const [snapshot, setSnapshot] = useState<LibraryVersion | null>(null), [selected, setSelected] = useState<number | null>(null);
-  const [label, setLabel] = useState(''), [busy, setBusy] = useState(''), [error, setError] = useState(''), [loading, setLoading] = useState(true);
+  const local = useLocalDraft(`${project.id}/${scope}/${componentId ?? ''}/release`, {label: ''});
+  const label = local.value.label, setLabel = (label: string) => local.setValue({label}), [busy, setBusy] = useState(''), [error, setError] = useState(''), [loading, setLoading] = useState(true);
   const epoch = useRef(0), listEpoch = useRef(0), mounted = useRef(true), busyRef = useRef(false);
   const identity = `${project.id}/${scope}/${componentId ?? ''}`;
   const context = useRef({ identity, revision: project.revision }); context.current = { identity, revision: project.revision };
@@ -65,7 +67,7 @@ export default function LibraryVersions({ project, scope, componentId, disabled,
   ] : [];
   return <section className="library-section library-versions" aria-busy={!!busy}>
     <h3><span><History size={13}/>Versions</span><small>Project revisions</small></h3>
-    {scope === 'system' && <form className="library-editor-form" onSubmit={event => { event.preventDefault(); void save(false); }}><label>Release message<input value={label} maxLength={160} required readOnly={disabled || !!busy} placeholder="e.g. Approved brand palette" onChange={event => setLabel(event.target.value)}/></label><button className="library-button" disabled={disabled || !!busy || !label.trim()}><Check size={13}/>Save named release</button></form>}
+    {scope === 'system' && <form className="library-editor-form" onBlurCapture={local.onBlur} onCompositionStartCapture={local.onCompositionStart} onCompositionEndCapture={local.onCompositionEnd} onSubmit={event => { event.preventDefault(); void save(false); }}><label>Release message<input value={label} maxLength={160} required readOnly={disabled || !!busy} placeholder="e.g. Approved brand palette" onChange={event => setLabel(event.target.value)}/></label><button className="library-button" disabled={disabled || !!busy || !label.trim()}><Check size={13}/>Save named release</button></form>}
     <p className="library-field-note">Browse saved versions without changing the project. Apply restores only this {scope === 'system' ? 'design system' : 'component definition'}.</p>
     {loading ? <p className="library-field-note" role="status">Loading versions…</p> : <ul className="library-version-list">{versions.slice(0, count).map(version => <li key={version.revision}><button type="button" disabled={!!busy} aria-pressed={selected === version.revision} onClick={() => void choose(version.revision)}><strong>v{version.revision} · {version.label}</strong><time dateTime={version.createdAt}>{new Date(version.createdAt).toLocaleString()}</time></button></li>)}</ul>}
     {!loading && !versions.length && !error && <p className="library-field-note">No recorded versions are available for this component.</p>}

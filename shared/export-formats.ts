@@ -1,9 +1,10 @@
 import type { DesignNode, DesignProject } from './types.js';
-import { exportMapPageMarkup, exportMediaUrl, exportNodeCode, exportPageHtml, inlineCss, nodeCss, nodeLinkStyle, projectForBoard, resolvedNodes, safeCodeDocument, textListStyle, vectorDataUrl, type ExportOptions } from './export.js';
+import { exportMapPageMarkup, exportMediaUrl, exportNodeCode, exportPageHtml, inlineCss, nodeCss, nodeStateRules, nodeLinkStyle, projectForBoard, resolvedNodes, LIVE_CODE_SANDBOX, safeCodeDocument, textListStyle, vectorDataUrl, type ExportOptions } from './export.js';
 import { shaderRuntimeOptions, shaderRuntimeSource } from './shaders.js';
 import { ADVANCED_STYLE_PROPERTIES, nodeBoxSize, visibleBounds } from './effects.js';
 import { isSafeLink } from './links.js';
 import { resolveNodeTokens, tokenCssVariables } from './design-system.js';
+import { implementationNotesMarkdown } from './implementation-notes.js';
 
 export type ExportScope = 'selection' | 'page' | 'board' | 'project';
 export interface ExportTarget { scope: ExportScope; boardId?: string; pageId?: string; nodeIds?: string[] }
@@ -196,10 +197,14 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
     const siblings = children.get(node.parentId);
     if (siblings) siblings.push(node); else children.set(node.parentId, [node]);
     const className = `cd-layer-${index}`; classes.set(node.id, className);
-    css.push(`.${className} {\n  ${inlineCss(nodeCss(node, project.designSystem, rawStyles.get(node.id))).replaceAll(';', ';\n  ')};\n}`);
+    const base = nodeCss(node, project.designSystem, rawStyles.get(node.id));
+    css.push(`.${className} {\n  ${inlineCss(base).replaceAll(';', ';\n  ')};\n}`);
+    // Class plus pseudo-class outranks the base class, so React export needs no !important.
+    css.push(...nodeStateRules(node, `.${className}`, false, project.designSystem, rawStyles.get(node.id), base));
   });
   css.push('.cd-media { display: block; width: 100%; height: 100%; pointer-events: none; }', '.cd-code { border: 0; }', '.cd-shader-status { position: absolute; inset: 0; padding: 8px; overflow: auto; color: #ddd; background: #242424; font: 11px/1.4 system-ui, sans-serif; }', '.cd-arrow { position: absolute; right: 0; top: -5px; width: 9px; height: 9px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; transform: rotate(45deg); }');
   const hasLinks = nodes.some(node => !!node.href && isSafeLink(node.href));
+  if (nodes.some(node => node.type === 'code' && node.live)) css.push('.cd-media.cd-live { pointer-events: auto; }');
   if (hasLinks) css.push(`.cd-link { ${inlineCss(nodeLinkStyle)}; }`);
   if (nodes.some(node => node.type === 'text' && node.styles.listStyleType && node.styles.listStyleType !== 'none')) css.push(`.cd-text-list { ${inlineCss(textListStyle)}; }`);
   const expression = (value: unknown) => `{${JSON.stringify(value)}}`;
@@ -221,7 +226,7 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
     if (node.type === 'arrow') content = '<span className="cd-arrow" />';
     if (node.type === 'code') {
       const vector = vectorDataUrl(node.source ?? '');
-      content = vector ? `<img className="cd-media" style={{ objectFit: ${JSON.stringify(node.styles.objectFit ?? 'fill')} }} alt=${expression(node.name)} src=${expression(vector)} draggable={false} />` : `<iframe className="cd-media cd-code" title=${expression(node.name)} sandbox="" referrerPolicy="no-referrer" srcDoc=${expression(safeCodeDocument(node.source ?? '', project.designSystem))} />`;
+      content = vector ? `<img className="cd-media" style={{ objectFit: ${JSON.stringify(node.styles.objectFit ?? 'fill')} }} alt=${expression(node.name)} src=${expression(vector)} draggable={false} />` : `<iframe className="cd-media cd-code${node.live ? ' cd-live' : ''}" title=${expression(node.name)} sandbox="${node.live ? LIVE_CODE_SANDBOX : ''}" referrerPolicy="no-referrer" srcDoc=${expression(safeCodeDocument(node.source ?? '', project.designSystem, node.live))} />`;
     }
     const descendants = (children.get(node.id) ?? []).map(child => render(child, depth + 1, next, linkedAncestor || !!href, pointerEvents)).join('\n');
     const link = href ? `<a className="cd-link" style={{ pointerEvents: ${JSON.stringify(pointerEvents)} }} aria-label=${expression(node.name)} href=${expression(href)}${href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"'} />` : '';
@@ -230,16 +235,16 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
   };
   const shaders = nodes.some(node => node.type === 'shader');
   const imports = shaders ? "import { useEffect, useRef } from 'react';\n" : '';
-  const runtime = shaders ? `\nconst createShaderRenderer = ${shaderRuntimeSource()};\n` : '';
+  const runtime = shaders ? `\nconst createShaderRenderer = ${shaderRuntimeSource(nodes.some(node => node.type === 'shader' && node.shader?.provider === 'shaders.com'))};\n` : '';
   const setup = shaders ? `  const root = useRef(null);\n  useEffect(() => {\n    const renderers = Array.from(root.current.querySelectorAll('canvas[data-shader]'), canvas => {\n      const status = canvas.nextElementSibling;\n      status.hidden = true;\n      return createShaderRenderer(canvas, JSON.parse(canvas.dataset.shader), message => { status.textContent = 'Shader unavailable: ' + message; status.hidden = false; });\n    });\n    return () => renderers.forEach(renderer => renderer.dispose());\n  }, []);\n` : '';
   const jsx = `${imports}import './design.css';\n${runtime}\nexport default function ExportedDesign() {\n${setup}  return (\n    <main${shaders ? ' ref={root}' : ''} className="exported-design" aria-label=${expression(project.name)}>\n${(children.get(null) ?? []).map(node => render(node, 3)).join('\n')}\n    </main>\n  );\n}\n`;
   const stylesheet = `${css.join('\n\n')}\n`;
-  return { jsx, css: stylesheet, files: { 'Design.jsx': jsx, 'design.css': stylesheet } };
+  return { jsx, css: stylesheet, files: { 'Design.jsx': jsx, 'design.css': stylesheet, 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(exportTargetProject(project, target)) } };
 }
 
 export function exportHandoffPrompt(project: DesignProject, target: ExportTarget): string {
   const page = project.pages.find(page => page.id === target.pageId), board = project.boards.find(board => board.id === target.boardId);
   const scope = target.scope === 'selection' ? `only the selected layer subtree(s) ${target.nodeIds?.join(', ')} on page ${page?.name ?? target.pageId} (${target.pageId})` : target.scope === 'page' ? `only page ${page?.name ?? target.pageId} (${target.pageId})` : target.scope === 'board' ? `only board ${board?.name ?? target.boardId} (${target.boardId})` : 'the entire project, across every board and page';
   const read = target.scope === 'selection' ? target.nodeIds?.map(nodeId => `canvas_get_node_context with projectId ${project.id}, pageId ${target.pageId} and nodeId ${nodeId}`).join('; then ') : `canvas_get_project with projectId ${project.id}`;
-  return `Implement ${scope} in ${project.name}. The approved project is ${project.id}, revision ${project.revision}.${target.boardId && target.scope !== 'project' ? ` Board context: ${target.boardId}.` : ''} First read ${read}, then use canvas_export_project with projectId ${project.id}${target.scope !== 'project' && target.boardId ? ` and boardId ${target.boardId}` : ''}${(target.scope === 'page' || target.scope === 'selection') && target.pageId ? ` and pageId ${target.pageId}` : ''}${target.scope === 'selection' ? ` and nodeIds ${JSON.stringify(target.nodeIds)}` : ''} and format source. Use format react for generated JSX and CSS of a selection or page. Review the scoped layout, component hierarchy, editable source, media, shader settings, project design system, DESIGN.md, tokens.css, explicit token bindings and anchored conversations before implementing. Preserve the approved design and its original dimensions. Exported React and CSS are implementation source for the visual structure; connect real application behavior in the target codebase. Keep unrelated project areas outside this implementation scope.`;
+  return `Implement ${scope} in ${project.name}. The approved project is ${project.id}, revision ${project.revision}.${target.boardId && target.scope !== 'project' ? ` Board context: ${target.boardId}.` : ''} First read ${read}, then use canvas_export_project with projectId ${project.id}${target.scope !== 'project' && target.boardId ? ` and boardId ${target.boardId}` : ''}${(target.scope === 'page' || target.scope === 'selection') && target.pageId ? ` and pageId ${target.pageId}` : ''}${target.scope === 'selection' ? ` and nodeIds ${JSON.stringify(target.nodeIds)}` : ''} and format source. Use format react for generated JSX and CSS of a selection or page. Review the scoped layout, component hierarchy, editable source, media, shader settings, project design system, DESIGN.md, tokens.css, explicit token bindings and anchored conversations before implementing. Read saved notes on the relevant objects, ancestor containers and materialized component instances; these capture implementation intent the canvas may only approximate. Read IMPLEMENTATION_NOTES.md in the exported files. Prefer the specified platform features and existing libraries when compatible with the target app, verifying their current APIs and support before building a custom approximation. Preserve the approved design and its original dimensions. Use Tailwind CSS utilities for new or rewritten application styling unless the user explicitly requests traditional CSS or another styling approach. Preserve semantic token values and approved geometry when translating the exported visual reference. Connect real application behavior in the target codebase. Keep unrelated project areas outside this implementation scope.`;
 }

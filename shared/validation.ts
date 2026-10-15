@@ -83,7 +83,7 @@ export const designSystemSourceSchema = z.object({
   kind: z.enum(['design-md', 'component', 'stylesheet', 'config', 'canvas']), notes: z.string().max(5000), confidence: z.enum(['observed', 'inferred']),
 }).strict();
 export const designSystemRequestSchema = z.object({
-  id: idSchema, mode: z.enum(['generate', 'find']), brief: z.string().trim().min(1).max(20_000), repository: z.string().max(2000), createdAt: timestamp, queued: z.boolean(),
+  id: idSchema, mode: z.enum(['generate', 'find', 'components']), brief: z.string().trim().min(1).max(20_000), repository: z.string().max(2000), createdAt: timestamp, queued: z.boolean(),
 }).strict();
 
 export const assetRefSchema = z.string().regex(ASSET_REF_PATTERN, 'Use an uploaded asset:<SHA-256> media reference');
@@ -111,11 +111,12 @@ export const mediaSchema = z.object({
   poster: assetRefSchema.optional(), autoplay: z.boolean().optional(), loop: z.boolean().optional(), muted: z.boolean().optional(),
 }).strict();
 export const shaderSchema = z.object({
+  provider: z.literal('shaders.com').optional(),
   preset: z.enum(['mesh', 'waves', 'grain', 'custom']),
   colors: z.array(z.string().regex(/^#(?:[a-fA-F0-9]{3}|[a-fA-F0-9]{4}|[a-fA-F0-9]{6}|[a-fA-F0-9]{8})$/, 'Use a hex RGB or RGBA color')).min(2).max(4).optional(),
   speed: z.number().finite().min(0).max(5).optional(), scale: z.number().finite().min(0.1).max(10).optional(),
   seed: z.number().finite().min(0).max(10_000).optional(), animate: z.boolean().optional(), fragment: z.string().max(30_000).optional(),
-}).strict();
+}).strict().refine(shader => !shader.provider || shader.preset !== 'custom', 'Shaders.com layers use mesh, waves or grain components');
 
 const gradientSchema = z.object({
   type: z.enum(['linear', 'radial']), angle: z.number().finite().min(-3600).max(3600), interpolation: z.enum(['srgb', 'oklab']),
@@ -132,7 +133,7 @@ const gradientSchema = z.object({
 }).strict().describe('Editable native CSS gradient with unique stable stop IDs. Stored stop order is preserved; rendering sorts by percentage position. Angle is in degrees and applies to linear gradients. Color interpolation requires a modern browser.');
 const cornerRadius = z.number().finite().min(0).max(100_000);
 
-export const nodeStyleSchema = z.object({
+const nodeStyleBase = z.object({
   fill: color.optional(), color: color.optional(),
   fillMode: z.enum(['solid', 'gradient', 'none']).optional().describe('Absent means legacy solid fill. Gradient mode uses gradient; none hides fill without deleting saved colors or gradient settings.'),
   fillOpacity: z.number().finite().min(0).max(1).optional().describe('Solid box-fill opacity factor, default 1. Multiplies the authored color alpha without changing the saved color or token binding. Text and line colors retain their existing behavior.'),
@@ -172,9 +173,16 @@ export const nodeStyleSchema = z.object({
   animation: z.string().trim().min(1).max(2000).refine(safeMotion, 'Use safe CSS animation without URLs or declarations; times are limited to 600 seconds').optional(),
 }).strict();
 
+// Values land in generated stylesheets, so state styles reuse the base schema's CSS safety checks instead of redefining them.
+const nodeStateStyleSchema = nodeStyleBase.pick({ fill: true, color: true, borderColor: true, opacity: true, shadow: true, outlineColor: true, textDecorationLine: true }).strict();
+export const nodeStyleSchema = nodeStyleBase.extend({
+  states: z.object({ hover: nodeStateStyleSchema.optional(), active: nodeStateStyleSchema.optional(), focus: nodeStateStyleSchema.optional() }).strict().optional()
+    .describe('Per-state visual overrides applied as :hover, :active (pressed) and :focus-within CSS rules in HTML and React exports, and previewed in the Inspector. Supported keys: fill, color, borderColor, opacity, shadow, outlineColor, textDecorationLine. Send the complete states object; an empty object clears all states. Not applied in static image or SVG exports.'),
+}).strict();
+
 export const tokenBindingsSchema = z.object(Object.fromEntries(BINDABLE_STYLE_PROPERTIES.map(property => [property, idSchema.optional()])) as Record<typeof BINDABLE_STYLE_PROPERTIES[number], z.ZodOptional<typeof idSchema>>).strict();
 
-const componentOverrideProperties = ['type', 'name', 'x', 'y', 'width', 'height', 'content', 'href', 'source', 'jsx', 'media', 'shader', 'effects', 'locked', 'hidden'];
+const componentOverrideProperties = ['type', 'name', 'x', 'y', 'width', 'height', 'content', 'notes', 'href', 'source', 'live', 'jsx', 'media', 'shader', 'effects', 'locked', 'hidden'];
 const componentOverridePathSchema = z.string().max(100).refine(value => componentOverrideProperties.includes(value) || (value.startsWith('styles.') && Object.hasOwn(nodeStyleSchema.shape, value.slice(7))) || (value.startsWith('tokenBindings.') && (BINDABLE_STYLE_PROPERTIES as readonly string[]).includes(value.slice(14))), 'Use an editable node property or an individual styles/tokenBindings property');
 export const componentInstanceSchema = z.object({
   componentId: idSchema, version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
@@ -191,6 +199,8 @@ export const nodeSchema = z.object({
   x: coordinate, y: coordinate, width: dimension, height: dimension,
   href: z.string().trim().max(2048).refine(isSafeLink, 'Use an HTTP(S), mailto:, tel: or # link; an empty string removes the link').optional(),
   content: z.string().max(100_000).optional(), source: z.string().max(500_000).optional(),
+  live: z.boolean().optional().describe('Code layers only. true lets the layer\'s own inline <script> run inside a sandbox with no network, storage or parent access. The editor stays passive until the user double-clicks the selected layer; HTML and React exports run it. false or omitted keeps scripts disabled.'),
+  notes: z.string().max(5000).optional().describe('Saved implementation intent beyond the visual canvas: behavior, materials, native effects, preferred libraries and constraints. Component-wide notes live on the reusable definition root; instance edits remain local overrides. An empty string clears notes.'),
   jsx: z.object({ source: z.string().max(100_000), starters: z.array(z.enum(['ios-frame', 'android-frame', 'macos-window', 'browser-window'])).max(4), deviceChrome: z.enum(['safe-area', 'device']).optional() }).strict().optional(),
   generation: z.object({ status: z.enum(['building', 'ready']), updatedAt: timestamp.optional() }).strict().optional().describe('Frames being generated use building, then ready when complete. The store timestamps actual saved work; editor-only loading chrome never changes authored styles.'),
   media: mediaSchema.optional(), shader: shaderSchema.optional(), effects: nodeEffectsSchema.optional(),
@@ -424,15 +434,19 @@ export const operationSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('update_design_system'), patch: nonempty({ name: nameSchema, description: z.string().max(5000), documentation: z.string().max(100_000), sources: z.array(designSystemSourceSchema).max(1000) }) }).strict(),
   z.object({ type: z.literal('apply_design_system_document'), markdown: z.string().min(1).max(MAX_INPUT_BYTES) }).strict(),
   z.object({ type: z.literal('upsert_design_token'), token: designSystemTokenSchema }).strict(),
+  z.object({ type: z.literal('update_design_token'), tokenId: idSchema, patch: nonempty({ name: nameSchema, kind: z.enum(DESIGN_TOKEN_KINDS), value: z.union([z.string().trim().min(1).max(2000), z.number().finite()]), description: z.string().max(5000) }) }).strict(),
   z.object({ type: z.literal('delete_design_token'), tokenId: idSchema }).strict(),
   z.object({ type: z.literal('set_design_system_request'), request: designSystemRequestSchema.nullable() }).strict(),
   z.object({ type: z.literal('release_design_system'), label: nameSchema }).strict(),
   z.object({ type: z.literal('capture_component'), pageId: idSchema, nodeId: idSchema, componentId: idSchema, name: nameSchema, description: z.string().max(5000).optional() }).strict(),
+  z.object({ type: z.literal('upsert_component'), component: nativeComponentDefinitionSchema }).strict(),
+  z.object({ type: z.literal('set_component_notes'), componentId: idSchema, notes: z.string().max(5000) }).strict(),
   z.object({ type: z.literal('instantiate_component'), componentId: idSchema, pageId: idSchema, nodeId: idSchema, x: coordinate, y: coordinate, parentId: idSchema.nullable().optional() }).strict(),
   z.object({ type: z.literal('release_component'), pageId: idSchema, nodeId: idSchema, componentId: idSchema.optional(), label: nameSchema.optional() }).strict(),
   z.object({ type: z.literal('update_component_instance'), pageId: idSchema, nodeId: idSchema, resetOverrides: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('detach_component_instance'), pageId: idSchema, nodeId: idSchema }).strict(),
   z.object({ type: z.literal('upsert_inspiration'), boardId: idSchema, item: inspirationItemSchema }).strict(),
+  z.object({ type: z.literal('update_inspiration'), boardId: idSchema, itemId: idSchema, patch: nonempty({ name: nameSchema, notes: z.string().max(5000), usage: z.string().max(5000), sourceUrl: inspirationItemSchema.shape.sourceUrl.unwrap().nullable() }) }).strict(),
   z.object({ type: z.literal('delete_inspiration'), boardId: idSchema, itemId: idSchema }).strict(),
 ]);
 export const operationsSchema: z.ZodType<Operation[]> = z.array(operationSchema).min(1).max(2000);

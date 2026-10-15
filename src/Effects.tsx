@@ -46,24 +46,14 @@ export function Effects({ node, onChange, disabled = false }: Props) {
   }, [node.effects]);
   useLayoutEffect(() => { if (disabled || openedId && !selected) setOpenedId(null); }, [disabled, openedId, selected]);
 
-  const change = (next: NodeEffect[], focusTarget: HTMLElement | null = section.current) => {
-    if (disabled || pending.current) return;
-    // The project queue owns every accepted save, including after this selection unmounts.
-    pending.current = true;
-    (popup.current ?? focusTarget ?? section.current)?.focus({ preventScroll: true });
-    latest.current = next; setEffects(next); setSaving(true); setSaveError('');
-    const complete = (success: boolean) => {
-      pending.current = false;
-      if (!mounted.current) return;
-      setSaving(false);
-      if (!success) {
-        if (section.current?.contains(document.activeElement) || popup.current?.contains(document.activeElement)) section.current?.focus({ preventScroll: true });
-        latest.current = saved.current; setEffects(saved.current);
-        setSaveError('The effects could not be saved. Your saved settings have been restored.');
-      }
-    };
-    try { void onChange(next).then(complete, () => complete(false)); }
-    catch { complete(false); }
+  const change = async (next: NodeEffect[], _focusTarget: HTMLElement | null = section.current) => {
+    pending.current = true; latest.current = next;
+    if (mounted.current) { setEffects(next); setSaving(true); setSaveError(''); }
+    let success = false;
+    try { success = await onChange(next); } catch { /* The autosave field retains its draft. */ }
+    pending.current = false;
+    if (mounted.current) { setSaving(false); if (!success) setSaveError('Could not save effects. Your draft is kept in the field.'); }
+    return success;
   };
   const patch = (id: string, value: EffectPatch) => change(latest.current.map(effect => effect.id === id ? { ...effect, ...value } : effect), triggers.current.get(id) ?? section.current);
   const close = (restoreFocus = true) => {
@@ -104,7 +94,7 @@ export function Effects({ node, onChange, disabled = false }: Props) {
     };
     const outside = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (panel.contains(target) || anchor.contains(target)) return;
+      if (panel.contains(target) || anchor.contains(target) || target instanceof Element && target.closest('[data-autosave-feedback]')) return;
       if (document.activeElement instanceof HTMLElement && panel.contains(document.activeElement)) document.activeElement.blur();
       close(false);
     };
@@ -128,7 +118,7 @@ export function Effects({ node, onChange, disabled = false }: Props) {
       if (controls?.length && (event.shiftKey && event.target === controls[0] || !event.shiftKey && event.target === controls[controls.length - 1])) { event.preventDefault(); close(); }
     }
   };
-  const number = (label: string, value: number, key: keyof EffectPatch, min: number, max: number, suffix?: string) => <Field label={label} type="number" value={value} min={min} max={max} suffix={suffix} disabled={locked} onChange={input => { if (selected) patch(selected.id, { [key]: Math.max(min, Math.min(max, Number(input))) }); }}/>;
+  const number = (label: string, value: number, key: keyof EffectPatch, min: number, max: number, suffix?: string) => <Field label={label} type="number" value={value} min={min} max={max} suffix={suffix} disabled={locked} onChange={input => { if (selected) return patch(selected.id, { [key]: Math.max(min, Math.min(max, Number(input))) }); }}/>;
   const shadow = selected && 'blur' in selected ? selected : null;
 
   return <section ref={section} tabIndex={-1} className="inspector-section effects-section" aria-labelledby={headingId} onKeyDown={event => event.stopPropagation()}>
@@ -148,8 +138,8 @@ export function Effects({ node, onChange, disabled = false }: Props) {
           {shadow.type === 'text-shadow' ? number('Blur', shadow.blur, 'blur', 0, 1000, 'px') : <div className="two-fields">{number('Blur', shadow.blur, 'blur', 0, 1000, 'px')}{number('Spread', shadow.spread, 'spread', -100000, 100000, 'px')}</div>}
           <ColorField label="Color" value={shadow.color} disabled={locked} title="CSS color or hex value" onChange={input => {
             const value = input.trim();
-            if (!safeEffectColor(value) || !CSS.supports('color', value)) { setColorError('Use a valid CSS color, such as #000000 or rgb(0 0 0).'); return; }
-            setColorError(''); patch(shadow.id, { color: value });
+            if (!safeEffectColor(value) || !CSS.supports('color', value)) { setColorError('Use a valid CSS color, such as #000000 or rgb(0 0 0).'); return false; }
+            setColorError(''); return patch(shadow.id, { color: value });
           }}/>
           {colorError && <p className="effect-error" role="alert">{colorError}</p>}
           <Field label="Opacity" type="number" value={compact(shadow.opacity * 100)} min={0} max={100} suffix="%" disabled={locked} onChange={input => patch(shadow.id, { opacity: Math.max(0, Math.min(100, Number(input))) / 100 })}/>

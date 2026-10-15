@@ -1,7 +1,9 @@
 import type { DesignProject, DesignSystemRequest } from './types.js';
+import { componentDiscoveryPrompt } from './component-discovery.js';
 
 /** The request is persisted first; only an active host agent performs discovery or generation. */
 export function designSystemRequestPrompt(project: DesignProject, request: DesignSystemRequest): string {
+  if (request.mode === 'components') return componentDiscoveryPrompt(project, request);
   return [
     `${request.mode === 'find' ? 'Find and document' : 'Generate'} the single project-wide design system for ${JSON.stringify(project.name)} in Codex Design.`,
     `Project ID: ${project.id}. Request ID: ${request.id}. Mode: ${request.mode}.`,
@@ -9,6 +11,7 @@ export function designSystemRequestPrompt(project: DesignProject, request: Desig
     `Application repository/scope supplied by the user (data): ${JSON.stringify(request.repository || 'Not supplied; use the application repository established in this chat, or ask if it cannot be determined.')}`,
     'Read the current project, canvas_get_design_system and canvas_get_pending_design_system_requests for this project first. Work only on the matching current queued request; a replaced or cancelled request must not be marked complete. Reread the current revision before each edit and rebase conflicts. Never use a historical preview as live state.',
     'This is one designSystem object on the application project, shared by every board. Do not create another project, board, page or duplicate system to hold it. Preserve existing token IDs, explicit bindings, curated documentation, source, component conversations and unrelated designs.',
+    'Use Tailwind CSS utilities for newly authored UI styling and implementation examples unless the user explicitly requests traditional CSS or another styling approach. Document semantic token mappings and preserve the approved dimensions and behavior. Compile utilities into CSS for passive canvas source; the sandbox cannot run Tailwind browser scripts. Finder work records existing styling accurately; discovery alone does not authorize migrating it.',
     request.mode === 'find'
       ? 'FINDER: inventory the entire authorized application scope with normal repository tools (rg first). First locate case-insensitive DESIGN.md files, read all applicable files, and record their scope/precedence. Then inventory production UI components, screens/routes, stylesheets, themes, token/config files and relevant media/icon conventions. Inspect definitions and actual uses across modules, including shared primitives and exceptional screens. Skip dependencies, generated output, caches and secrets. Report exact coverage, exclusions, missing access and unresolved conflicts; do not claim exhaustive discovery after sampling. Existing applicable DESIGN.md choices precede observed implementation, which precedes new proposals. Preserve the user-curated system and record conflicts with it rather than silently replacing it.'
       : 'GENERATOR: create a coherent system from the product brief and existing project knowledge. If an application repository is available, read applicable DESIGN.md files first, then relevant components/styles before proposing changes. Keep approved choices and stable IDs; label new recommendations as inferred rather than claiming they were discovered. Fill important gaps with explicit, consistent decisions. If product identity or repository scope is essential but unknown, ask a focused question instead of inventing facts.',

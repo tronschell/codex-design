@@ -5,6 +5,7 @@ import { canvasMapLayout, canvasMapPngReason, exportFormatReason, exportHandoffP
 import { embedded, sendFollowUp } from './bridge';
 import { downloadExport, exportFile, exportTexts, type ExportText } from './export-utils';
 import { Select } from './Select';
+import { useLocalDraft } from './useLocalDraft';
 import './export.css';
 
 export interface ExportPanelProps {
@@ -29,8 +30,9 @@ const formats: { id: ExportFormat; name: string; detail: string; description: st
 export default function ExportPanel({ project, boardId, pageId, selectedIds, onClose, onNotify }: ExportPanelProps) {
   const [scope, setScope] = useState<ExportScope>(selectedIds.length ? 'selection' : 'board');
   const [format, setFormat] = useState<ExportFormat>(selectedIds.length ? 'react' : 'png');
-  const [background, setBackground] = useState('dark'), [customColor, setCustomColor] = useState('#171717');
-  const [scale, setScale] = useState<1 | 2 | 3 | 4>(2), [labels, setLabels] = useState(true), [margin, setMargin] = useState(80);
+  const preferences = useLocalDraft(`${project.id}/export-settings`, {background: 'dark', customColor: '#171717', scale: '2', labels: 'true', margin: '80'});
+  const {background, customColor} = preferences.value, scale = ([1,2,3,4].includes(Number(preferences.value.scale)) ? Number(preferences.value.scale) : 2) as 1 | 2 | 3 | 4, labels = preferences.value.labels === 'true', margin = Number(preferences.value.margin);
+  const setBackground = (background: string) => preferences.setValue({background}), setCustomColor = (customColor: string) => preferences.setValue({customColor}), setScale = (scale: number) => preferences.setValue({scale: String(scale)}), setLabels = (labels: boolean) => preferences.setValue({labels: String(labels)}), setMargin = (margin: string) => preferences.setValue({margin});
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [copied, setCopied] = useState('');
   const [sources, setSources] = useState<ExportText[]>([]), [sourceIndex, setSourceIndex] = useState(0);
   const panel = useRef<HTMLElement>(null), busyRef = useRef(false), mounted = useRef(true), activeRequest = useRef<AbortController | null>(null);
@@ -96,7 +98,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
   };
 
   return <div className="export-backdrop" onPointerDown={close}>
-    <section ref={panel} className="export-panel" role="dialog" aria-modal="true" aria-labelledby="export-heading" aria-busy={!!busy} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
+    <section ref={panel} onBlurCapture={preferences.onBlur} onCompositionStartCapture={preferences.onCompositionStart} onCompositionEndCapture={preferences.onCompositionEnd} className="export-panel" role="dialog" aria-modal="true" aria-labelledby="export-heading" aria-busy={!!busy} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
       if (event.key === 'Tab') {
         const controls = panel.current?.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea');
@@ -126,7 +128,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
             ]}/></label>
             {background === 'custom' && <label className="export-map-field"><span>Color</span><span className="export-map-color"><input type="color" aria-label="Choose canvas map color" value={/^#[\da-f]{6}$/i.test(customColor) ? customColor : '#171717'} disabled={!!busy} onChange={event => setCustomColor(event.target.value)}/><input type="text" aria-label="Canvas map hexadecimal color" spellCheck={false} value={customColor} disabled={!!busy} onChange={event => setCustomColor(event.target.value)} placeholder="#171717" maxLength={9}/></span></label>}
             <label className="export-map-field"><span>{format === 'png' ? 'Scale' : 'Still quality'}</span><Select label="Canvas map export scale" value={String(scale)} disabled={!!busy} onChange={value => setScale(Number(value) as 1 | 2 | 3 | 4)} options={[1, 2, 3, 4].map(value => ({ value: String(value), label: `${value}×${value === 1 ? ' · design size' : ''}`, disabled: format === 'png' && !!mapDetails?.layout && !!canvasMapPngReason({ pixelWidth: mapDetails.layout.width * value, pixelHeight: mapDetails.layout.height * value }) }))}/></label>
-            <label className="export-map-field"><span>Margin</span><span className="export-map-margin"><input type="number" aria-label="Canvas map margin in design pixels" value={margin} min={0} max={1000} step={8} disabled={!!busy} onChange={event => setMargin(Number(event.target.value))}/><span>px</span></span></label>
+            <label className="export-map-field"><span>Margin</span><span className="export-map-margin"><input type="number" aria-label="Canvas map margin in design pixels" value={preferences.value.margin} min={0} max={1000} step={8} disabled={!!busy} onChange={event => setMargin(event.target.value)}/><span>px</span></span></label>
             <label className="export-map-labels"><input type="checkbox" checked={labels} disabled={!!busy} onChange={event => setLabels(event.target.checked)}/>Frame and page labels</label>
             {mapDetails?.layout && <output className="export-map-size" aria-live="polite"><strong>{(format === 'png' ? mapDetails.layout.pixelWidth : mapDetails.layout.width).toLocaleString()} × {(format === 'png' ? mapDetails.layout.pixelHeight : mapDetails.layout.height).toLocaleString()} {format === 'png' ? 'px' : 'design px'}</strong><span>{format === 'png' ? `${scale}× resolution · pixel dimensions determine print size` : `Scalable canvas · embedded stills at ${scale}×`}</span></output>}
             <p className="export-format-note">HTML source is flattened without running scripts. Video uses its poster or first frame; shaders use time zero. Fonts depend on this device. SVG requires a browser with HTML/CSS support.</p>

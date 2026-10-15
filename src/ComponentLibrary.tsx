@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Check, Component, Download, Plus, RefreshCw, Unlink } from 'lucide-react';
 import type { DesignProject, LibraryScope, Operation } from '../shared/types';
 import { uid } from './editor-utils';
 import LibraryVersions from './LibraryVersions';
+import ImplementationNotes from './ImplementationNotes';
+import { useLocalDraft } from './useLocalDraft';
 
 
 interface ComponentEditorProps {
+  discovery: ReactNode;
   project: DesignProject;
   pageId?: string;
   selectedNodeId?: string;
@@ -22,32 +25,35 @@ interface ComponentEditorProps {
   onInserted: (nodeId: string) => void;
 }
 
-export default function ComponentEditor({ project, pageId, selectedNodeId, componentId, disabled, position, onSelect, onExport, exportDisabled, onChange, onApply, onNotify, onReturn, onInserted }: ComponentEditorProps) {
+export default function ComponentEditor({ discovery, project, pageId, selectedNodeId, componentId, disabled, position, onSelect, onExport, exportDisabled, onChange, onApply, onNotify, onReturn, onInserted }: ComponentEditorProps) {
   const page = project.pages.find(item => item.id === pageId), selected = page?.nodes.find(node => node.id === selectedNodeId);
   const instance = page?.nodes.find(node => node.componentInstance && Object.values(node.componentInstance.nodeMap).includes(selectedNodeId ?? ''));
   const definition = project.designSystem.components.find(item => item.id === componentId);
-  const [name, setName] = useState(selected?.name ?? ''), [description, setDescription] = useState(''), [label, setLabel] = useState('');
+  const local = useLocalDraft(`${project.id}/${pageId ?? ''}/${selectedNodeId ?? ''}/${componentId}/component-actions`, {name: selected?.name ?? '', description: '', label: ''});
+  const {name, description, label} = local.value;
+  const setName = (name: string) => local.setValue({name}), setDescription = (description: string) => local.setValue({description}), setLabel = (label: string) => local.setValue({label});
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const guard = useRef(false), mounted = useRef(true);
   const identity = `${project.id}/${pageId ?? ''}/${selectedNodeId ?? ''}/${componentId}`;
   const context = useRef(identity); context.current = identity;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { setName(selected?.name ?? ''); setDescription(''); }, [selectedNodeId]);
   const run = async (operations: Operation[], success: (next: DesignProject) => void) => {
-    if (guard.current || disabled) return;
+    if (guard.current || disabled) return false;
     const owner = context.current;
     guard.current = true; setBusy(true); setError('');
     try {
       const next = await onChange(operations);
       if (!next) throw new Error('The component was not saved. Review the error and try again.');
       if (mounted.current && context.current === owner) success(next);
-    } catch (failure) { if (mounted.current && context.current === owner) setError(failure instanceof Error ? failure.message : 'Could not save the component.'); }
+      return true;
+    } catch (failure) { if (mounted.current && context.current === owner) setError(failure instanceof Error ? failure.message : 'Could not save the component.'); return false; }
     finally { guard.current = false; if (mounted.current) setBusy(false); }
   };
   const locked = disabled || busy;
   const instances = definition ? project.pages.flatMap(item => item.nodes.filter(node => node.componentInstance?.componentId === definition.id).map(node => ({ page: item, node }))) : [];
 
-  return <div className="library-panel-scroll" aria-busy={busy}>
+  return <div className="library-panel-scroll" aria-busy={busy} onBlurCapture={local.onBlur} onCompositionStartCapture={local.onCompositionStart} onCompositionEndCapture={local.onCompositionEnd}>
+    {discovery}
     <section className="library-section"><h3>Export library</h3><p className="library-field-note">Markdown, React, CSS and editable definitions.</p><div className="library-button-row"><button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport()}><Download size={13}/>Download library</button>{definition && <button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport(definition.id)}><Download size={13}/>Download component</button>}</div></section>
     <section className="library-section library-editor-form">
       <h3>Create a component</h3>
@@ -90,9 +96,10 @@ export default function ComponentEditor({ project, pageId, selectedNodeId, compo
           <button className="library-button" disabled={locked || !label.trim()}><Check size={13}/>Release selection to this component</button>
         </form>}
       </section>
+      <section className="library-section"><h3>Implementation notes</h3><ImplementationNotes key={`${project.id}/${definition.id}`} value={definition.nodes.find(node => node.id === definition.rootNodeId)?.notes} disabled={locked} onSave={notes => onChange([{ type: 'set_component_notes', componentId: definition.id, notes }]).then(Boolean)}/><p className="library-field-note">Saved with the component release. Existing instances keep their version; instance-specific notes remain local.</p></section>
       {instances.length > 0 && <section className="library-section"><h3>Instances</h3><ul className="library-instance-list">{instances.map(({ page: owner, node }) => <li key={node.id}><span title={`${owner.name} · ${node.name}`}><strong>{node.name}</strong><small>{owner.name} · v{node.componentInstance!.version}</small></span>{node.componentInstance!.version !== definition.version && <button type="button" className="library-button" disabled={locked} onClick={() => void run([{ type: 'update_component_instance', pageId: owner.id, nodeId: node.id }], () => onNotify('Instance updated. Local overrides retained.'))}>Update</button>}</li>)}</ul></section>}
       <LibraryVersions key={definition.id} project={project} scope="component" componentId={definition.id} disabled={locked} onChange={onChange} onApply={onApply} onNotify={onNotify}/>
-    </> : <p className="library-note">{project.designSystem.components.length ? 'Choose a component on the library canvas to place it or review its versions.' : 'Your project has no reusable components yet. Create the first one from an existing canvas object.'}</p>}
+    </> : <p className="library-note">{project.designSystem.components.length ? 'Choose a component on the library canvas to place it or review its versions.' : 'Find components from your app, or create one from an existing canvas object.'}</p>}
     {error && <p className="library-note library-action-error" role="alert">{error}</p>}
     {busy && <p className="library-note" role="status">Saving component…</p>}
   </div>;

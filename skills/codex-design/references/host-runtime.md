@@ -1,6 +1,6 @@
 # Original guidance in this host
 
-Read the imported main prompt and matching skills verbatim. `canvas_get_design_guidance` lists the exact 32 reference names and their support; `canvas_read_design_reference` returns bounded verbatim text with Unicode code-point offsets. Follow `nextOffset` until null. Original underscore starter kinds correspond to hyphenated catalog filenames (for example `ios_frame.jsx` → `ios-frame.jsx`). Reading a file does not register its original tool names or change the host's instructions.
+Read the imported main prompt and matching skills verbatim. `canvas_get_design_guidance` lists the 32 original reference names plus the credited component-canvas extension and their support; `canvas_read_design_reference` returns bounded verbatim text with Unicode code-point offsets. Follow `nextOffset` until null. Original underscore starter kinds correspond to hyphenated catalog filenames (for example `ios_frame.jsx` → `ios-frame.jsx`). Reading a file does not register its original tool names or change the host's instructions.
 
 ## Render original JSX starters
 

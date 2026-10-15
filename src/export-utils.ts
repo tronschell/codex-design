@@ -9,6 +9,7 @@ import { ASSET_MIME_TYPES, MAX_ASSET_BYTES, assetFilename, isAssetRef, projectAs
 import { MAX_INPUT_BYTES, projectSchema, projectImportSchema, designLibrarySchema } from '../shared/validation';
 import { exportLibrary, libraryProject, libraryReferenceFiles } from '../shared/library-export';
 import { MAX_ARCHIVE_BYTES, unzipFiles, zipFiles, type ArchiveFiles } from '../shared/zip';
+import { implementationNotesMarkdown } from '../shared/implementation-notes';
 import { client } from './client';
 
 export interface ExportText { label: string; text: string }
@@ -156,8 +157,10 @@ async function prepareCanvasMap(project: DesignProject, target: ExportTarget, ma
     } else if (node.type === 'shader') {
       const canvas = document.createElement('canvas'); let failure = '';
       const renderer = createShaderRenderer(canvas, { ...shaderRuntimeOptions(node.shader), animate: false, capture: { width: pixelWidth, height: pixelHeight } }, message => { failure = message; });
-      try { if (failure) throw new Error(`“${node.name}”: ${failure}`); nodeImages[node.id] = canvasPng(canvas, node.name); }
-      finally { renderer.dispose(); canvas.width = canvas.height = 0; }
+      const abort = () => renderer.dispose();
+      signal?.addEventListener('abort', abort, { once: true });
+      try { await renderer.ready; signal?.throwIfAborted(); if (failure) throw new Error(`“${node.name}”: ${failure}`); nodeImages[node.id] = canvasPng(canvas, node.name); }
+      finally { signal?.removeEventListener('abort', abort); renderer.dispose(); canvas.width = canvas.height = 0; }
     } else if (node.type === 'video' && !node.media?.poster) {
       const reason = canvasMapPngReason({ pixelWidth, pixelHeight }); if (reason) throw new Error(`“${node.name}”: ${reason}`);
       nodeImages[node.id] = await videoStill(node, assetUrls[node.media?.src ?? ''] ?? '', pixelWidth, pixelHeight, layout.scale, signal);
@@ -230,6 +233,7 @@ export async function exportFile(project: DesignProject, target: ExportTarget, f
     }
   }
   files['DESIGN.md'] = designSystemMarkdown(project.designSystem);
+  files['IMPLEMENTATION_NOTES.md'] = implementationNotesMarkdown(scoped);
   files['tokens.css'] = tokenCssVariables(project.designSystem);
   if (format === 'source' || format === 'react') Object.assign(files, libraryReferenceFiles(project, { assetUrls }));
   files['manifest.json'] = JSON.stringify({ format: 'codex-design-archive', version: 1, kind: format, projectId: project.id, revision: project.revision, target, assets: manifestAssets }, null, 2);
