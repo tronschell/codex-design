@@ -867,3 +867,14 @@ This is a correctness fix rather than a performance optimization. Method: build 
 | Widget gzip | 980,960 B | 981,099 B | +139 B | +0.01417% |
 
 The Codex, browser, JSX-renderer and starter runtime bundles remain byte-identical. Report: `/private/tmp/codex-text-sync-artifacts.json`. No dependency was added. The practical change is that incoming clean text and “Use saved value” replace the visible stale text; local typing avoids a DOM rewrite. This behavior was inspected in source, not measured in a live editor session. Load/interaction time, CPU, RAM, FPS, native caret/IME behavior and concurrent edit sequences remain unmeasured or unexercised. Compilation and builds ran without tests, fixtures, verification designs or changes to saved user content.
+
+## Inline edit lock and session guards — October 15, 2026
+
+This is a correctness change. Comparable workload/method: build clean `4a8558d` and the complete correction on the same machine with `npm run build`; compare exact self-contained widget bytes and Python gzip level 9 with fixed mtime. Saved designs and dependencies are unchanged.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Widget HTML | 3,526,143 B | 3,526,224 B | +81 B | +0.00230% |
+| Widget gzip | 981,099 B | 981,149 B | +50 B | +0.00510% |
+
+The Codex, browser, JSX-renderer and starter runtime bundles remain byte-identical. Local report: `/private/tmp/codex-text-lock-artifacts.json`. The practical intended effect is to prevent inline text edits through locked ancestry or non-Select tools and prevent an unmounted editor's save completion from dismissing a newer edit session. These paths were inspected in source; browser inspection could not start because the UI automation runtime returned a missing-path error. No interaction, load, CPU, RAM, frame-rate or GPU measurements were obtained, and no runtime savings are claimed. Builds and strict TypeScript compilation ran without tests, fixtures or verification designs.

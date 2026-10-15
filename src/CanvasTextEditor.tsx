@@ -30,7 +30,7 @@ export default function CanvasTextEditor({ node, style, onSave, onFinish }: { no
       onPointerDown={event => event.stopPropagation()}
       onInput={event => { displayed.current = event.currentTarget.innerText; draft.setValue({ content: displayed.current }); }}
       onCompositionStart={() => { setComposing(true); draft.onCompositionStart(); }} onCompositionEnd={() => { setComposing(false); draft.onCompositionEnd(); }}
-      onBlur={async () => { setComposing(false); draft.onCompositionEnd(); if (await draft.flush()) onFinish(); }}
+      onBlur={async () => { setComposing(false); draft.onCompositionEnd(); if (await draft.flush() && element.current) onFinish(); }}
       onKeyDown={event => {
         event.stopPropagation();
         if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
