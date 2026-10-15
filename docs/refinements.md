@@ -152,6 +152,8 @@ Prioritize observed problems over additions. Complete one small, usable batch pe
 6. Profile large real boards, explicit token bindings, layer filtering, large inspiration collections, asset reuse, hidden shader/video work and archive creation. Record CPU, transferred bytes and actual available memory/frame metrics; do not infer RAM percentages from node counts. Token collection resolution builds one lookup map per collection; measure real bound-board workloads before claiming a speed improvement.
 7. Upload cancellation and pending-upload cleanup are complete. Add resume and a clear asset storage-management view when useful; never garbage-collect media still referenced by saved versions. Inspect real upload/cancel behavior after the installed host reloads.
 
+8. Profile final archive downloads on real exports: `downloadExport` currently copies its whole Uint8Array before Blob construction. Preserve buffer/view ownership and cancellation; count explicit payload copies separately from measured browser RAM.
+
 No deployment, publication, multiplayer, external messages or new integrations are authorized by this backlog. The installed local plugin may be refreshed after complete compiled changes, as previously requested by the user.
 
 ## Follow-up cadence
@@ -389,3 +391,9 @@ Profiled the existing three largest token-bound projects (Lot revision 107, Bloo
 In three alternating before/after process pairs, median HTML source generation fell 7.080→5.934 ms (−1.146 ms, −16.2%) and React/CSS 7.620→6.450 ms (−1.170 ms, −15.4%) for the whole eight-page workload. CPU time fell 15.9% and 15.5%, respectively. Token-aware style generation fell 44.5% in wall time and 43.1% in CPU time. All measured output encodings retain their lengths and hashes, and saved source files remain unchanged. Literal canvas-style timings overlap between runs; no panning improvement is claimed. Detailed workload, method, before/after tables, artifact costs and unmeasured browser/memory metrics are recorded in performance.md.
 
 Production packaging and strict unused-symbol TypeScript compilation passed with the existing large-chunk warning. No tests, fixtures, verification designs, dependencies or user-design writes were introduced. MCP schemas, saved source/comments/media, project/chat isolation and History Apply are unchanged. Browser startup, real interaction, installed-host behavior and full export download latency remain unmeasured; the timing gain applies to source generation only.
+
+## Indexed ZIP checksum traversal — October 15, 2026
+
+A one-line indexed-byte traversal replaces the shared CRC32 iterator. On the frozen existing Lot revision 107 payload (598 nodes/four pages, project JSON, two original PNGs and its media manifest; 4,880,095 B ZIP), three alternating process pairs measured packing at 23.027→8.638 ms (−14.389 ms, −62.5%) and unpacking at 22.351→8.089 ms (−14.261 ms, −63.8%). Their CPU times fell 61.9% and 63.7%, respectively. Generated ZIP bytes and all four extracted entries retain identical lengths/hashes. The checksum algorithm and existing validation remain intact; no cache, dependency or format change was needed.
+
+Production packaging and strict unused-symbol TypeScript compilation passed, with the existing large-chunk warning. Full workload/method, before/after tables, artifact costs and limits are in performance.md. This measures archive processing rather than whole-browser export/import; memory, FPS and installed-host latency remain unmeasured. No tests, fixtures, verification designs, saved-project writes or imports were introduced. History Apply, source, comments, media and MCP contracts are preserved. The next concrete archive candidate is the observed extra download-buffer copy, recorded above.
