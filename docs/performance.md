@@ -856,3 +856,14 @@ This is an editor correctness fix, not a runtime optimization. The eligible live
 Method: build the clean `bacd8ae` checkout and the completed change on the same machine through `npm run build`, then compare exact production widget bytes and Python gzip level 9 with fixed mtime. Widget.html changes 3,525,309→3,525,681 B (+372 B, +0.01055%); gzip changes 980,795→980,960 B (+165 B, +0.01682%). The Codex, browser and JSX runtime bundles are byte-identical to that frozen baseline. No dependency was added. Local artifact report: `/private/tmp/codex-live-scope-artifacts.json`.
 
 Production packaging and strict unused-symbol TypeScript compilation passed, retaining the existing large-chunk warning. Reviewed every activation/subscription caller, the CanvasNodes tree and the separate readonly NodeView path with the React best-practices checklist. No saved design or user script was modified or executed, and no tests, fixtures or verification designs were added or run. Actual live activation/exit, reused-ID navigation, native multiple-selection gestures and installed-host behavior were not exercised. Loading, interaction latency, CPU, RAM, paint/FPS and GPU use remain unmeasured; no speed or resource savings are claimed.
+
+## Inline text synchronization correction — October 14, 2026
+
+This is a correctness fix rather than a performance optimization. Method: build clean `c8636cc` and the completed source change on the same machine with `npm run build`, then compare the exact self-contained production widget and Python gzip level 9 with fixed mtime. Workload is the same application build, with no design-content changes.
+
+| Artifact | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Widget HTML | 3,525,681 B | 3,526,143 B | +462 B | +0.01310% |
+| Widget gzip | 980,960 B | 981,099 B | +139 B | +0.01417% |
+
+The Codex, browser, JSX-renderer and starter runtime bundles remain byte-identical. Report: `/private/tmp/codex-text-sync-artifacts.json`. No dependency was added. The practical change is that incoming clean text and “Use saved value” replace the visible stale text; local typing avoids a DOM rewrite. This behavior was inspected in source, not measured in a live editor session. Load/interaction time, CPU, RAM, FPS, native caret/IME behavior and concurrent edit sequences remain unmeasured or unexercised. Compilation and builds ran without tests, fixtures, verification designs or changes to saved user content.
