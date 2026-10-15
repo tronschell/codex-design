@@ -1109,3 +1109,22 @@ Correctness fix: the windowed layer tree from phase 5 measured the list's offset
 User effect: clicking, deselecting and starting a drag on a 20,000-node page take 8–15 ms less main-thread work each (12–22%), and every drag move takes about 3 ms less. What remains with the inspector closed is mostly React development-mode overhead and browser rendering; only about 9 ms per click is application script. Production-build interaction timings, paint, frame rate and memory were not measured. Raw output: `artifacts/selection-phase6.json`, `artifacts/snap-scene-phase6.txt`.
 
 `npm run typecheck` and `npm run build` pass for this entry and for the phase 2–5 entries above (the build keeps its existing large-chunk warning). No tests, dependencies or fixtures were added or run.
+
+## Focused-context index reuse rejected — October 15, 2026
+
+Profiled a small candidate for shared/context.ts: reuse effects.nodeIndex for the two resolved-node lookups instead of constructing their local Maps. The geometry helper already exposes this index, but fewer apparent maps did not produce a faster focused read on the existing saved workload. The candidate was built only in scratch storage and was not applied to the repository; the application implementation remains unchanged.
+
+Workload: frozen actual Lot revision 107 (598 nodes/four pages), Bloom revision 9 (536 nodes/three pages) and Forma revision 35 (397 nodes/one page). Choose the first existing root frame on each page, giving eight focused reads across 1,531 saved nodes and returning 359 focused nodes per pass. Read with source included, separately with and without image-placement context. No synthetic project or verification design was created, and no source/shader code stored in those designs was executed. The original and frozen input hashes remain identical.
+
+Method: bundle the current f4843c1 context module and the candidate with identical esbuild Node 22 ESM settings, without minification. Node v24.19.0 / Apple M5 Pro, three fresh-process pairs ordered current/candidate, candidate/current, current/candidate. Each mode gets forty warmup passes, GC before sampling and thirteen batches of four passes. The table is the median of 39 batch averages per version, normalized to one pass of eight reads. performance.now() measures wall time; process.cpuUsage user + system measures process CPU, including runtime work during the interval. JSON serialization, output hashing and input reads are outside timing. Initial five-warmup exploratory runs are excluded.
+
+| Eight-read workload / metric | Current | Candidate | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Ordinary context · wall | 0.756990 ms | 0.816365 ms | +0.059375 ms | +7.8% |
+| Ordinary context · CPU | 0.777750 ms | 1.039000 ms | +0.261250 ms | +33.6% |
+| Image-placement context · wall | 1.706073 ms | 1.779146 ms | +0.073073 ms | +4.3% |
+| Image-placement context · CPU | 1.916750 ms | 2.631500 ms | +0.714750 ms | +37.3% |
+
+Ordinary wall-time run medians are 0.737719–0.782875 ms current versus 0.805333–0.857594 ms candidate, consistently slower across pairs. Image-placement wall ranges overlap (1.633885–1.772146 versus 1.733979–1.809250 ms), so the small image-mode wall change is inconclusive. All six final runs retain identical complete response lengths and SHA-256 hashes for each mode: 172,896 B ordinary and 257,944 B with image placement. Identical output does not make the slower candidate useful.
+
+Decision and practical effect: retain the current context implementation, avoiding the measured ordinary-read regression. This is a rejected optimization, not a shipped speedup. No cache-size, memory, GC, whole-MCP request, browser interaction, canvas FPS or end-to-end image-generation improvement was measured or inferred. No tests, fixtures, dependencies, saved-design writes or app imports were introduced or run. Raw source candidates, real workload provenance, six final run reports, output hashes and summary are in /private/tmp/codex-context-index-profile/.
