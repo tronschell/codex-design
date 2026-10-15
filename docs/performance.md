@@ -954,3 +954,18 @@ All six final ZIP Blob outputs retain the same 4,880,095 B length, application/z
 Artifact method: compare the existing packaged clean 469fc68 build with the completed production build, exact bytes and Python gzip level 9 with fixed mtime. Widget 3,526,260→3,526,210 B (-50 B, -0.00142%); gzip 981,174→981,157 B (-17 B, -0.00173%). Codex, browser, JSX-renderer and starter bundles remain byte-identical. Strict unused-symbol TypeScript compilation and production packaging passed with the existing large-chunk warning. No tests, fixtures, verification designs, dependencies or user-design writes were added or run.
 
 Browser Blob implementation/heap behavior, actual memory peak/RAM/GC reduction, end-to-end export/download/import latency, installed-host interaction, startup, canvas panning/FPS and whole-app CPU utilization remain unmeasured. Node Blob timings do not establish those browser metrics. Raw source stages, workload provenance, six run reports, output/view hashes and artifact comparisons are in /private/tmp/codex-download-blob-profile/.
+
+## Creation completions respect navigation — October 15, 2026
+
+This correctness change prevents old creation/import completions from replacing a newer pane choice or applying selection/camera/menu follow-ups to a different project, board or page. It reuses the existing captured navigation identity and current readonly state. A newly created project remains saved and appears in Projects when its original pane context has changed. Snapshot activation reports whether it applied after waiting for queued writes; both callers check the result. No request/save is cancelled retroactively.
+
+Verification is strict unused-symbol TypeScript compilation, production packaging and direct source review of all creation/import follow-ups and the shared activation/queue/binding paths. No tests, assertions, fixtures, verification designs, saved-project writes or app imports were added or run. Actual delayed responses, rapid navigation, History/library interactions and installed-host behavior were not exercised in a browser. Loading/interaction latency, memory, CPU utilization, panning/FPS and GPU metrics remain unmeasured, and no performance improvement is claimed.
+
+Artifact method: compare the existing clean packaged 82d4615 build with the completed production build; exact file bytes and Python gzip level 9 with fixed mtime. The frontend widget grows as follows; the Codex, browser, JSX-renderer and starter bundles retain identical bytes and SHA-256 hashes. No new dependency or persistence/MCP format was added. Build output retains the existing large-chunk warning.
+
+| Artifact / encoding | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Widget · raw | 3,526,210 B | 3,526,515 B | +305 B | +0.00865% |
+| Widget · gzip level 9 | 981,157 B | 981,304 B | +147 B | +0.01498% |
+
+The user's practical benefit is preserving their current canvas and history preview when earlier creation work finishes. Bundle size is an artifact measurement, not a measured download/load-time change. Artifact hashes and comparisons are in /private/tmp/codex-creation-navigation-review/.

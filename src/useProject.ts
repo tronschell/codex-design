@@ -142,10 +142,11 @@ export function useProject() {
     const intent = ++navigation.current;
     loadingProject.current = value.id; setLoading(true);
     await queue.current.catch(() => {});
-    if (!mounted.current || intent !== navigation.current) return;
+    if (!mounted.current || intent !== navigation.current) return false;
     selection.current++;
     activate(value, { projectId: value.id });
     loadingProject.current = null; setLoading(false); setHydrated(true);
+    return true;
   }, [activate]);
   const captureNavigation = useCallback(() => {
     const intent = navigation.current, pane = binding.current;

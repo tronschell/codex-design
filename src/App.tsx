@@ -177,7 +177,7 @@ export default function App() {
   const board = project?.boards.find(item => item.id === (bound?.boardId || boardId)) || (!bound ? project?.boards[0] : undefined);
   const boardPages = useMemo(() => project?.pages.filter(item => item.boardId === board?.id) || [], [project?.pages, board?.id]);
   const page = boardPages.find(p => p.id === (bound?.pageId || pageId)) || boardPages[0];
-  useLayoutEffect(() => { activeCanvas.current = project && page ? { projectId: project.id, pageId: page.id, readOnly: historyOpen || !!library } : null; });
+  useLayoutEffect(() => { activeCanvas.current = project ? { projectId: project.id, pageId: page?.id || '', readOnly: historyOpen || !!library } : null; });
   useEffect(() => () => { activeCanvas.current = null; }, []);
   useLayoutEffect(() => () => { mediaController.current?.abort(); }, [project?.id, page?.id, historyOpen, loading, library]);
   useEffect(() => { if (liveProject && page) recordCanvasReady(); }, [liveProject?.id, page?.id]);
@@ -500,21 +500,29 @@ export default function App() {
     while (anchor?.parentId) anchor = nodes.find(n => n.id === anchor?.parentId);
     if (anchor?.type !== 'frame') anchor = screens.at(-1);
     const node = { ...newNode('frame', anchor ? anchor.x + anchor.width + 100 : centerX - p.width / 2, anchor ? anchor.y : centerY - p.height / 2), width: p.width, height: p.height, name: `${p.name.startsWith('Slide') ? 'Slide' : p.name} ${screens.length + 1}`, styles: { fill: p.name.startsWith('Slide') ? '#ffffff' : '#0b0c0e' } };
-    const next = await change([{ type: 'create_node', pageId: page.id, node }]);
-    if (next) { setSelection(node.id); setTool('select'); setMenu(null); const box = stageRef.current; const zoom = clampZoom(Math.min((box.clientWidth - 200) / node.width, (box.clientHeight - 200) / node.height, .8)); setView({ zoom, x: (box.clientWidth - node.width * zoom) / 2 - node.x * zoom, y: (box.clientHeight - node.height * zoom) / 2 - node.y * zoom + 25 }); }
+    const isCurrent = captureNavigation(), next = await change([{ type: 'create_node', pageId: page.id, node }]);
+    if (next && isCurrent() && !activeCanvas.current?.readOnly) { setSelection(node.id); setTool('select'); setMenu(null); const box = stageRef.current; const zoom = clampZoom(Math.min((box.clientWidth - 200) / node.width, (box.clientHeight - 200) / node.height, .8)); setView({ zoom, x: (box.clientWidth - node.width * zoom) / 2 - node.x * zoom, y: (box.clientHeight - node.height * zoom) / 2 - node.y * zoom + 25 }); }
   };
   const createProject = async (name: string, template: 'blank' | 'demo') => {
     if (historyOpen) return false;
-    try { const next = await client.create(name.trim() || (template === 'demo' ? 'GaugeReel Mobile' : 'Untitled project'), template); await setSnapshot(next); setBoardId(next.boards[0].id); setPageId(next.pages[0].id); setMenu(null); notify('Project created.'); return true; }
+    const isCurrent = captureNavigation();
+    try {
+      const next = await client.create(name.trim() || (template === 'demo' ? 'GaugeReel Mobile' : 'Untitled project'), template);
+      void refreshProjects().catch(() => {});
+      if (isCurrent() && !activeCanvas.current?.readOnly && await setSnapshot(next)) { setMenu(null); notify('Project created.'); }
+      else notify(`${next.name} created. Find it in Projects.`);
+      return true;
+    }
     catch (e) { setError((e as Error).message); return false; }
   };
   const createBoard = async (name: string) => {
     if (!project) return false;
-    const id = uid(), next = await change([{ type: 'create_board', board: { id, name: name.trim() || 'Untitled board' } }], false);
+    const isCurrent = captureNavigation(), id = uid(), next = await change([{ type: 'create_board', board: { id, name: name.trim() || 'Untitled board' } }], false);
     if (!next) return false;
-    selectBoard(id); notify('Board created.'); return true;
+    if (isCurrent() && !activeCanvas.current?.readOnly) { selectBoard(id); notify('Board created.'); }
+    return true;
   };
-  const createPage = async () => { if (!project || !board) return; const p: DesignPage = { id: uid(), boardId: board.id, name: newPageName.trim() || `Page ${boardPages.length + 1}`, nodes: [], viewport: { x: 120, y: 100, zoom: .65 } }; if (await change([{ type: 'create_page', page: p }], false)) { selectPage(p.id); setNewPageName(''); setMenu(null); } };
+  const createPage = async () => { if (!project || !board) return; const isCurrent = captureNavigation(), p: DesignPage = { id: uid(), boardId: board.id, name: newPageName.trim() || `Page ${boardPages.length + 1}`, nodes: [], viewport: { x: 120, y: 100, zoom: .65 } }; if (await change([{ type: 'create_page', page: p }], false) && isCurrent() && !activeCanvas.current?.readOnly) { selectPage(p.id); setNewPageName(''); setMenu(null); } };
 
   const point = (e: { clientX: number; clientY: number }) => { const box = stageRef.current!.getBoundingClientRect(), current = viewRef.current; return { x: (e.clientX - box.left - current.x) / current.zoom, y: (e.clientY - box.top - current.y) / current.zoom }; };
   const capture = (pointerId: number) => { try { stageRef.current?.setPointerCapture(pointerId); } catch { /* Pointer may already be released. */ } };
@@ -827,7 +835,7 @@ export default function App() {
       try {
         const next = await importProjectFile(file);
         void refreshProjects().catch(() => {});
-        if (isCurrent() && !activeCanvas.current?.readOnly) { await setSnapshot(next); setMenu(null); notify('Project imported as a new copy.'); }
+        if (isCurrent() && !activeCanvas.current?.readOnly && await setSnapshot(next)) { setMenu(null); notify('Project imported as a new copy.'); }
         else notify(`${next.name} imported. Find it in Projects.`);
       } catch (error) { setError((error as Error).message); }
     }}/>
