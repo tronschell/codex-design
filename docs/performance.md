@@ -878,3 +878,35 @@ This is a correctness change. Comparable workload/method: build clean `4a8558d` 
 | Widget gzip | 981,099 B | 981,149 B | +50 B | +0.00510% |
 
 The Codex, browser, JSX-renderer and starter runtime bundles remain byte-identical. Local report: `/private/tmp/codex-text-lock-artifacts.json`. The practical intended effect is to prevent inline text edits through locked ancestry or non-Select tools and prevent an unmounted editor's save completion from dismissing a newer edit session. These paths were inspected in source; browser inspection could not start because the UI automation runtime returned a missing-path error. No interaction, load, CPU, RAM, frame-rate or GPU measurements were obtained, and no runtime savings are claimed. Builds and strict TypeScript compilation ran without tests, fixtures or verification designs.
+
+## Skip unbound CSS token scans — October 15, 2026
+
+Source inspection found that every emitted style property scanned the project's token array even when that property used Custom. The shared CSS emitter now returns literal values immediately without a design-system context or explicit binding. Bound values retain the same compatible-kind check, CSS variable and literal fallback. This removes redundant searches without a cache, invalidation rule, dependency or data-format change.
+
+Workload: frozen existing Lot revision 107 (598 nodes, four pages, 22 tokens), Bloom revision 9 (536 nodes, three pages, 16 tokens) and Forma revision 35 (397 nodes, one page, 22 tokens). Together: 1,531 nodes, including 1,003 with bindings, across eight pages. Source files and the in-memory input encodings retained their hashes. No user designs were edited.
+
+Method: bundle clean `006618d` and the completed shared export modules separately with the production Node-target esbuild settings (Node 22 target, ESM, no minification). Run on Node v24.19.0 / Apple M5 Pro in fresh processes, ordered before/after, after/before, before/after. Each case has ten warmup passes, then 17 timed batches per process: twelve whole-workload passes per style batch or five per export batch. Tables pool the 51 final batch averages per version and report their median; exploratory `initial` runs are excluded. Wall time uses performance.now(); CPU time is process.cpuUsage user + system. Each export pass constructs all eight pages independently using the supported page scope. React timings include the existing implementation-notes Markdown in its result. Media reads/embedding, archives, network, download, the separate Codex handoff prompt and browser rendering are outside the timed workload.
+
+Wall time per workload pass:
+
+| Workload | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Literal canvas styles · 1,531 layers | 0.473 ms | 0.449 ms | -0.024 ms | -5.1% |
+| Token-aware export styles · 1,531 layers | 2.472 ms | 1.371 ms | -1.101 ms | -44.5% |
+| HTML source · 8 pages | 7.080 ms | 5.934 ms | -1.146 ms | -16.2% |
+| React/CSS source · 8 pages | 7.620 ms | 6.450 ms | -1.170 ms | -15.4% |
+
+CPU time per workload pass (not whole-app CPU utilization):
+
+| Workload | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Literal canvas styles · 1,531 layers | 0.504 ms | 0.477 ms | -0.027 ms | -5.4% |
+| Token-aware export styles · 1,531 layers | 2.544 ms | 1.447 ms | -1.098 ms | -43.1% |
+| HTML source · 8 pages | 7.177 ms | 6.039 ms | -1.138 ms | -15.9% |
+| React/CSS source · 8 pages | 7.685 ms | 6.496 ms | -1.189 ms | -15.5% |
+
+The substantial export-style, HTML and React reductions are consistent across all three process pairs: wall-time run medians span 2.379–2.490→1.354–1.379 ms, 7.017–7.195→5.877–5.987 ms and 7.541–7.656→6.359–6.498 ms, respectively. Literal canvas-style wall-time ranges overlap (0.449–0.532→0.444–0.452 ms), so that small difference is inconclusive; it is not evidence of faster panning.
+
+The four complete output encodings retain identical byte lengths and SHA-256 hashes across all six final runs: literal styles 402,264 B, token-aware styles 448,757 B, HTML results 738,136 B and complete React result objects 1,716,447 B. These are JSON response encodings, not browser RAM or downloadable archive sizes. The practical effect is less synchronous work preparing code exports; the measured absolute savings are about 1.15 ms for eight HTML pages and 1.17 ms for eight React/CSS pages. Actual export-menu latency, startup, project loading, scrolling/panning, FPS, memory, GPU and whole-app CPU utilization remain unmeasured by this change. No UI speedup is inferred from Node timings.
+
+Production artifact method: run npm run build on the clean baseline and completed change, then compare exact bytes and Python gzip level 9 with fixed mtime. Widget 3,526,224→3,526,247 B (+23 B, +0.00065%); gzip 981,149→981,164 B (+15 B, +0.00153%). Codex runtime 4,315,883→4,315,974 B (+91 B, +0.00211%). browser runtime 5,492,358→5,492,449 B (+91 B, +0.00166%). JSX-renderer and starter bundles remain byte-identical. Production packaging and strict unused-symbol TypeScript compilation passed with the existing large-chunk warning. No tests, fixtures, verification designs or dependencies were added or run. Raw workload, six run reports, summaries and artifact hashes are under `/private/tmp/codex-token-lookup-profile/`.

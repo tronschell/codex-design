@@ -53,7 +53,10 @@ export function nodeCss(node: DesignNode, system?: DesignSystem, fallbackStyles 
   const s = system ? resolveNodeTokens(node, system).styles : node.styles;
   const cssValue = (property: BindableStyleProperty, fallback: string | number): string | number => {
     const value = s[property] ?? fallback;
-    const token = system?.tokens.find(token => token.id === node.tokenBindings?.[property] && compatibleTokenKinds(property).includes(token.kind));
+    if (!system) return value;
+    const tokenId = node.tokenBindings?.[property];
+    if (!tokenId) return value;
+    const token = system.tokens.find(token => token.id === tokenId && compatibleTokenKinds(property).includes(token.kind));
     if (!token) return value;
     const literal = fallbackStyles[property] ?? fallback;
     return `var(${tokenCssVariableName(token)}, ${typeof literal === 'number' && !['fontWeight', 'lineHeight', 'opacity'].includes(property) ? `${literal}px` : literal})`;
