@@ -154,6 +154,8 @@ Prioritize observed problems over additions. Complete one small, usable batch pe
 
 8. The redundant final download-buffer copy is removed. Profile actual large existing exports in the installed browser when available; separate Blob preparation from media/source generation and end-to-end download latency, and measure browser RAM rather than inferring it from payload bytes.
 
+9. Revisit the layer-list scrolling regression documented in performance.md. Profile an existing real board when browser inspection is available; retain bounded rows, selection reveal, keyboard access and manual scrolling, and report scroll work separately from canvas dragging.
+
 No deployment, publication, multiplayer, external messages or new integrations are authorized by this backlog. The installed local plugin may be refreshed after complete compiled changes, as previously requested by the user.
 
 ## Follow-up cadence
@@ -415,3 +417,11 @@ The shared snapshot activation now returns whether it actually activated after d
 Reviewed all five creation/import follow-ups, both snapshot activation callers, queue/navigation epochs, bound board/page identity, current History/library guards and central selection synchronization. This review also found that the readonly context disappeared on an empty board; the existing context ref now retains its project and readonly state even without a page, while page-bound media checks still require their original page ID. Strict unused-symbol TypeScript compilation and production packaging passed with the existing large-chunk warning. No tests, fixtures, verification designs, dependencies, saved-project writes or imports were performed. MCP schemas, project/chat isolation, History Apply, source, comments and media formats are unchanged; backend/runtime bundles remain byte-identical. Artifact costs are in performance.md.
 
 Actual delayed network responses, rapid project/board/page navigation and installed-host History/library interaction remain source-inspected rather than browser-exercised. No runtime speed, memory, CPU or FPS improvement is claimed. The backlog includes those real-host sequences for subsequent direct inspection.
+
+## Refresh committed interaction and performance work — October 15, 2026
+
+The previously overlapping application/MCP work was committed as 13360e6, leaving a clean checkout. Direct file comparison found that the installed plugin still contained the prior build. Packaged that completed commit through the documented local process and refreshed the existing local plugin; tracked source/docs and all production dist files match the installed copies after refresh. This batch adds no new runtime implementation or saved-design changes.
+
+Strict unused-symbol TypeScript compilation and production packaging passed with the existing large-chunk warning. No tests, fixtures, dependencies, app imports or design mutations were introduced or run. The existing performance report remains the source for that commit's measurements; runtime latency, memory, CPU and frame-rate measurements were not repeated or inferred from installation. Installed-host gestures still need direct inspection after the pane reloads.
+
+Recorded the report's layer-list scrolling regression as a concrete remaining candidate, preserving its disclosure and the existing bounded rendering/reveal behavior. Publication, deployment and wider access were not part of this local refresh.
