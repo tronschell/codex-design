@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type Po
 import type { DesignNode, DesignSystem } from '../shared/types';
 import { LIVE_CODE_SANDBOX, nodeCss, nodeLinkStyle, resolvedNodes, safeCodeDocument, textListStyle, vectorDataUrl } from '../shared/export';
 import { isSafeLink } from '../shared/links';
+import { nodeIndex } from '../shared/effects';
 import './design-node.css';
 import { recordCanvasWork } from './canvas-profile';
 import MediaNode from './MediaNode';
@@ -48,7 +49,7 @@ function indexChildren(nodes: DesignNode[], previous?: ChildIndex): ChildIndex {
   }
   if (!previous) return { childrenByParent, roots };
   // Reuse sibling arrays unless something below them changed, so memoized subtrees skip rendering.
-  const byId = new Map(nodes.map(node => [node.id, node])), stale = new Set<string>();
+  const byId = nodeIndex(nodes), stale = new Set<string>();
   const invalidate = (id: string) => { for (let node = byId.get(id); node && !stale.has(node.id); node = node.parentId ? byId.get(node.parentId) : undefined) stale.add(node.id); };
   for (const [id, children] of childrenByParent) {
     const old = previous.childrenByParent.get(id);
@@ -62,20 +63,20 @@ function indexChildren(nodes: DesignNode[], previous?: ChildIndex): ChildIndex {
 // The shared index changes on every edit; a layer re-renders only when its own node or child list does.
 const sameLayer = (a: TreeProps, b: TreeProps) => (Object.keys(b) as (keyof TreeProps)[]).every(key => key === 'childrenByParent' ? a.childrenByParent.get(a.node.id) === b.childrenByParent.get(b.node.id) : Object.is(a[key], b[key])) && Object.keys(a).length === Object.keys(b).length;
 
-// Esc inside the scripted frame hands control back to the canvas, which cannot see key events from the sandboxed document.
-const exitScript = '<script>addEventListener("keydown",function(e){if(e.key==="Escape")parent.postMessage("codex-live-exit","*")})</script>';
 function ScriptedFrame({ id, name, passive, source, designSystem }: { id: string; name: string; passive: string; source: string; designSystem?: DesignSystem }) {
-  const active = useIsLiveFrame(id), frame = useRef<HTMLIFrameElement>(null);
-  const srcDoc = useMemo(() => active ? safeCodeDocument(source, designSystem, true) + exitScript : passive, [active, passive, source, designSystem]);
+  const active = useIsLiveFrame(id), frame = useRef<HTMLIFrameElement>(null), loads = useRef(0);
+  const srcDoc = useMemo(() => active ? safeCodeDocument(source, designSystem, true) : passive, [active, passive, source, designSystem]);
   useEffect(() => {
+    loads.current = 0;
     if (!active) return;
+    // The sandboxed document's prelude posts this on Esc, which the canvas cannot otherwise see.
     const exit = (event: MessageEvent) => { if (event.source === frame.current?.contentWindow && event.data === 'codex-live-exit') setLiveFrame(null); };
     window.addEventListener('message', exit);
     frame.current?.focus();
     return () => window.removeEventListener('message', exit);
   }, [active]);
   // The key remounts the frame so a new sandbox applies and leaving resets script state to the static first paint.
-  return <iframe key={active ? 'live' : 'passive'} ref={frame} title={name} sandbox={active ? LIVE_CODE_SANDBOX : ''} referrerPolicy="no-referrer" srcDoc={srcDoc} tabIndex={active ? 0 : -1} className={active ? 'tw:pointer-events-auto! tw:outline tw:outline-1 tw:-outline-offset-1 tw:outline-[#4c8dff]' : undefined} />;
+  return <iframe key={active ? 'live' : 'passive'} ref={frame} title={name} sandbox={active ? LIVE_CODE_SANDBOX : ''} referrerPolicy="no-referrer" srcDoc={srcDoc} tabIndex={active ? 0 : -1} onLoad={active ? () => { if (++loads.current > 1) setLiveFrame(null); } : undefined} className={active ? 'tw:pointer-events-auto! tw:outline tw:outline-1 tw:-outline-offset-1 tw:outline-[#4c8dff]' : undefined} />;
 }
 
 const TreeNode = memo(function NodeLayer({ node, childrenByParent, ancestors, onSelect, onTextEdit, interactive = true, preview, designSystem, liveTarget, linkedAncestor = false, lockedAncestor = false, inheritedPointerEvents = 'auto' }: TreeProps) {

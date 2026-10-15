@@ -193,6 +193,12 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
   const rawStyles = new Map(rendered.project.pages[0].nodes.map(node => [node.id, node.styles]));
   const children = new Map<string | null, DesignNode[]>(), classes = new Map<string, string>();
   const css = [tokenCssVariables(project.designSystem), `.exported-design { position: relative; width: ${rendered.width}px; height: ${rendered.height}px; }`];
+  // A link overlay takes the pointer for its whole layer, so states below it follow the outermost linked ancestor.
+  const byId = new Map(nodes.map((node, index) => [node.id, { node, index }])), linkedScope = (node: DesignNode) => {
+    let scope: number | undefined;
+    for (let parent = byId.get(node.parentId ?? ''), seen = 0; parent && seen < nodes.length; parent = byId.get(parent.node.parentId ?? ''), seen++) if (parent.node.href && isSafeLink(parent.node.href)) scope = parent.index;
+    return scope === undefined ? undefined : `.cd-layer-${scope}`;
+  };
   nodes.forEach((node, index) => {
     const siblings = children.get(node.parentId);
     if (siblings) siblings.push(node); else children.set(node.parentId, [node]);
@@ -200,7 +206,7 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
     const base = nodeCss(node, project.designSystem, rawStyles.get(node.id));
     css.push(`.${className} {\n  ${inlineCss(base).replaceAll(';', ';\n  ')};\n}`);
     // Class plus pseudo-class outranks the base class, so React export needs no !important.
-    css.push(...nodeStateRules(node, `.${className}`, false, project.designSystem, rawStyles.get(node.id), base));
+    css.push(...(node.styles.states ? nodeStateRules(node, `.${className}`, false, project.designSystem, rawStyles.get(node.id), base, linkedScope(node)) : []));
   });
   css.push('.cd-media { display: block; width: 100%; height: 100%; pointer-events: none; }', '.cd-code { border: 0; }', '.cd-shader-status { position: absolute; inset: 0; padding: 8px; overflow: auto; color: #ddd; background: #242424; font: 11px/1.4 system-ui, sans-serif; }', '.cd-arrow { position: absolute; right: 0; top: -5px; width: 9px; height: 9px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; transform: rotate(45deg); }');
   const hasLinks = nodes.some(node => !!node.href && isSafeLink(node.href));
@@ -226,7 +232,7 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
     if (node.type === 'arrow') content = '<span className="cd-arrow" />';
     if (node.type === 'code') {
       const vector = vectorDataUrl(node.source ?? '');
-      content = vector ? `<img className="cd-media" style={{ objectFit: ${JSON.stringify(node.styles.objectFit ?? 'fill')} }} alt=${expression(node.name)} src=${expression(vector)} draggable={false} />` : `<iframe className="cd-media cd-code${node.live ? ' cd-live' : ''}" title=${expression(node.name)} sandbox="${node.live ? LIVE_CODE_SANDBOX : ''}" referrerPolicy="no-referrer" srcDoc=${expression(safeCodeDocument(node.source ?? '', project.designSystem, node.live))} />`;
+      content = vector ? `<img className="cd-media" style={{ objectFit: ${JSON.stringify(node.styles.objectFit ?? 'fill')} }} alt=${expression(node.name)} src=${expression(vector)} draggable={false} />` : `<iframe className="cd-media cd-code${node.live ? ' cd-live' : ''}" title=${expression(node.name)} sandbox="${node.live ? LIVE_CODE_SANDBOX : ''}" referrerPolicy="no-referrer" srcDoc=${expression(safeCodeDocument(node.source ?? '', project.designSystem, node.live))}${node.live ? ` data-passive=${expression(safeCodeDocument(node.source ?? '', project.designSystem))} onLoad={liveFrameLoad}` : ''} />`;
     }
     const descendants = (children.get(node.id) ?? []).map(child => render(child, depth + 1, next, linkedAncestor || !!href, pointerEvents)).join('\n');
     const link = href ? `<a className="cd-link" style={{ pointerEvents: ${JSON.stringify(pointerEvents)} }} aria-label=${expression(node.name)} href=${expression(href)}${href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"'} />` : '';
@@ -237,7 +243,9 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
   const imports = shaders ? "import { useEffect, useRef } from 'react';\n" : '';
   const runtime = shaders ? `\nconst createShaderRenderer = ${shaderRuntimeSource(nodes.some(node => node.type === 'shader' && node.shader?.provider === 'shaders.com'))};\n` : '';
   const setup = shaders ? `  const root = useRef(null);\n  useEffect(() => {\n    const renderers = Array.from(root.current.querySelectorAll('canvas[data-shader]'), canvas => {\n      const status = canvas.nextElementSibling;\n      status.hidden = true;\n      return createShaderRenderer(canvas, JSON.parse(canvas.dataset.shader), message => { status.textContent = 'Shader unavailable: ' + message; status.hidden = false; });\n    });\n    return () => renderers.forEach(renderer => renderer.dispose());\n  }, []);\n` : '';
-  const jsx = `${imports}import './design.css';\n${runtime}\nexport default function ExportedDesign() {\n${setup}  return (\n    <main${shaders ? ' ref={root}' : ''} className="exported-design" aria-label=${expression(project.name)}>\n${(children.get(null) ?? []).map(node => render(node, 3)).join('\n')}\n    </main>\n  );\n}\n`;
+  // A second load means a live layer's script navigated its frame; it returns to the static paint without scripts.
+  const liveRuntime = nodes.some(node => node.type === 'code' && node.live) ? "\nfunction liveFrameLoad(event) {\n  const frame = event.currentTarget;\n  if (frame.dataset.loaded && frame.getAttribute('sandbox')) { frame.setAttribute('sandbox', ''); frame.srcdoc = frame.dataset.passive; }\n  frame.dataset.loaded = '1';\n}\n" : '';
+  const jsx = `${imports}import './design.css';\n${runtime}${liveRuntime}\nexport default function ExportedDesign() {\n${setup}  return (\n    <main${shaders ? ' ref={root}' : ''} className="exported-design" aria-label=${expression(project.name)}>\n${(children.get(null) ?? []).map(node => render(node, 3)).join('\n')}\n    </main>\n  );\n}\n`;
   const stylesheet = `${css.join('\n\n')}\n`;
   return { jsx, css: stylesheet, files: { 'Design.jsx': jsx, 'design.css': stylesheet, 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(exportTargetProject(project, target)) } };
 }

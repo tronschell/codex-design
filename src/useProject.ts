@@ -213,7 +213,7 @@ export function useProject() {
       const before = ref.current;
       if (!before || !current()) return null;
       let next: DesignProject;
-      try { next = await client.mutate(before.id, before.revision, operations); }
+      try { next = await client.mutate(before, operations); }
       catch (error) {
         if (!current()) return null;
         const message = errorMessage(error); setError(message);
@@ -290,7 +290,7 @@ export function useProject() {
         if (loadingProject.current) break;
         const current = ref.current!, request = selection.current, fallback = Date.now() < watchFallbackUntil.current;
         try {
-          const next: DesignProject | undefined = fallback ? await client.get(projectId, controller.signal) : (await client.watch(projectId, current.revision, controller.signal)).project;
+          const next: DesignProject | undefined = fallback ? await client.get(projectId, controller.signal) : (await client.watch(current, controller.signal)).project;
           if (!active()) break;
           if (request !== selection.current) continue;
           if (pending.current || loadingProject.current) continue;

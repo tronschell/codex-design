@@ -1,5 +1,5 @@
 import type { DesignNode, DesignPage, Viewport } from '../shared/types';
-import { parentLocalDelta, parentLocalPoint, visualBounds } from '../shared/effects';
+import { nodeIndex, parentLocalDelta, parentLocalPoint, visualBounds } from '../shared/effects';
 
 export const uid = () => crypto.randomUUID();
 export const clampZoom = (zoom: number) => Math.min(4, Math.max(0.05, zoom));
@@ -10,7 +10,8 @@ export function subtree(nodeId: string, nodes: DesignNode[]): DesignNode[] {
   return nodes.filter(node => ids.has(node.id));
 }
 export function selectionRoots(nodeIds: string[], nodes: DesignNode[]) {
-  const selected = new Set(nodeIds), byId = new Map(nodes.map(node => [node.id, node]));
+  const selected = new Set(nodeIds), byId = nodeIndex(nodes);
+  if (!selected.size) return [];
   return nodes.filter(node => {
     if (!selected.has(node.id)) return false;
     const seen = new Set<string>();
@@ -67,19 +68,33 @@ export function layoutFrameLabels(nodes: DesignNode[], zoom: number) {
     const box = visualBounds(node,nodes);
     return {node,left:box.x*zoom,top:box.y*zoom,width:box.width*zoom,height:box.height*zoom};
   });
-  const labels: { node: DesignNode; left: number; top: number; width: number; height: number }[] = [];
+  type Box = typeof roots[number];
+  const labels: Box[] = [];
+  // Obstacles are bucketed by horizontal span, so each frame tests only the columns it overlaps rather than every root
+  // and label (quadratic at hundreds of frames). Very wide obstacles stay in one list every frame checks.
+  const cell = 256, columns = new Map<number, Box[]>(), wide: Box[] = [];
+  const column = (x: number) => Math.floor(x / cell);
+  const add = (item: Box) => {
+    const first = column(item.left), last = column(item.left + item.width);
+    if (last - first > 64) { wide.push(item); return; }
+    for (let index = first; index <= last; index++) { const list = columns.get(index); if (list) list.push(item); else columns.set(index, [item]); }
+  };
+  roots.forEach(add);
   const frames = roots.filter(item => item.node.type === 'frame').sort((a, b) => a.top - b.top || a.left - b.left || a.node.id.localeCompare(b.node.id));
   for (const frame of frames) {
     if (frame.width < 48) continue;
     const bottom = frame.top - 1;
     let top = frame.top - 28;
-    // Chrome occupies only clear space above its frame, even when zoom makes gutters tiny.
-    for (const obstacles of [roots, labels]) for (const obstacle of obstacles) {
-      if (obstacle.node.id === frame.node.id || obstacle.left >= frame.left + frame.width || obstacle.left + obstacle.width <= frame.left) continue;
+    // Chrome occupies only clear space above its frame, even when zoom makes gutters tiny. The result is the highest
+    // overlapping obstacle edge, so visiting an obstacle twice or in another order does not change it.
+    const test = (obstacle: Box) => {
+      if (obstacle.node.id === frame.node.id || obstacle.left >= frame.left + frame.width || obstacle.left + obstacle.width <= frame.left) return;
       if (obstacle.top < bottom && obstacle.top + obstacle.height > top) top = Math.max(top, obstacle.top + obstacle.height + 1);
-    }
+    };
+    wide.forEach(test);
+    for (let index = column(frame.left), last = column(frame.left + frame.width); index <= last; index++) columns.get(index)?.forEach(test);
     const height = Math.min(22, bottom - top);
-    if (height >= 16) labels.push({ node: frame.node, left: frame.left, top, width: frame.width, height });
+    if (height >= 16) { const label = { node: frame.node, left: frame.left, top, width: frame.width, height }; labels.push(label); add(label); }
   }
   return labels;
 }

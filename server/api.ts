@@ -1,6 +1,6 @@
 import { json, Router, type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
-import { assetRefSchema, beginAssetUploadSchema, cancelAssetUploadSchema, createProjectSchema, libraryVersionRequestSchema, MAX_INPUT_BYTES, mutateProjectSchema, readAssetChunkSchema, restoreLibraryVersionSchema, restoreProjectVersionSchema, revisionSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
+import { assetRefSchema, beginAssetUploadSchema, cancelAssetUploadSchema, createProjectSchema, libraryVersionRequestSchema, MAX_DOCUMENT_BYTES, MAX_INPUT_BYTES, documentLimitLabel, mutateProjectSchema, readAssetChunkSchema, restoreLibraryVersionSchema, restoreProjectVersionSchema, revisionSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
 import { ProjectStore, StoreError } from './store.ts';
 
 function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, any>, input: unknown): T {
@@ -11,6 +11,11 @@ function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, any>, input: unknown): T {
 
 export function createApiRouter(store: ProjectStore): Router {
   const router = Router();
+  // A whole-document import gets the document limit; every other request keeps the smaller transaction limit.
+  router.post('/projects/import', json({ limit: MAX_DOCUMENT_BYTES + 64 * 1024 }), async (request, response) => {
+    const { project } = parse(z.object({ project: z.unknown() }).strict(), request.body);
+    response.status(201).json(await store.importProject(project));
+  });
   router.use(json({ limit: MAX_INPUT_BYTES }));
 
   router.get('/health', (_request, response) => { response.json({ ok: true }); });
@@ -42,10 +47,6 @@ export function createApiRouter(store: ProjectStore): Router {
     const input = parse(createProjectSchema, request.body);
     response.status(201).json(await store.create(input.name, input.template));
   });
-  router.post('/projects/import', async (request, response) => {
-    const { project } = parse(z.object({ project: z.unknown() }).strict(), request.body);
-    response.status(201).json(await store.importProject(project));
-  });
   router.get('/projects/:id', async (request, response) => { response.json(await store.get(request.params.id)); });
   router.get('/projects/:id/changes', async (request, response) => {
     const afterRevision = parse(z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).pipe(revisionSchema), request.query.afterRevision);
@@ -54,7 +55,8 @@ export function createApiRouter(store: ProjectStore): Router {
     response.on('close', close);
     try {
       const project = await store.waitForChange(request.params.id, afterRevision, controller.signal);
-      if (!response.destroyed) response.json({ projectId: request.params.id, revision: project?.revision ?? afterRevision, changed: !!project, ...(project ? { project } : {}) });
+      const delta = project && request.query.delta === '1' ? await store.projectDelta(project, afterRevision) : undefined;
+      if (!response.destroyed) response.json({ projectId: request.params.id, revision: project?.revision ?? afterRevision, changed: !!project, ...(delta ? { delta } : project ? { project } : {}) });
     } catch (error) { if (!controller.signal.aborted) throw error; }
     finally { response.off('close', close); }
   });
@@ -82,7 +84,11 @@ export function createApiRouter(store: ProjectStore): Router {
   });
   router.post('/projects/:id/operations', async (request, response) => {
     const { expectedRevision, operations } = parse(mutateProjectSchema, request.body);
-    response.json(await store.mutate(request.params.id, expectedRevision, operations));
+    const project = await store.mutate(request.params.id, expectedRevision, operations);
+    // ?delta=1 callers hold expectedRevision, so unchanged pages travel as id references.
+    if (request.query.delta !== '1') { response.json(project); return; }
+    const delta = await store.projectDelta(project, expectedRevision);
+    response.json(delta ? { delta } : { project });
   });
 
   router.get('/events', async (_request, response) => {
@@ -125,14 +131,14 @@ export function createApiRouter(store: ProjectStore): Router {
     });
   });
 
-  const errors: ErrorRequestHandler = (error, _request, response, next) => {
+  const errors: ErrorRequestHandler = (error, request, response, next) => {
     if (response.headersSent) { next(error); return; }
     if (error instanceof StoreError) {
       response.status(error.status).json({ error: { code: error.code, message: error.message, ...(error.details === undefined ? {} : { details: error.details }) } });
       return;
     }
     if (error?.type === 'entity.too.large') {
-      response.status(413).json({ error: { code: 'input_too_large', message: 'Request exceeds the 2 MiB limit' } });
+      response.status(413).json({ error: { code: 'input_too_large', message: request.path === '/projects/import' ? `Project exceeds the ${documentLimitLabel} limit` : 'Request exceeds the 2 MiB limit' } });
       return;
     }
     if (error instanceof SyntaxError && 'body' in error) {

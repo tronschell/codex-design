@@ -3,7 +3,8 @@ import { lstat, mkdir, open, readFile, readdir, rename, rm } from 'node:fs/promi
 import path from 'node:path';
 import { z } from 'zod';
 import type { DesignProject, LibraryScope, ProjectVersion, ProjectVersionSummary } from '../shared/types.ts';
-import { MAX_INPUT_BYTES, projectSchema, projectVersionSummarySchema, revisionSchema } from '../shared/validation.ts';
+import type { ProjectDelta } from '../shared/project-delta.ts';
+import { MAX_DOCUMENT_BYTES, documentLimitLabel, projectSchema, projectVersionSummarySchema, revisionSchema } from '../shared/validation.ts';
 
 export class StoreError extends Error {
   constructor(public status: number, public code: string, message: string, public details?: unknown) {
@@ -16,16 +17,17 @@ const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'E
 const hash = (json: string) => createHash('sha256').update(json).digest('hex');
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const manifestSchema = z.object({ format: z.union([z.literal(1), z.literal(2)]), firstRevision: revisionSchema }).strict();
-// Format 1 records hash a complete project.json; format 2 records hash snapshot.json and the reassembled project.
+// Format 1 records hash a complete project.json; format 2 records hash snapshot.json, whose blobs are named by their own hashes.
+// Early format 2 records also hashed the reassembled project; that redundant check still runs when present.
 const recordSchema = z.union([
   z.object({ version: projectVersionSummarySchema, hash: hashSchema }).strict(),
-  z.object({ format: z.literal(2), version: projectVersionSummarySchema, hash: hashSchema, projectHash: hashSchema }).strict(),
+  z.object({ format: z.literal(2), version: projectVersionSummarySchema, hash: hashSchema, projectHash: hashSchema.optional() }).strict(),
 ]);
 const snapshotSchema = z.object({ format: z.literal(2), parts: z.array(z.object({ key: z.string().min(1).max(100), value: z.unknown().optional(), blob: hashSchema.optional(), pages: z.array(hashSchema).optional() }).strict()) }).strict();
 type Snapshot = z.infer<typeof snapshotSchema>;
 const pendingSchema = z.object({ previousRevision: revisionSchema, revision: revisionSchema, hash: hashSchema }).strict().refine((value) => value.revision === value.previousRevision + 1, 'Invalid pending revision');
 const corrupt = (message: string) => new StoreError(500, 'corrupt_history', message);
-const snapshotLimit = MAX_INPUT_BYTES + 64 * 1024; // Legacy board normalization can enrich an already-full saved document.
+const snapshotLimit = MAX_DOCUMENT_BYTES + 64 * 1024; // Legacy board normalization can enrich an already-full saved document.
 
 async function syncDirectory(directory: string) {
   const handle = await open(directory, 'r');
@@ -60,23 +62,32 @@ async function readBounded(filename: string, limit: number): Promise<string> {
 // Pages, the design system and threads are stored once by content hash, so a save writes only the parts it changed.
 // The full project JSON is assembled from the same fragments, giving one serialization per saved revision.
 const blobKeys = new Set(['designSystem', 'threads']);
-interface EncodedProject { json: string; projectHash: string; snapshot: string; snapshotHash: string; blobs: Map<string, string> }
+// Saved project objects are never mutated (edits apply to a clone and unchanged parts are reused by identity),
+// so a page, design system or thread list keeps its serialized form and hash across saves.
+const fragmentCache = new WeakMap<object, { json: string; key: string }>();
+function fragment(value: object) {
+  let cached = fragmentCache.get(value);
+  if (!cached) { const json = JSON.stringify(value); cached = { json, key: hash(json) }; fragmentCache.set(value, cached); }
+  return cached;
+}
+interface EncodedProject { json: string; snapshot: string; snapshotHash: string; blobs: Map<string, string> }
 function encodeProject(project: DesignProject): EncodedProject {
   const fragments: string[] = [], parts: Snapshot['parts'] = [], blobs = new Map<string, string>();
-  const blob = (json: string) => { const key = hash(json); blobs.set(key, json); return key; };
+  const blob = (value: object) => { const { json, key } = fragment(value); blobs.set(key, json); return { json, key }; };
   for (const [key, value] of Object.entries(project)) {
     if (value === undefined) continue;
     if (key === 'pages') {
-      const pages = (value as DesignProject['pages']).map(page => JSON.stringify(page));
-      fragments.push(`"pages":[${pages.join(',')}]`); parts.push({ key, pages: pages.map(blob) });
+      const pages = (value as DesignProject['pages']).map(blob);
+      fragments.push(`"pages":[${pages.map(page => page.json).join(',')}]`); parts.push({ key, pages: pages.map(page => page.key) });
+    } else if (blobKeys.has(key)) {
+      const stored = blob(value);
+      fragments.push(`${JSON.stringify(key)}:${stored.json}`); parts.push({ key, blob: stored.key });
     } else {
-      const json = JSON.stringify(value);
-      fragments.push(`${JSON.stringify(key)}:${json}`);
-      parts.push(blobKeys.has(key) ? { key, blob: blob(json) } : { key, value });
+      fragments.push(`${JSON.stringify(key)}:${JSON.stringify(value)}`); parts.push({ key, value });
     }
   }
-  const json = `{${fragments.join(',')}}`, snapshot = JSON.stringify({ format: 2, parts });
-  return { json, projectHash: hash(json), snapshot, snapshotHash: hash(snapshot), blobs };
+  const snapshot = JSON.stringify({ format: 2, parts });
+  return { json: `{${fragments.join(',')}}`, snapshot, snapshotHash: hash(snapshot), blobs };
 }
 
 async function readMetadata<T>(filename: string, schema: z.ZodType<T, z.ZodTypeDef, any>, limit = 8192): Promise<T> {
@@ -93,12 +104,12 @@ export class ProjectHistory {
   private readonly root: string;
   constructor(private readonly dataDir: string) { this.root = path.join(dataDir, 'history'); }
 
-  // Hashes of committed project objects; the store passes its cached copy back as the next save's previous project.
+  // Snapshot hashes of committed project objects; the store passes its cached copy back as the next save's previous project.
   private readonly committed = new WeakMap<DesignProject, string>();
 
   async save(project: DesignProject, label: string, previous?: DesignProject, restoredFrom?: number, library?: ProjectVersionSummary['library']): Promise<void> {
     const encoded = encodeProject(project), json = encoded.json;
-    if (Buffer.byteLength(json) > MAX_INPUT_BYTES) throw new StoreError(413, 'input_too_large', 'Project exceeds the 2 MiB limit');
+    if (Buffer.byteLength(json) > MAX_DOCUMENT_BYTES) throw new StoreError(413, 'input_too_large', `Project exceeds the ${documentLimitLabel} limit`);
     const version = projectVersionSummarySchema.parse({ revision: project.revision, createdAt: project.updatedAt, label: label.slice(0, 500), ...(restoredFrom === undefined ? {} : { restoredFrom }), ...(library ? { library } : {}) });
     if (!previous) {
       await this.initialize(project, version, encoded);
@@ -122,7 +133,7 @@ export class ProjectHistory {
       await rm(path.join(this.directory(project.id), 'pending.json'));
       await syncDirectory(this.directory(project.id));
     }
-    this.committed.set(project, encoded.projectHash);
+    this.committed.set(project, encoded.snapshotHash);
   }
 
   async list(project: DesignProject): Promise<ProjectVersionSummary[]> {
@@ -138,6 +149,23 @@ export class ProjectHistory {
       versions.push(record.version);
     }
     return versions.reverse();
+  }
+
+  /** The project relative to a revision the caller holds, or undefined when that revision predates content-addressed history. */
+  async delta(project: DesignProject, baseRevision: number): Promise<ProjectDelta | undefined> {
+    if (baseRevision >= project.revision) return undefined;
+    const record = await this.readRecord(project.id, baseRevision);
+    if (!('format' in record)) return undefined;
+    const snapshot = await this.readSnapshot(project.id, baseRevision, record.hash);
+    const held = new Set(snapshot.parts.flatMap(part => part.pages ?? (part.blob ? [part.blob] : [])));
+    const { pages, threads, designSystem, ...rest } = project;
+    return {
+      baseRevision,
+      project: {
+        ...rest, pages: pages.map(page => held.has(fragment(page).key) ? { id: page.id, unchanged: true as const } : page),
+        ...(held.has(fragment(threads).key) ? {} : { threads }), ...(held.has(fragment(designSystem).key) ? {} : { designSystem }),
+      },
+    };
   }
 
   async get(project: DesignProject, revision: number): Promise<ProjectVersion> {
@@ -188,7 +216,7 @@ export class ProjectHistory {
     await mkdir(temporary, { mode: 0o700 });
     try {
       await writeFileSynced(path.join(temporary, 'snapshot.json'), encoded.snapshot);
-      await writeFileSynced(path.join(temporary, 'version.json'), JSON.stringify({ format: 2, version, hash: encoded.snapshotHash, projectHash: encoded.projectHash }));
+      await writeFileSynced(path.join(temporary, 'version.json'), JSON.stringify({ format: 2, version, hash: encoded.snapshotHash }));
       await syncDirectory(temporary);
       await rename(temporary, path.join(directory, String(revision)));
       await syncDirectory(directory);
@@ -246,7 +274,8 @@ export class ProjectHistory {
     }
     // Compare hashes; read the snapshot back only when they differ, such as a legacy document normalized on read.
     const head = await this.readRecord(project.id, project.revision);
-    if ((this.committed.get(project) ?? hash(JSON.stringify(project))) !== ('format' in head ? head.projectHash : head.hash)) {
+    const current = 'format' in head ? this.committed.get(project) ?? encodeProject(project).snapshotHash : hash(JSON.stringify(project));
+    if (current !== head.hash) {
       const saved = await this.readVersion(project.id, project.revision);
       if (JSON.stringify(saved.project) !== JSON.stringify(project)) throw corrupt('The current project does not match its saved history snapshot.');
     }
@@ -285,22 +314,25 @@ export class ProjectHistory {
     return record;
   }
 
+  private async readSnapshot(projectId: string, revision: number, expectedHash: string): Promise<Snapshot> {
+    const stored = await readBounded(path.join(this.directory(projectId), String(revision), 'snapshot.json'), snapshotLimit);
+    if (hash(stored) !== expectedHash) throw corrupt(`Snapshot checksum failed for revision ${revision}.`);
+    try { const parsed = snapshotSchema.safeParse(JSON.parse(stored)); if (!parsed.success) throw new Error(); return parsed.data; }
+    catch { throw corrupt(`Snapshot for revision ${revision} has an invalid structure.`); }
+  }
+
   private async readVersion(projectId: string, revision: number): Promise<ProjectVersion> {
     const record = await this.readRecord(projectId, revision);
     let json: string;
     if ('format' in record) {
-      const stored = await readBounded(path.join(this.directory(projectId), String(revision), 'snapshot.json'), snapshotLimit);
-      if (hash(stored) !== record.hash) throw corrupt(`Snapshot checksum failed for revision ${revision}.`);
-      let snapshot: Snapshot;
-      try { const parsed = snapshotSchema.safeParse(JSON.parse(stored)); if (!parsed.success) throw new Error(); snapshot = parsed.data; }
-      catch { throw corrupt(`Snapshot for revision ${revision} has an invalid structure.`); }
+      const snapshot = await this.readSnapshot(projectId, revision, record.hash);
       const fragments: string[] = [];
       for (const part of snapshot.parts) {
         const value = part.pages ? `[${(await Promise.all(part.pages.map(key => this.readBlob(projectId, key)))).join(',')}]` : part.blob ? await this.readBlob(projectId, part.blob) : JSON.stringify(part.value);
         fragments.push(`${JSON.stringify(part.key)}:${value}`);
       }
       json = `{${fragments.join(',')}}`;
-      if (hash(json) !== record.projectHash) throw corrupt(`Snapshot checksum failed for revision ${revision}.`);
+      if (record.projectHash && hash(json) !== record.projectHash) throw corrupt(`Snapshot checksum failed for revision ${revision}.`);
     } else {
       json = await readBounded(path.join(this.directory(projectId), String(revision), 'project.json'), snapshotLimit);
       if (hash(json) !== record.hash) throw corrupt(`Snapshot checksum failed for revision ${revision}.`);

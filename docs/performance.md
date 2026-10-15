@@ -830,9 +830,9 @@ Workload: a generated 4,944-node single-page project (`exportPageHtml` and `expo
 
 Projects without states: output bytes are identical to the pre-change build (2,327,833 B HTML, 2,635,692 B React) and the three baseline runs (18.5–19.2 ms HTML, 18.6–20.4 ms React medians) bracket the post-change 17.8/18.5 ms, so no export cost is measured for existing designs.
 
-User effect: states cost nothing unless authored; a design with them downloads about 1% more source and gets real `:hover`, `:active` and `:focus-within` behaviour from plain CSS, with no script. Estimates, not measurements: the editor adds one `useMemo` that returns the existing node array while no state is previewed, and previewing maps the list once and re-renders only the selected layer, because unchanged `DesignNode` objects keep their memoized subtrees. Editor pan/zoom, selection latency and memory were not measured: the browser pane's `requestAnimationFrame` was suspended during this session, so the profiler captured no frames and that baseline was discarded. The production bundle was built (JS 3,415,360 B, CSS 107,152 B after) but not built before the change, so no size delta is claimed.
+User effect: states cost nothing unless authored; a design with them downloads about 1% more source and gets `:hover` and `:active` behaviour from plain CSS, with no script. (Correction, October 15: a later real-pointer review found pressed was masked by focus and focus never applied to unlinked layers; see the review fixes entry below.) Estimates, not measurements: the editor adds one `useMemo` that returns the existing node array while no state is previewed, and previewing maps the list once and re-renders only the selected layer, because unchanged `DesignNode` objects keep their memoized subtrees. Editor pan/zoom, selection latency and memory were not measured: the browser pane's `requestAnimationFrame` was suspended during this session, so the profiler captured no frames and that baseline was discarded. The production bundle was built (JS 3,415,360 B, CSS 107,152 B after) but not built before the change, so no size delta is claimed.
 
-Browser check: an exported demo page parsed the emitted rules and, with the pane's hover simulated by swapping `:hover`/`:active` for classes, computed background rgb(51,102,255) → rgb(255,138,76) with opacity 0.9 on hover and rgb(194,77,6) when pressed, confirming the `!important` rules beat the inline styles. The pane did not deliver real pointer hover, so native `:hover` matching and the Inspector's States section were not exercised in a browser; both compile (`tsc --noEmit`, `vite build`).
+Browser check: an exported demo page parsed the emitted rules and, with the pane's hover simulated by swapping `:hover`/`:active` for classes, computed background rgb(51,102,255) → rgb(255,138,76) with opacity 0.9 on hover and rgb(194,77,6) when pressed, confirming the `!important` rules beat the inline styles. This class-swap check is superseded by the real-pointer run in the review fixes entry below. The pane did not deliver real pointer hover, so native `:hover` matching and the Inspector's States section were not exercised in a browser; both compile (`tsc --noEmit`, `vite build`).
 
 ## Opt-in live code layers — October 14, 2026
 
@@ -845,9 +845,9 @@ Same 4,944-node workload, method and process as the states entry above (3 warmup
 | HTML export median | 17.8 ms (after-states run) | 17.4 and 18.0 ms | -0.4 / +0.2 ms | inside noise |
 | React export median | 18.5 ms | 18.4 and 18.5 ms | -0.1 / 0.0 ms | inside noise |
 
-Projects without live layers export identical bytes at the same speed. The editor path is unchanged for passive code layers: they render the same sandboxed iframe, and only layers marked `live` mount a small wrapper that subscribes by id to a single-frame store, so entering or leaving re-renders just that layer rather than the scene (design estimate, not profiled in a browser; the pane's `requestAnimationFrame` was suspended, so no editor timings exist). At most one scripted iframe runs, and leaving remounts it passive, which releases its timers and listeners. User effect: existing designs cost nothing extra; a live layer costs one running iframe only while it is being used.
+Projects without live layers export identical bytes at the same speed. The editor path is unchanged for passive code layers: they render the same sandboxed iframe, and only layers marked `live` mount a small wrapper that subscribes by id to a single-frame store, so entering or leaving re-renders just that layer rather than the scene (design estimate, not profiled in a browser; the pane's `requestAnimationFrame` was suspended, so no editor timings exist). At most one scripted iframe runs, and leaving remounts it with the passive document (whether that releases the old document's timers and listeners promptly is browser behaviour and was not measured). User effect: existing designs cost nothing extra; a live layer costs one running iframe only while it is being used.
 
-Exported page check: a generated page with one live and one passive layer, loaded in the browser pane, delivered exactly one message, from the live frame. Inside it, localStorage, `parent.document`, `document.cookie` and a `fetch` to a same-machine URL were all blocked; the passive frame ran nothing. A React export carried `sandbox="allow-scripts"`, the `cd-live` class and its CSS rule. The editor's double-click/Esc flow compiles (`tsc --noEmit`, `vite build`) but was not exercised in a browser because the pane would not render the canvas, and a script can still burn CPU or navigate its own frame; no CPU limit is claimed.
+Exported page check: a generated page with one live and one passive layer, loaded in the browser pane, delivered exactly one message, from the live frame. Inside it, localStorage, `parent.document`, `document.cookie` and a `fetch` to a same-machine URL were all blocked (correction, October 15: self-navigation and WebRTC still reached the network; see the review fixes entry below); the passive frame ran nothing. A React export carried `sandbox="allow-scripts"`, the `cd-live` class and its CSS rule. The editor's double-click/Esc flow compiles (`tsc --noEmit`, `vite build`) but was not exercised in a browser because the pane would not render the canvas, and a script can still burn CPU or navigate its own frame; no CPU limit is claimed.
 
 ## Live-layer activation scope correction — October 14, 2026
 
@@ -969,3 +969,143 @@ Artifact method: compare the existing clean packaged 82d4615 build with the comp
 | Widget · gzip level 9 | 981,157 B | 981,304 B | +147 B | +0.01498% |
 
 The user's practical benefit is preserving their current canvas and history preview when earlier creation work finishes. Bundle size is an artifact measurement, not a measured download/load-time change. Artifact hashes and comparisons are in /private/tmp/codex-creation-navigation-review/.
+
+## States and live-layer review fixes — October 15, 2026
+
+Correctness and safety fixes from an independent review of the two entries above; no speedup is claimed. The changes: state colours accept only safe colour values, and every inline CSS string escapes `; { } < >`. State rules are emitted in focus → hover → pressed order, with focus as `:has(:focus-visible)`. Children of a linked layer follow that layer's hover. A border added only in a state becomes an inset outline. Hidden layers emit no state rules. Live documents load a prelude that removes the WebRTC constructors and owns Esc. A second frame load (self-navigation) resets the frame to its passive document. HTML exports run live layers only after a click on Run. The canvas map never runs scripts. Inert state keys, empty states and stray `live` flags are normalised on every write path.
+
+Real-pointer check: headless Chrome driven over the DevTools protocol with real mouse and keyboard events on an exported page (file URL), plus a UDP listener and an HTTP server on 127.0.0.1.
+
+| Check | Result |
+| --- | --- |
+| Button base → hover → pressed → released → left | rgb(51,102,255) → rgb(255,138,76) → rgb(194,77,6) → rgb(255,138,76) → rgb(51,102,255); pressed now wins and focus does not stick after a click |
+| Keyboard focus (Tab) on that button | rgb(255,255,255) |
+| Child text of a linked card, card hovered / not hovered | rgb(255,0,0) / rgb(255,255,255) |
+| Child position when a state-only border appears | unchanged (600,0 20×20); outline 1px, offset −1px |
+| Live layer before Run | no messages, empty sandbox |
+| After Run | script ran; `RTCPeerConnection` and `webkitRTCPeerConnection` both blocked; 0 UDP packets; its `location.href` navigation reset the frame to the passive document with the Run button restored; 0 requests reached the HTTP server |
+| Canvas map | no `allow-scripts`, `script-src` or Run button |
+| Schema | `red}body{…}x{` and `var(--x)` rejected as state fills; hex, rgba and `transparent` accepted |
+
+The 0 HTTP requests is specific to a file-URL page; whether a served page's frame can complete one navigation request before the reset was not measured, so the docs say navigation is reset, not prevented.
+
+Export cost (same 4,944-node workload and benchmark as the states entry; 3 warmups and 12 samples, reporting medians): output bytes are unchanged at 2,327,833 B HTML / 2,635,692 B React without states, and 2,364,159 B / 2,658,664 B with 238 stateful layers (0 B, 0%). The escaping touches no value in this design. Medians this run were 19.7/20.1 ms without states and 21.3/21.1 ms with them. HEAD has moved several commits since the 17.8/18.5 ms baseline and no back-to-back pre-fix run was taken, so no timing change is claimed. `tsc --noEmit` and `vite build` pass. The editor's double-click, Esc and navigation-reset flow, and the Inspector's Focus gating, compile but were not exercised in a browser. No tests were added or run.
+
+## Incremental save validation — October 15, 2026
+
+Phase 2 of the corporate-scale plan. Same `ProjectStore.mutate` benchmark as the content-addressed history entry: scratch data, 20 sequential `update_node` saves of the first root frame, median and p90 over saves 3–20, two runs per side, HEAD vs working tree in the same order. The document cap was raised to 32 MiB for both sides only so the 48× workload could load. Node.js 24.19.0, macOS arm64.
+
+| Workload | Measurement | Before | After | Absolute change | Percentage change |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 12×, 12 pages (1.69 MB, 4,944 nodes) | Save median | 83.2 / 84.1 ms | 57.8 / 57.9 ms | −25.8 ms | −30.9% |
+| | CPU per save | 49.8 / 50.5 ms | 21.3 / 22.3 ms | −28.4 ms | −56.5% |
+| | List versions | 17.4 / 13.1 ms | 4.3 / 4.6 ms | −10.8 ms | −70.8% |
+| 48×, 48 pages (6.78 MB, 19,776 nodes) | Save median | 196.0 / 196.8 ms | 89.0 / 90.9 ms | −106.5 ms | −54.2% |
+| | CPU per save | 168.8 / 170.9 ms | 55.0 / 57.2 ms | −113.8 ms | −67.0% |
+| | clone + apply + validate | 113.2 / 115.1 ms | 29.4 / 31.8 ms | −83.6 ms | −73.2% |
+| | List versions | 40.8 / 41.6 ms | 3.7 / 3.0 ms | −37.9 ms | −92.0% |
+
+Changes: `validateProjectUpdate` re-validates only the nodes, pages, threads and components whose JSON changed, reusing earlier results by structural equality (`sameJson`), while project-wide invariants still run on every save and two of them are no longer quadratic. The history encoder reuses the stored JSON and hash of unchanged pages instead of hashing the whole project. Request size and saved-document size are separate limits. A scratch check ran 24 valid and invalid edits through both the incremental and the full validator and got the same outcome, including the same errors, every time.
+
+User effect: on a 48-page project an edit is durable in about 90 ms instead of about 196 ms of server time; most of what remains is fsync, not CPU. History listing is effectively instant. Raw output: `artifacts/save-pipeline-phase2.txt`.
+
+## Delta editor sync and compact MCP acknowledgements — October 15, 2026
+
+Phase 3. Workload: the same scratch projects, driven in-process through the embedded MCP server (`canvas_edit_project` with one node move, then `canvas_watch_project` for the next revision), with the editor's merge (`applyProjectDelta` plus `share`) timed separately. Two runs per side, HEAD vs working tree; the table shows run 1 / run 2.
+
+| Workload | Measurement | Before | After | Absolute change | Percentage change |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 48×, 48 pages | Edit round trip | 1,193.1 / 1,187.7 ms | 81.8 / 81.9 ms | −1,108.6 ms | −93.1% |
+| | Edit CPU | 1,361.3 / 1,386.2 ms | 47.7 / 47.3 ms | −1,326.3 ms | −96.5% |
+| | SDK output validation | 1,012.7 / 1,013.9 ms | 0.2 / 0.2 ms | −1,013.1 ms | −99.98% |
+| | Edit response | 5,980.7 KB | 126.2 KB | −5,854.5 KB | −97.9% |
+| | Editor parse + merge | 93.9 / 95.7 ms | 3.9 / 4.0 ms | −90.9 ms | −95.8% |
+| | Watch update | 1,060.8 / 1,018.5 ms, 5,980.7 KB | 1.1 / 1.2 ms, 126.2 KB | −1,038.5 ms | −99.9% |
+| 12×, 12 pages | Edit round trip | 224.9 / 230.2 ms | 56.3 / 56.2 ms | −171.3 ms | −75.3% |
+| | Edit response | 1,490 KB | 125 KB | −1,365 KB | −91.6% |
+
+Changes: tools that return a project declare a shallow passthrough output schema, so the MCP SDK no longer re-validates the full document on every call (the largest single cost). Edits and watches can return a delta containing only the changed pages, which the editor merges into its existing copy; a stale base revision falls back to a full read. `canvas_edit_project` returns a compact acknowledgement unless `includeProject: true`, and `canvas_get_project` accepts `boardScope` to read one board. The benchmark confirmed the merged editor copy is identical to the saved project. `docs/mcp.md`, the skill and the server instructions describe the new defaults.
+
+User effect: an agent edit on a 48-page project round-trips in about 82 ms instead of about 1.2 s, and the open editor picks it up in about 5 ms instead of about 1.1 s, with 98% less data per update. Not done: on-demand board loading (a partial document cannot pass the project-wide checks), and `canvas_open_canvas` still sends the whole project because the widget needs it at launch. Raw output: `artifacts/mcp-sync-phase3-before.txt`, `artifacts/mcp-sync-phase3-after.txt`.
+
+## Corporate-scale limits and page-scoped working copies — October 15, 2026
+
+Phase 4. Limits are now: 2 MiB per request or transaction; 32 MiB per saved document, import or history snapshot; 500 boards, 500 pages, 25,000 nodes per page, 100,000 nodes per project, 5,000 native components and 20,000 conversations. Component nodes stay at 5,000 and a transaction at 2,000 operations.
+
+`mutate` now deep-copies only the pages a page-scoped transaction (`create_node`, `update_node`, `delete_node`, `snap_node`) touches and shares every other page by reference; any other operation still clones the whole project. A scratch check deep-froze the cached project before a save: nothing was mutated and untouched pages kept their identity. Same save benchmark, the working tree with the new limits before and after this change, two runs each (run 1 / run 2).
+
+| Workload | Measurement | Full clone | Page-scoped copy | Absolute change | Percentage change |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 120×, 120 pages (16.98 MB, 49,440 nodes) | Save median | 164.2 / 169.7 ms | 99.2 / 101.1 ms | −66.8 ms | −40.0% |
+| | CPU per save | 138.7 / 145.9 ms | 61.0 / 63.7 ms | −80.0 ms | −56.2% |
+| | clone + apply + validate | 71.1 / 77.9 ms | 13.7 / 14.5 ms | −60.4 ms | −81.1% |
+| 48×, 48 pages | Save median | 89.0 / 89.0 ms | 66.9 / 68.1 ms | −21.5 ms | −24.2% |
+| | CPU per save | 55.7 / 55.1 ms | 31.0 / 31.5 ms | −24.2 ms | −43.6% |
+
+At 120 pages, `history.save` (writing the 17 MB working file and fsync) is about 86 ms of the remaining save. The JS heap after GC is about 102 MB either way. RSS high-water marks were 1.1–1.8 GB with full clones and about 0.5 GB with page-scoped copies, but RSS depends on GC timing and these figures are noisy, so no exact memory saving is claimed. The MCP path on the same build: 48× edit 64.3–64.5 ms (81.8 ms after phase 3), and 120× edit 91.4–92.6 ms with 56–57 ms CPU, a 128.6 KB response, 9.2–9.5 ms editor merge and a 1.4–1.6 ms watch.
+
+User effect: a 120-page, 49,000-node project, which the old 2 MiB cap rejected outright, now saves in about 100 ms of server time and syncs to an open editor in under 100 ms. Raw output: `artifacts/save-limits-phase4-fullclone.txt`, `artifacts/save-limits-phase4-pagecopy.txt`, `artifacts/mcp-sync-phase4.txt`.
+
+## Windowed layers panel, drag preview and history diff — October 15, 2026
+
+Phase 5. Workload: one page holding 48 GaugeReel copies (19,776 nodes, 768 root frames, 912 root layer rows, 7.1 MB) in scratch data; Vite dev server with React development Strict Mode and `?profile=1`; built-in browser at an emulated 1280 × 800; `requestAnimationFrame` mapped to a MessageChannel macrotask. A step is dispatch, two macrotasks, then a forced layout, so these are main-thread work per step, not frame rates. Before means the HEAD versions of `src/App.tsx`, `src/Inspector.tsx` and `src/editor-utils.ts` swapped into the same tree on freshly regenerated data. With the inspector open, before shows two runs and after shows one.
+
+| Inspector open | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Drag: mean step | 78.5 / 74.9 ms | 36.2 ms | −40.5 ms | −52.8% |
+| Drag: p95 step | 166 / 178 ms | 66 ms | −106 ms | −61.6% |
+| Drag: layer-row renders, 60 moves | 113,088 | 96 | −112,992 | −99.9% |
+| Drop to saved | 697 / 703 ms | 484 ms | −216 ms | −30.9% |
+| Clear selection (Esc) | 215 / 207 ms | 74.5 ms | −136.5 ms | −64.7% |
+| Open inspector | 338 / 336 ms | 87 ms | −250 ms | −74.2% |
+| Filter layers | 284 / 268 ms | 60 ms | −216 ms | −78.3% |
+| Clear filter | 157 / 151 ms | 73 ms | −81 ms | −52.6% |
+| Select the 10th layer row | 110.9 ms | 104.1 ms | −6.8 ms | −6.1% (within noise) |
+| Scroll layers, 100 px steps | 8.6 ms | 14.3 ms | +5.7 ms | +66% (regression) |
+| Scroll layers, 300 px steps | 15.2 ms | 27.9 ms | +12.7 ms | +84% (regression) |
+| DOM elements | 33,832 | 24,037 | −9,795 | −29.0% |
+
+| Inspector closed | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Drag: mean step | 35.74 ms | 26.97 ms | −8.77 ms | −24.5% |
+| Drag: p95 step | 61.9 ms | 52.1 ms | −9.8 ms | −15.8% |
+| Drag: React render, 60 moves | 1,234.5 ms | 756.6 ms | −477.9 ms | −38.7% |
+| Zoom: mean step | 30.08 ms | 29.55 ms | −0.53 ms | −1.8% (no change) |
+| Zoom: React render, 40 steps | 640.1 ms | 448.9 ms | −191.2 ms | −29.9% |
+| Pan: mean step | 13.57 ms | 13.85 ms | +0.28 ms | +2.1% (no change) |
+| Drop to saved | 465.2 ms | 484.2 ms | +19.0 ms | +4.1% (single network-bound run) |
+
+Changes:
+
+- **Windowed layer tree.** `LayerTree` is a memoized component that renders fixed 22 px rows in 20-row chunks around the scroll position; selection and the Inspector's callbacks reach it through a ref, so canvas drags no longer re-render it. Revealing the selection scrolls by row index.
+- **Drag preview reuses unchanged nodes.** When every patch only moves x/y and the parent is not a stack, the preview copies the base node array and replaces just the moved entries instead of re-resolving 19,776 nodes. Other gestures use the previous path. With the drag fast path alone, the mean step was 29.55 ms.
+- **Frame-label layout uses column buckets.** `layoutFrameLabels` checks collisions only against labels in the same 256 px screen column (wide labels in a separate list): 6.27 → 1.80 ms per call at 768 frames in Node, with 0 mismatches over 16 cases (the real page plus 600 random frames at 8 zooms).
+- **History diff compares raw pages.** `versionChanges` resolves tokens only for the page it shows when the design-system tokens are unchanged: 19.5 → 3.3 ms at 48 pages and 48.1 → 6.9 ms at 120 pages (2,000 threads), with 0 mismatches over 6 edit types (node moved, node removed, thread reply, token value, no change, page added).
+
+User effect: with the layers panel open on a corporate-scale page, dragging does about half the main-thread work per move, and opening, filtering and clearing the selection take a quarter to a third of the time they did. Known regression: scrolling the layer list does more work per scroll step (14–28 ms vs 9–15 ms), because each 20-row chunk boundary re-renders the window; the list now holds about 60 rows instead of all 912, so the trade was accepted, but it is not yet fixed. Zoom and pan wall time did not change. Raw output: `artifacts/canvas-phase5-layers-before.json`, `artifacts/canvas-phase5-layers-after.json`, `artifacts/canvas-phase5-drag.json`, `artifacts/version-changes-phase5.txt`.
+
+## Selection and drag-start work — October 15, 2026
+
+Same 48× page, dev server, viewport and step definition as the phase 5 entry. Before and after swapped `src/App.tsx`, `src/Inspector.tsx`, `src/editor-utils.ts`, `src/DesignNode.tsx`, `shared/effects.ts` and `shared/snapping.ts` (before = this session's working tree without these changes) and reloaded the page. Medians of 7 trials for selection and 4 drags for drag start; after shows two runs.
+
+| Measurement | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Click-select a frame, inspector closed | 55.2 ms | 45.1 / 47.4 ms | −8.9 ms | −16.1% |
+| Esc, inspector closed | 36.6 ms | 27.3 / 30.2 ms | −7.9 ms | −21.6% |
+| Click-select a frame, inspector open | 96.9 ms | 84.5 / 86.7 ms | −11.3 ms | −11.7% |
+| Select a layer row | 93.2 ms | 79.5 / 76.8 ms | −15.0 ms | −16.1% |
+| Pointer-down on a frame (drag start) | 56.4 ms | 47.9 / 45.3 ms | −9.8 ms | −17.4% |
+| Later drag moves, mean | 26.21 ms | 22.76 / 23.03 ms | −3.32 ms | −12.7% |
+| First drag move | 47.3 ms | 45.3 / 48.4 ms | −0.45 ms | −1.0% (no change) |
+
+Changes, found with Chrome's JS Self-Profiling API through a scratch proxy that added the `Document-Policy: js-profiling` header:
+
+- The Inspector's state-link check reused the existing layer index instead of rebuilding an id map and child map over every node on each selection.
+- `shared/effects.ts` exports its per-array `nodeIndex` cache. `selectionRoots`, the App's `nodeById`, the canvas child index and `createSnapScene` use it instead of building their own id maps.
+- Snap candidates are built on a gesture's first move instead of on every pointer-down, so a plain click no longer pays for them. `createSnapScene` decides whether a node can snap (parent, sibling or root) before walking its ancestors for visibility. That cut it from 4.6 to 1.5 ms per call on 19,776 nodes, with 0 mismatches over 27 cases including hidden nodes and multi-node drags. That timing has the cached index warm, as it is in the editor.
+
+Correctness fix: the windowed layer tree from phase 5 measured the list's offset with `offsetTop`, which is relative to `.inspector` (60 px), not to the scroller (2 px). Selecting a layer above the current scroll position left its row hidden 58 px above the list in 4 of 7 checks; 7 of 7 are visible now. The reveal uses the fixed row geometry and a tracked scroll position instead of reading layout. It measured 12–13 ms per selection, but that is forced layout that would otherwise run at frame time, so no speedup is claimed for it.
+
+User effect: clicking, deselecting and starting a drag on a 20,000-node page take 8–15 ms less main-thread work each (12–22%), and every drag move takes about 3 ms less. What remains with the inspector closed is mostly React development-mode overhead and browser rendering; only about 9 ms per click is application script. Production-build interaction timings, paint, frame rate and memory were not measured. Raw output: `artifacts/selection-phase6.json`, `artifacts/snap-scene-phase6.txt`.
+
+`npm run typecheck` and `npm run build` pass for this entry and for the phase 2–5 entries above (the build keeps its existing large-chunk warning). No tests, dependencies or fixtures were added or run.

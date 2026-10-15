@@ -53,8 +53,8 @@ const multiply = (a: Matrix, b: Matrix): Matrix => [
 ];
 const transformsFor = (node: DesignNode) => (node.effects ?? []).filter((effect): effect is TransformEffect => effect.type === 'transform' && effect.enabled !== false);
 const nodeIndexes = new WeakMap<DesignNode[], Map<string, DesignNode>>();
-function parentNode(nodes: DesignNode[], id: string | null) {
-  if (!id) return undefined;
+/** Id lookup for a node array, cached per array; callers must treat the array as a snapshot. */
+export function nodeIndex(nodes: DesignNode[]): Map<string, DesignNode> {
   let byId = nodeIndexes.get(nodes);
   if (!byId) {
     // Resolved arrays are snapshots; cache lookups, while geometry still reads current node values.
@@ -62,7 +62,10 @@ function parentNode(nodes: DesignNode[], id: string | null) {
     for (const node of nodes) byId.set(node.id, node);
     nodeIndexes.set(nodes, byId);
   }
-  return byId.get(id);
+  return byId;
+}
+function parentNode(nodes: DesignNode[], id: string | null) {
+  return id ? nodeIndex(nodes).get(id) : undefined;
 }
 function ancestors(node: DesignNode, nodes: DesignNode[]): DesignNode[] {
   const result: DesignNode[] = [], seen = new Set<string>();

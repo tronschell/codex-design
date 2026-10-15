@@ -1,5 +1,5 @@
 import type { DesignNode } from './types.js';
-import { nodeInnerSize, nodePadding, visualBounds } from './effects.js';
+import { nodeIndex, nodeInnerSize, nodePadding, visualBounds } from './effects.js';
 
 export interface SnapBox { x: number; y: number; width: number; height: number }
 export interface SnapGuide { axis: 'x' | 'y'; position: number; start: number; end: number }
@@ -7,7 +7,7 @@ interface SnapCandidate { position: number; start: number; end: number; priority
 export interface SnapScene { x: SnapCandidate[]; y: SnapCandidate[] }
 
 export function createSnapScene(nodes: DesignNode[], node: DesignNode, moving: DesignNode[] = [node]): SnapScene {
-  const scene: SnapScene = { x: [], y: [] }, byId = new Map(nodes.map(item => [item.id, item]));
+  const scene: SnapScene = { x: [], y: [] }, byId = nodeIndex(nodes);
   const children = new Map<string, DesignNode[]>();
   for (const item of nodes) if (item.parentId) { const siblings = children.get(item.parentId); if (siblings) siblings.push(item); else children.set(item.parentId, [item]); }
   const excluded = new Set<string>(), pending = [...moving];
@@ -35,13 +35,14 @@ export function createSnapScene(nodes: DesignNode[], node: DesignNode, moving: D
     for (const position of [box.y, box.y + box.height / 2, box.y + box.height]) scene.y.push({ position, start: box.x, end: box.x + box.width, priority, id });
   };
   for (const target of nodes) {
-    if (excluded.has(target.id) || hidden(target) || (ancestors.has(target.id) && target.id !== node.parentId)) continue;
-    if (target.id === node.parentId) {
+    // Only the parent, siblings and root frames snap, so classify before walking ancestors for visibility.
+    const priority = target.id === node.parentId ? 0 : target.parentId === node.parentId ? 1 : !target.parentId ? 2 : -1;
+    if (priority < 0 || excluded.has(target.id) || (ancestors.has(target.id) && priority !== 0) || hidden(target)) continue;
+    if (priority === 0) {
       const size = nodeInnerSize(target), padding = nodePadding(target);
       const width = Math.max(0, size.width - padding.x * 2), height = Math.max(0, size.height - padding.y * 2);
       add(visualBounds({ ...node, type: 'rectangle', parentId: target.id, x: padding.x, y: padding.y, width, height, styles: {}, effects: undefined }, nodes), 0, target.id);
-    } else if (target.parentId === node.parentId) add(visualBounds(target, nodes), 1, target.id);
-    else if (!target.parentId) add(visualBounds(target, nodes), 2, target.id);
+    } else add(visualBounds(target, nodes), priority, target.id);
   }
   scene.x.push({ position: 0, start: 0, end: 0, priority: 3, id: '' });
   scene.y.push({ position: 0, start: 0, end: 0, priority: 3, id: '' });

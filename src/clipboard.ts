@@ -3,7 +3,7 @@ import type { BindableStyleProperty, DesignNode, DesignProject, Operation } from
 import { compatibleTokenKinds } from '../shared/design-system';
 import { hasTransformedAncestor, nodeBoxSize, nodeInnerSize, parentLocalDelta, visualBounds } from '../shared/effects';
 import { resolvedNodes } from '../shared/export';
-import { MAX_INPUT_BYTES, idSchema, nodeSchema, operationsSchema, projectSchema, threadSchema } from '../shared/validation';
+import { MAX_DOCUMENT_BYTES, MAX_INPUT_BYTES, documentLimitLabel, idSchema, nodeSchema, operationsSchema, projectSchema, threadSchema } from '../shared/validation';
 import { remapComponentInstance, selectionRoots, subtree, uid } from './editor-utils';
 
 export const CLIPBOARD_MIME = 'application/x-codex-design-selection+json';
@@ -16,9 +16,9 @@ const clipboardSchema = z.object({
 }).strict();
 type ClipboardSelection = z.infer<typeof clipboardSchema>;
 
-function boundedJson(value: unknown, message: string) {
+function boundedJson(value: unknown, message: string, limit = MAX_INPUT_BYTES) {
   const text = JSON.stringify(value);
-  if (new TextEncoder().encode(text).byteLength > MAX_INPUT_BYTES) throw new Error(message);
+  if (new TextEncoder().encode(text).byteLength > limit) throw new Error(message);
   return text;
 }
 
@@ -158,6 +158,6 @@ export function preparePaste(text: string, project: DesignProject, pageId: strin
   const next = { ...project, pages: project.pages.map(item => item.id === pageId ? { ...item, nodes: [...item.nodes, ...copies] } : item), threads: [...project.threads, ...threads] };
   const parsedProject = projectSchema.safeParse(next);
   if (!parsedProject.success) throw new Error(`Cannot paste into this project: ${parsedProject.error.issues[0]?.message ?? 'invalid document'}. Paste a smaller selection or choose another page.`);
-  boundedJson(parsedProject.data, 'Pasting would exceed the project’s 2 MiB limit. Paste fewer objects or choose another project.');
+  boundedJson(parsedProject.data, `Pasting would exceed the project’s ${documentLimitLabel} limit. Paste fewer objects or choose another project.`, MAX_DOCUMENT_BYTES);
   return { operations: parsedOperations.data, rootIds: data.roots.map(root => ids.get(root.id)!) };
 }

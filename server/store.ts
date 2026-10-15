@@ -6,34 +6,47 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { createDemoProject } from '../shared/seed.ts';
 import { defaultTokens, type BindableStyleProperty, type CanvasSelection, type DesignNode, type DesignProject, type LibraryScope, type LibraryVersion, type NativeComponentDefinition, type Operation, type ProjectSummary, type ProjectVersion, type ProjectVersionSummary } from '../shared/types.ts';
-import { canvasSelectionSchema, createProjectSchema, idSchema, libraryVersionRequestSchema, MAX_INPUT_BYTES, operationsSchema, projectSchema, projectImportSchema, revisionSchema } from '../shared/validation.ts';
+import { canvasSelectionSchema, createProjectSchema, idSchema, libraryVersionRequestSchema, MAX_DOCUMENT_BYTES, MAX_INPUT_BYTES, documentLimitLabel, operationsSchema, projectSchema, projectImportSchema, revisionSchema, validateProjectUpdate } from '../shared/validation.ts';
 import { ProjectHistory, StoreError } from './history.ts';
+import type { ProjectDelta } from '../shared/project-delta.ts';
 import { AssetStore } from './assets.ts';
 import { resolvedNodes } from '../shared/export.ts';
 import { parentLocalDelta, visualBounds } from '../shared/effects.ts';
 import { createSnapScene, snapBox } from '../shared/snapping.ts';
 import type { AssetChunk, AssetMetadata, AssetUpload, AssetUploadCancellation } from '../shared/media.ts';
 import { LEGACY_TOKEN_IDS, compatibleTokenKinds, defaultDesignSystem, resolveNodeTokens } from '../shared/design-system.ts';
+import { normalizeNodeData } from '../shared/node-states.ts';
 import { applyComponentOverride, componentInstanceRoot, componentSubtree, materializeComponent, recordComponentOverrides } from '../shared/components.ts';
 import { parseDesignSystemDocument } from '../shared/design-system-document.ts';
 export { StoreError } from './history.ts';
 
 function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, any>, input: unknown, code = 'invalid_input'): T {
-  const result = schema.safeParse(input);
+  return checked(schema.safeParse(input), code);
+}
+function checked<T>(result: z.SafeParseReturnType<unknown, T>, code: string): T {
   if (!result.success) throw new StoreError(400, code, result.error.issues.map((issue) => `${issue.path.join('.') || 'input'}: ${issue.message}`).join('; '), result.error.issues);
   return result.data;
 }
 
-function serialize(input: unknown): string {
+function serialize(input: unknown, limit = MAX_INPUT_BYTES): string {
   let json: string | undefined;
   try { json = JSON.stringify(input); } catch { throw new StoreError(400, 'invalid_input', 'Input must be JSON serializable'); }
   if (json === undefined) throw new StoreError(400, 'invalid_input', 'Input must be JSON serializable');
-  if (Buffer.byteLength(json) > MAX_INPUT_BYTES) throw new StoreError(413, 'input_too_large', 'Project or transaction exceeds the 2 MiB limit');
+  if (Buffer.byteLength(json) > limit) throw new StoreError(413, 'input_too_large', limit === MAX_INPUT_BYTES ? 'Transaction exceeds the 2 MiB limit' : `Project exceeds the ${documentLimitLabel} limit`);
   return json;
 }
 
 const fileVersion = (info: BigIntStats) => `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
 const isMissing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
+
+// Node edits read the rest of the document but only write their own page (and replace, never mutate, the threads array),
+// so untouched pages stay shared with the immutable cached document instead of being deep-cloned on every save.
+const pageScopedOperations = new Set<Operation['type']>(['create_node', 'update_node', 'delete_node', 'snap_node']);
+function workingCopy(previous: DesignProject, operations: Operation[]): DesignProject {
+  if (!operations.every(operation => pageScopedOperations.has(operation.type))) return structuredClone(previous);
+  const touched = new Set(operations.map(operation => (operation as Extract<Operation, { pageId: string }>).pageId));
+  return { ...structuredClone({ ...previous, pages: [] }), pages: previous.pages.map(page => touched.has(page.id) ? structuredClone(page) : page) };
+}
 
 function touchGeneration(project: DesignProject, operation: Operation, now: string) {
   if (operation.type !== 'create_node' && operation.type !== 'update_node' && operation.type !== 'delete_node' && operation.type !== 'snap_node' && operation.type !== 'replace_page') return;
@@ -98,8 +111,12 @@ function changeLabel(project: DesignProject, operation: Operation): string {
 }
 
 function libraryChanges(previous: DesignProject, current: DesignProject, released = false): ProjectVersionSummary['library'] {
-  const componentIds = current.designSystem.components.filter(component => JSON.stringify(component) !== JSON.stringify(previous.designSystem.components.find(item => item.id === component.id))).map(component => component.id);
-  for (const component of previous.designSystem.components) if (!current.designSystem.components.some(item => item.id === component.id)) componentIds.push(component.id);
+  // validateProjectUpdate reuses unchanged objects, so identity settles most comparisons without serializing.
+  if (previous.designSystem === current.designSystem) return { system: released, componentIds: [] };
+  const before = new Map(previous.designSystem.components.map(component => [component.id, component]));
+  const componentIds = current.designSystem.components.filter(component => { const prior = before.get(component.id); return prior !== component && JSON.stringify(component) !== JSON.stringify(prior); }).map(component => component.id);
+  const ids = new Set(current.designSystem.components.map(component => component.id));
+  for (const component of previous.designSystem.components) if (!ids.has(component.id)) componentIds.push(component.id);
   return { system: released || JSON.stringify(previous.designSystem) !== JSON.stringify(current.designSystem), componentIds };
 }
 
@@ -201,6 +218,12 @@ export class ProjectStore {
     return this.assets.readChunk(input);
   }
 
+  /** A saved project relative to baseRevision for a client that holds it; undefined when the full project must be sent. */
+  async projectDelta(project: DesignProject, baseRevision: number): Promise<ProjectDelta | undefined> {
+    // Revision directories are immutable once committed, so this read needs no write lock.
+    try { return await this.history.delta(project, baseRevision); } catch { return undefined; }
+  }
+
   async waitForChange(projectId: string, afterRevision: number, signal?: AbortSignal): Promise<DesignProject | null> {
     parse(idSchema, projectId); parse(revisionSchema, afterRevision);
     if (signal?.aborted) throw signal.reason ?? new DOMException('The canvas watch was aborted.', 'AbortError');
@@ -226,7 +249,8 @@ export class ProjectStore {
         try {
           do {
             dirty = false;
-            const project = await this.read(projectId);
+            // Callers only serialize the result, so share the cached document instead of cloning it on every check.
+            const project = await this.read(projectId, false, true);
             if (settled) return;
             if (project.revision > afterRevision) { finish(project); return; }
           } while (dirty && !settled);
@@ -335,7 +359,7 @@ export class ProjectStore {
       // previous is the cached document and stays untouched; operations apply to the single working clone.
       const previous = await this.read(projectId, false, true);
       this.checkRevision(previous, expectedRevision);
-      const project = structuredClone(previous);
+      const project = workingCopy(previous, changes);
       const now = new Date().toISOString();
       const touchedBoards = new Set<string>();
       const labels: string[] = [];
@@ -348,7 +372,7 @@ export class ProjectStore {
       for (const board of project.boards) if (touchedBoards.has(board.id)) board.updatedAt = now;
       project.revision += 1;
       project.updatedAt = now;
-      const validated = parse(projectSchema, project, 'invalid_project');
+      const validated = checked(validateProjectUpdate(previous, project), 'invalid_project');
       await this.assets.validateProject(validated);
       const namedRelease = changes.find(operation => operation.type === 'release_design_system' || (operation.type === 'release_component' && operation.label));
       const mainLabel = namedRelease ? changeLabel(previous, namedRelease) : labels[0];
@@ -362,7 +386,7 @@ export class ProjectStore {
   }
 
   async importProject(input: unknown): Promise<DesignProject> {
-    serialize(input);
+    serialize(input, MAX_DOCUMENT_BYTES);
     const imported = parse(projectImportSchema, input, 'invalid_project');
     await this.init();
     return this.withWriteLock(async () => {
@@ -385,19 +409,19 @@ export class ProjectStore {
   async listVersions(projectId: string): Promise<ProjectVersionSummary[]> {
     parse(idSchema, projectId);
     await this.init();
-    return this.withWriteLock(async () => this.history.list(await this.read(projectId)));
+    return this.withWriteLock(async () => this.history.list(await this.read(projectId, false, true)));
   }
 
   async getVersion(projectId: string, revision: number): Promise<ProjectVersion> {
     parse(idSchema, projectId); parse(revisionSchema, revision);
     await this.init();
-    return this.withWriteLock(async () => this.history.get(await this.read(projectId), revision));
+    return this.withWriteLock(async () => this.history.get(await this.read(projectId, false, true), revision));
   }
 
   async listLibraryVersions(projectId: string, scope: LibraryScope, componentId?: string): Promise<ProjectVersionSummary[]> {
     parse(idSchema, projectId); parse(libraryVersionRequestSchema, { scope, componentId });
     await this.init();
-    return this.withWriteLock(async () => this.history.listLibrary(await this.read(projectId), scope, componentId));
+    return this.withWriteLock(async () => this.history.listLibrary(await this.read(projectId, false, true), scope, componentId));
   }
 
   async getLibraryVersion(projectId: string, revision: number, scope: LibraryScope, componentId?: string): Promise<LibraryVersion> {
@@ -507,7 +531,7 @@ export class ProjectStore {
     const filename = path.join(this.dataDir, `${id}.json`);
     try {
       const info = await stat(filename, { bigint: true });
-      if (info.size > MAX_INPUT_BYTES) throw new StoreError(500, 'corrupt_project', `Saved project ${id} exceeds the size limit`);
+      if (info.size > MAX_DOCUMENT_BYTES) throw new StoreError(500, 'corrupt_project', `Saved project ${id} exceeds the size limit`);
       // Check the file on every read so atomic saves and edits from other processes remain visible.
       const version = fileVersion(info);
       const cachedSummary = this.summaries.get(id);
@@ -635,6 +659,7 @@ export class ProjectStore {
       }
       case 'create_page': {
         const targetBoard = board(operation.page.boardId ?? project.boards[0].id);
+        operation.page.nodes.forEach(normalizeNodeData);
         project.pages.push({ ...operation.page, boardId: targetBoard.id });
         break;
       }
@@ -650,6 +675,7 @@ export class ProjectStore {
         if (operation.page.id !== operation.pageId) throw new StoreError(400, 'invalid_operation', 'A replacement page must keep its page ID');
         const targetBoard = board(operation.page.boardId ?? target.boardId ?? project.boards[0].id);
         const replacementPage = structuredClone(operation.page);
+        replacementPage.nodes.forEach(normalizeNodeData);
         const editableRoots = new Set(target.nodes.filter(node => node.componentInstance && JSON.stringify(node.componentInstance) === JSON.stringify(replacementPage.nodes.find(item => item.id === node.id)?.componentInstance)).map(node => node.id));
         for (const original of target.nodes) {
           const root = componentInstanceRoot(target.nodes, original.id), replacement = replacementPage.nodes.find(node => node.id === original.id);
@@ -673,7 +699,7 @@ export class ProjectStore {
         const target = page(operation.pageId);
         const containing = operation.node.parentId ? componentInstanceRoot(target.nodes, operation.node.parentId)?.componentInstance : undefined;
         if (containing && !Object.values(containing.nodeMap).includes(operation.node.id)) throw new StoreError(400, 'component_structure', 'Detach the containing component instance before adding children.');
-        target.nodes.push(operation.node); break;
+        target.nodes.push(normalizeNodeData(operation.node)); break;
       }
       case 'update_node': {
         const target = page(operation.pageId);
@@ -691,10 +717,9 @@ export class ProjectStore {
           }
         }
         const styles = { ...node.styles, ...operation.patch.styles };
-        if (styles.states) { for (const [state, value] of Object.entries(styles.states)) if (!Object.keys(value).length) delete styles.states[state as keyof typeof styles.states]; if (!Object.keys(styles.states).length) delete styles.states; }
         if ((operation.patch.source !== undefined && operation.patch.jsx === undefined) || (operation.patch.type !== undefined && operation.patch.type !== 'code')) delete node.jsx;
         Object.assign(node, operation.patch, { styles });
-        if (!node.live || node.type !== 'code') delete node.live;
+        normalizeNodeData(node);
         recordComponentOverrides(target.nodes, before, node);
         break;
       }

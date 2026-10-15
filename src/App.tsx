@@ -14,10 +14,11 @@ import HistoryPanel from './HistoryPanel';
 import ExportPanel from './ExportPanel';
 import ProjectLibrary from './ProjectLibrary';
 import { resolveProjectTokens, type TokenResolutionCache } from '../shared/design-system';
+import { sameJson } from '../shared/validation';
 
 // Client snapshots are never mutated, so resolved nodes can keep their identity and memoized layers skip rendering.
 const tokenCache: TokenResolutionCache = new WeakMap(), stackCache = new WeakMap<DesignNode, DesignNode>();
-import { hasTransformedAncestor, parentLocalDelta, parentLocalPoint, visibleBounds, visualBounds } from '../shared/effects';
+import { hasTransformedAncestor, nodeIndex, parentLocalDelta, parentLocalPoint, visibleBounds, visualBounds } from '../shared/effects';
 import { createSnapScene, snapBox, type SnapBox, type SnapScene, type SnapGuide } from '../shared/snapping';
 import { importProjectFile } from './export-utils';
 import InsertMenu from './InsertMenu';
@@ -37,7 +38,9 @@ import { CLIPBOARD_MIME, preparePaste, serializeSelection } from './clipboard';
 
 type Tool = 'select' | 'hand' | 'text' | 'frame' | 'note' | 'pen' | 'rectangle' | 'ellipse' | 'line' | 'arrow' | 'code' | 'comment';
 type Menu = 'project' | 'page' | 'shapes' | 'zoom' | 'frames' | 'insert' | 'comments' | null;
-type ObjectGesture = { kind: 'drag' | 'resize'; targets: DesignNode[]; selectionKey: string; box: SnapBox; nodes: DesignNode[]; scene: SnapScene | null; corner?: string; startX: number; startY: number; moved: boolean; pointer: { clientX: number; clientY: number } };
+type ObjectGesture = { kind: 'drag' | 'resize'; targets: DesignNode[]; selectionKey: string; box: SnapBox; nodes: DesignNode[]; scene: () => SnapScene | null; corner?: string; startX: number; startY: number; moved: boolean; pointer: { clientX: number; clientY: number } };
+// Snap candidates scan the whole page, so a gesture builds them on its first move rather than on every click.
+const lazy = <T,>(build: () => T) => { let built: { value: T } | undefined; return () => (built ??= { value: build() }).value; };
 type MarqueeGesture = { kind: 'marquee'; startX: number; startY: number; clientX: number; clientY: number; additive: boolean; initial: string[]; nodes: DesignNode[]; candidates: { id: string; box: SnapBox }[]; moved: boolean };
 type Gesture = { kind: 'pan'; startX: number; startY: number; view: Viewport } | ObjectGesture | MarqueeGesture | { kind: 'draw'; tool: Tool; startX: number; startY: number; x: number; y: number; parentId: string | null; points: { x: number; y: number }[] };
 type HistoryEntry = { projectId: string; pageId: string; before: DesignPage; after: DesignPage; beforeThreads: CommentThread[]; afterThreads: CommentThread[] };
@@ -55,16 +58,18 @@ function objectEditable(node: DesignNode, byId: ReadonlyMap<string, DesignNode>)
 }
 
 function versionChanges(snapshot: DesignProject, previous: DesignProject | null, preferredPageId: string) {
-  snapshot = resolveProjectTokens(snapshot);
-  previous = previous ? resolveProjectTokens(previous) : null;
-  const pages = snapshot.pages.filter(page => previous && (
-    JSON.stringify(page) !== JSON.stringify(previous.pages.find(old => old.id === page.id)) ||
-    JSON.stringify(snapshot.threads.filter(thread => thread.pageId === page.id)) !== JSON.stringify(previous.threads.filter(thread => thread.pageId === page.id))
-  ));
+  // Token edits restyle every page, so only then compare token-resolved pages; otherwise raw pages compare the same and only
+  // the page that gets its change boxes is resolved. sameJson stops at the first difference instead of serializing both versions.
+  const tokensChanged = !!previous && !sameJson(snapshot.designSystem.tokens, previous.designSystem.tokens);
+  if (tokensChanged) { snapshot = resolveProjectTokens(snapshot); previous = resolveProjectTokens(previous!); }
+  const byPage = (threads: CommentThread[]) => { const map = new Map<string, CommentThread[]>(); for (const thread of threads) { const list = map.get(thread.pageId); if (list) list.push(thread); else map.set(thread.pageId, [thread]); } return map; };
+  const oldPages = new Map(previous?.pages.map(page => [page.id, page])), newThreads = byPage(snapshot.threads), oldThreads = byPage(previous?.threads ?? []);
+  const pages = previous ? snapshot.pages.filter(page => !sameJson(page, oldPages.get(page.id)) || !sameJson(newThreads.get(page.id) ?? [], oldThreads.get(page.id) ?? [])) : [];
   const page = pages.find(page => page.id === preferredPageId) || pages[0] || snapshot.pages.find(page => page.id === preferredPageId) || snapshot.pages[0];
   const boxes: ChangeBox[] = [];
   if (page && previous) {
-    const before = resolvedNodes(previous.pages.find(old => old.id === page.id)?.nodes || []), after = resolvedNodes(page.nodes);
+    const resolvePage = (project: DesignProject, target?: DesignPage) => target && !tokensChanged ? resolveProjectTokens({ ...project, pages: [target] }).pages[0] : target;
+    const before = resolvedNodes(resolvePage(previous, oldPages.get(page.id))?.nodes || []), after = resolvedNodes(resolvePage(snapshot, page)!.nodes);
     const oldNodes = new Map(before.map(node => [node.id, node])), newNodes = new Map(after.map(node => [node.id, node]));
     const signature = (node?: DesignNode) => node ? JSON.stringify({ ...node, generation: undefined }) : undefined;
     const changed = new Set(after.filter(node => signature(node) !== signature(oldNodes.get(node.id))).map(node => node.id));
@@ -184,11 +189,26 @@ export default function App() {
   const renderProject = useMemo(() => project ? resolveProjectTokens(project, tokenCache) : null, [project]);
   const renderPage = renderProject?.pages.find(item => item.id === page?.id);
   const baseNodes = useMemo(() => resolvedNodes(renderPage?.nodes || [], undefined, stackCache), [renderPage?.nodes]);
-  const nodes = useMemo(() => previewPatch ? resolvedNodes((renderPage?.nodes || []).map(node => previewPatch[node.id] ? { ...node, ...previewPatch[node.id] } : node), undefined, stackCache) : baseNodes, [baseNodes, renderPage?.nodes, previewPatch]);
+  const baseIndex = useMemo(() => new Map(baseNodes.map((node, index) => [node.id, index])), [baseNodes]);
+  const nodes = useMemo(() => {
+    if (!previewPatch) return baseNodes;
+    const ids = Object.keys(previewPatch);
+    // Moving free-positioned layers changes no stack layout, so a drag preview swaps only the moved entries into baseNodes
+    // instead of re-resolving every layer on the page per pointer move.
+    const moveOnly = ids.every(id => {
+      const index = baseIndex.get(id), node = index === undefined ? undefined : baseNodes[index], parentIndex = node?.parentId ? baseIndex.get(node.parentId) : undefined;
+      const parentLayout = parentIndex === undefined ? undefined : baseNodes[parentIndex].styles.layout;
+      return node && parentLayout !== 'vertical' && parentLayout !== 'horizontal' && Object.keys(previewPatch[id]).every(key => key === 'x' || key === 'y');
+    });
+    if (!moveOnly) return resolvedNodes((renderPage?.nodes || []).map(node => previewPatch[node.id] ? { ...node, ...previewPatch[node.id] } : node), undefined, stackCache);
+    const next = baseNodes.slice();
+    for (const id of ids) { const index = baseIndex.get(id)!; next[index] = { ...next[index], ...previewPatch[id] }; }
+    return next;
+  }, [baseNodes, baseIndex, renderPage?.nodes, previewPatch]);
   const [stateView, setStateView] = useState<StateView>(null);
   // Previewing a hover/pressed/focus state restyles only the selected layer; with no state chosen the canvas list is untouched.
   const canvasNodes = useMemo(() => stateView ? nodes.map(node => node.id === stateView.id ? applyNodeState(node, stateView.state) : node) : nodes, [nodes, stateView]);
-  const nodeById = useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes]);
+  const nodeById = useMemo(() => nodeIndex(nodes), [nodes]);
   const selected = selection ? nodeById.get(selection) : undefined;
   const storedSelected = useMemo(() => page?.nodes.find(node => node.id === selection), [page?.nodes, selection]);
   const selectedNodes = useMemo(() => selectionIds.flatMap(id => nodeById.get(id) ?? []), [selectionIds, nodeById]);
@@ -581,7 +601,7 @@ export default function App() {
     const ids = selectionIds.includes(id) ? selectionIds : [id], targets = selectionRoots(ids,baseNodes), box = selectionBounds(targets,baseNodes);
     if (!selectionIds.includes(id)) setSelection(id);
     setCommentTarget(null);
-    if (!saving && !loading && box && targets.every(target => objectEditable(target,nodeById) && !['vertical','horizontal'].includes(nodeById.get(target.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(target,baseNodes,{x:0,y:0}) !== null)) gesture.current = { kind: 'drag', targets, selectionKey:JSON.stringify(ids), box, nodes: baseNodes, scene: createSnapScene(baseNodes,targets[0],targets), startX: e.clientX, startY: e.clientY, moved: false, pointer: {clientX:e.clientX,clientY:e.clientY} };
+    if (!saving && !loading && box && targets.every(target => objectEditable(target,nodeById) && !['vertical','horizontal'].includes(nodeById.get(target.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(target,baseNodes,{x:0,y:0}) !== null)) gesture.current = { kind: 'drag', targets, selectionKey:JSON.stringify(ids), box, nodes: baseNodes, scene: lazy(() => createSnapScene(baseNodes,targets[0],targets)), startX: e.clientX, startY: e.clientY, moved: false, pointer: {clientX:e.clientX,clientY:e.clientY} };
   };
   const nodeDownRef = useRef(nodeDown);
   useLayoutEffect(() => { nodeDownRef.current = nodeDown; });
@@ -600,8 +620,9 @@ export default function App() {
     };
     let box = g.kind === 'drag' ? {...g.box,x:g.box.x+dx,y:g.box.y+dy} : resize({...g.box,width:g.box.width+(west?-dx:dx),height:g.box.height+(north?-dy:dy)});
     let guides: SnapGuide[] = [];
-    if (snapping && !bypass && g.scene) {
-      const result = snapBox(g.scene,box,6/zoom,g.kind==='resize'?{x:west?'start':'end',y:north?'start':'end'}:undefined);
+    const scene = snapping && !bypass ? g.scene() : null;
+    if (scene) {
+      const result = snapBox(scene,box,6/zoom,g.kind==='resize'?{x:west?'start':'end',y:north?'start':'end'}:undefined);
       box = g.kind === 'resize' ? resize(result.box) : result.box;
       guides = result.guides;
     }
@@ -787,7 +808,7 @@ export default function App() {
           {tool==='select'&&!marquee&&!historyOpen&&!saving&&!loading&&resizableSelection&&['nw','ne','sw','se'].map(corner=><button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize selection ${corner}`} title={multiple?'Resize selected bounds; child contents retain their size':`Resize ${corner}`} onPointerDown={e=>{
             e.stopPropagation(); if(e.button!==0)return;
             const box=selectionBounds(selectedRoots,baseNodes)!,node=selectedRoots[0],parent=nodeById.get(node.parentId??'');
-            gesture.current={kind:'resize',targets:selectedRoots,selectionKey,box,nodes:baseNodes,scene:['vertical','horizontal'].includes(parent?.styles.layout??'')?null:createSnapScene(baseNodes,node,selectedRoots),corner,startX:e.clientX,startY:e.clientY,moved:false,pointer:{clientX:e.clientX,clientY:e.clientY}};capture(e.pointerId);
+            gesture.current={kind:'resize',targets:selectedRoots,selectionKey,box,nodes:baseNodes,scene:lazy(() => ['vertical','horizontal'].includes(parent?.styles.layout??'')?null:createSnapScene(baseNodes,node,selectedRoots)),corner,startX:e.clientX,startY:e.clientY,moved:false,pointer:{clientX:e.clientX,clientY:e.clientY}};capture(e.pointerId);
           }}/>)}
           {tool==='select'&&<span className="size-label">{multiple?`${selectionIds.length} objects · `:''}{Math.round(selectedBox.width)} × {Math.round(selectedBox.height)}</span>}
         </div>}

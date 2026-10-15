@@ -6,7 +6,11 @@ import { BINDABLE_STYLE_PROPERTIES, DESIGN_TOKEN_KINDS, LEGACY_TOKEN_IDS, compat
 import { BOX_SIZING_VALUES, CURSOR_VALUES, OBJECT_FIT_VALUES, OVERFLOW_VALUES, POINTER_EVENTS_VALUES, TEXT_DECORATION_VALUES, TEXT_OVERFLOW_VALUES, WHITE_SPACE_VALUES, safeColor, safeCssText, safeEffectColor } from './effects.ts';
 import { BLEND_MODES } from './appearance.ts';
 
-export const MAX_INPUT_BYTES = 2 * 1024 * 1024;
+export const MAX_INPUT_BYTES = 2 * 1024 * 1024; // one request or transaction
+export const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024; // one saved project document, import or history snapshot
+// Collection caps sized for a corporate project within MAX_DOCUMENT_BYTES.
+const MAX_PAGES = 500, MAX_PAGE_NODES = 25_000, MAX_PROJECT_NODES = 100_000, MAX_COMPONENTS = 5000, MAX_THREADS = 20_000;
+export const documentLimitLabel = `${MAX_DOCUMENT_BYTES / 1024 / 1024} MiB`;
 export const idSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/, 'Use a safe ID containing letters, numbers, underscores or hyphens');
 export const canvasSelectionSchema = z.object({ projectId: idSchema, boardId: idSchema, pageId: idSchema.optional() }).strict();
 const nameSchema = z.string().trim().min(1).max(160);
@@ -173,11 +177,11 @@ const nodeStyleBase = z.object({
   animation: z.string().trim().min(1).max(2000).refine(safeMotion, 'Use safe CSS animation without URLs or declarations; times are limited to 600 seconds').optional(),
 }).strict();
 
-// Values land in generated stylesheets, so state styles reuse the base schema's CSS safety checks instead of redefining them.
-const nodeStateStyleSchema = nodeStyleBase.pick({ fill: true, color: true, borderColor: true, opacity: true, shadow: true, outlineColor: true, textDecorationLine: true }).strict();
+// Values land in generated stylesheets. The base fill, color and borderColor stay lenient for saved documents; new state data uses the strict colour check.
+const nodeStateStyleSchema = nodeStyleBase.pick({ opacity: true, shadow: true, outlineColor: true, textDecorationLine: true }).extend({ fill: safeColorSchema.optional(), color: safeColorSchema.optional(), borderColor: safeColorSchema.optional() }).strict();
 export const nodeStyleSchema = nodeStyleBase.extend({
   states: z.object({ hover: nodeStateStyleSchema.optional(), active: nodeStateStyleSchema.optional(), focus: nodeStateStyleSchema.optional() }).strict().optional()
-    .describe('Per-state visual overrides applied as :hover, :active (pressed) and :focus-within CSS rules in HTML and React exports, and previewed in the Inspector. Supported keys: fill, color, borderColor, opacity, shadow, outlineColor, textDecorationLine. Send the complete states object; an empty object clears all states. Not applied in static image or SVG exports.'),
+    .describe('Per-state visual overrides applied as :hover, :active (pressed) and :has(:focus-visible) CSS rules (emitted focus, hover, pressed so pressed wins) in HTML and React exports, and previewed in the Inspector. Supported keys: fill, color, borderColor (safe CSS colours only), opacity, shadow, outlineColor, textDecorationLine. Send the complete states object; an empty object clears all states. The store drops keys a layer type never renders (fill on text, color on non-text, borderColor on arrows). Focus applies when a link inside the layer has keyboard focus, so set it on linked layers or their ancestors. Children of a linked layer follow that layer\'s hover/press/focus. Not applied in static image or SVG exports.'),
 }).strict();
 
 export const tokenBindingsSchema = z.object(Object.fromEntries(BINDABLE_STYLE_PROPERTIES.map(property => [property, idSchema.optional()])) as Record<typeof BINDABLE_STYLE_PROPERTIES[number], z.ZodOptional<typeof idSchema>>).strict();
@@ -199,7 +203,7 @@ export const nodeSchema = z.object({
   x: coordinate, y: coordinate, width: dimension, height: dimension,
   href: z.string().trim().max(2048).refine(isSafeLink, 'Use an HTTP(S), mailto:, tel: or # link; an empty string removes the link').optional(),
   content: z.string().max(100_000).optional(), source: z.string().max(500_000).optional(),
-  live: z.boolean().optional().describe('Code layers only. true lets the layer\'s own inline <script> run inside a sandbox with no network, storage or parent access. The editor stays passive until the user double-clicks the selected layer; HTML and React exports run it. false or omitted keeps scripts disabled.'),
+  live: z.boolean().optional().describe('Code layers only. true lets the layer\'s own inline <script> run in an opaque-origin sandbox without storage, cookies or parent DOM access; fetch, sockets, nested frames and WebRTC are blocked. A script can still navigate its own frame, which is a network request; editors and HTML exports reset the frame when that happens. The editor runs it only after the user double-clicks the selected layer, HTML exports after the viewer presses Run, and React exports on mount. false or omitted keeps scripts disabled.'),
   notes: z.string().max(5000).optional().describe('Saved implementation intent beyond the visual canvas: behavior, materials, native effects, preferred libraries and constraints. Component-wide notes live on the reusable definition root; instance edits remain local overrides. An empty string clears notes.'),
   jsx: z.object({ source: z.string().max(100_000), starters: z.array(z.enum(['ios-frame', 'android-frame', 'macos-window', 'browser-window'])).max(4), deviceChrome: z.enum(['safe-area', 'device']).optional() }).strict().optional(),
   generation: z.object({ status: z.enum(['building', 'ready']), updatedAt: timestamp.optional() }).strict().optional().describe('Frames being generated use building, then ready when complete. The store timestamps actual saved work; editor-only loading chrome never changes authored styles.'),
@@ -226,18 +230,20 @@ export const nativeComponentDefinitionSchema = z.object({
   });
 });
 
-export const designSystemSchema = z.object({
+const designSystemObjectSchema = z.object({
   name: nameSchema, description: z.string().max(5000), documentation: z.string().max(100_000),
-  tokens: z.array(designSystemTokenSchema).max(1000), sources: z.array(designSystemSourceSchema).max(1000), components: z.array(nativeComponentDefinitionSchema).max(200).default([]), request: designSystemRequestSchema.optional(),
-}).strict().superRefine((system, ctx) => {
+  tokens: z.array(designSystemTokenSchema).max(1000), sources: z.array(designSystemSourceSchema).max(1000), components: z.array(nativeComponentDefinitionSchema).max(MAX_COMPONENTS).default([]), request: designSystemRequestSchema.optional(),
+}).strict();
+function designSystemInvariants(system: z.infer<typeof designSystemObjectSchema>, ctx: z.RefinementCtx) {
+  const tokenKinds = new Map(system.tokens.map(token => [token.id, token.kind]));
   const componentIds = new Set<string>(), componentNames = new Set<string>();
   system.components.forEach((component, index) => {
     if (componentIds.has(component.id)) ctx.addIssue({ code: 'custom', message: `Duplicate component ID: ${component.id}`, path: ['components', index, 'id'] });
     if (componentNames.has(component.name.toLowerCase())) ctx.addIssue({ code: 'custom', message: `Duplicate component name: ${component.name}`, path: ['components', index, 'name'] });
     componentIds.add(component.id); componentNames.add(component.name.toLowerCase());
     for (const node of component.nodes) for (const [property, tokenId] of Object.entries(node.tokenBindings ?? {})) {
-      const token = system.tokens.find(item => item.id === tokenId);
-      if (!token || !compatibleTokenKinds(property as typeof BINDABLE_STYLE_PROPERTIES[number]).includes(token.kind)) ctx.addIssue({ code: 'custom', message: `Component ${component.name} has an invalid ${property} token binding`, path: ['components', index, 'nodes'] });
+      const kind = tokenId === undefined ? undefined : tokenKinds.get(tokenId);
+      if (!kind || !compatibleTokenKinds(property as typeof BINDABLE_STYLE_PROPERTIES[number]).includes(kind)) ctx.addIssue({ code: 'custom', message: `Component ${component.name} has an invalid ${property} token binding`, path: ['components', index, 'nodes'] });
     }
   });
   const ids = new Set<string>(), names = new Set<string>();
@@ -246,7 +252,8 @@ export const designSystemSchema = z.object({
     if (names.has(token.name.toLowerCase())) ctx.addIssue({ code: 'custom', message: `Duplicate token name: ${token.name}`, path: ['tokens', index, 'name'] });
     ids.add(token.id); names.add(token.name.toLowerCase());
   });
-});
+}
+export const designSystemSchema = designSystemObjectSchema.superRefine(designSystemInvariants);
 
 export const viewportSchema = z.object({
   x: coordinate, y: coordinate, zoom: z.number().finite().min(0.02).max(16),
@@ -254,7 +261,7 @@ export const viewportSchema = z.object({
 export const boardInputSchema = z.object({ id: idSchema, name: nameSchema }).strict();
 export const boardSchema = boardInputSchema.extend({ createdAt: timestamp, updatedAt: timestamp, inspiration: z.array(inspirationItemSchema).max(100).optional() });
 export const pageSchema = z.object({
-  id: idSchema, boardId: idSchema.optional(), name: nameSchema, nodes: z.array(nodeSchema).max(5000), viewport: viewportSchema,
+  id: idSchema, boardId: idSchema.optional(), name: nameSchema, nodes: z.array(nodeSchema).max(MAX_PAGE_NODES), viewport: viewportSchema,
 }).strict();
 export const messageSchema = z.object({
   id: idSchema, role: z.enum(['user', 'assistant']), content: z.string().trim().min(1).max(20_000), createdAt: timestamp,
@@ -315,13 +322,14 @@ export function normalizeLegacyProject(input: unknown): unknown {
   };
 }
 
-const resolvedProjectSchema = z.object({
+const resolvedProjectObjectSchema = z.object({
   id: idSchema, name: nameSchema, description: z.string().max(5000),
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-  boards: z.array(boardSchema).min(1).max(100),
-  pages: z.array(pageSchema.extend({ boardId: idSchema })).min(1).max(100), threads: z.array(threadSchema).max(2000),
+  boards: z.array(boardSchema).min(1).max(MAX_PAGES),
+  pages: z.array(pageSchema.extend({ boardId: idSchema })).min(1).max(MAX_PAGES), threads: z.array(threadSchema).max(MAX_THREADS),
   tokens: tokensSchema, designSystem: designSystemSchema, createdAt: timestamp, updatedAt: timestamp,
-}).strict().superRefine((project, ctx) => {
+}).strict();
+function projectInvariants(project: z.infer<typeof resolvedProjectObjectSchema>, ctx: z.RefinementCtx) {
   const ids = new Set<string>([project.id]);
   const addId = (id: string, path: (string | number)[]) => {
     if (ids.has(id)) ctx.addIssue({ code: 'custom', message: `Duplicate ID: ${id}`, path });
@@ -340,6 +348,7 @@ const resolvedProjectSchema = z.object({
     if (component.version > project.revision) ctx.addIssue({ code: 'custom', message: 'A component release cannot reference a future project revision', path: ['designSystem', 'components', index, 'version'] });
   });
   const pages = new Map(project.pages.map((page) => [page.id, page]));
+  const nodeIds = new Map<string, Map<string, unknown>>();
   let nodeCount = 0;
   project.pages.forEach((page, pageIndex) => {
     addId(page.id, ['pages', pageIndex, 'id']);
@@ -371,6 +380,15 @@ const resolvedProjectSchema = z.object({
       path.forEach((id) => complete.add(id));
     });
     const owners = new Set<string>();
+    // Each mapped member's owning instance, so unlinked children are found in one pass instead of one page scan per instance.
+    const instanceOf = new Map<string, string>();
+    for (const root of page.nodes) if (root.componentInstance) for (const id of Object.values(root.componentInstance.nodeMap)) if (!instanceOf.has(id)) instanceOf.set(id, root.id);
+    const unlinked = new Set<string>();
+    for (const node of page.nodes) {
+      const owner = node.parentId ? instanceOf.get(node.parentId) : undefined;
+      if (owner !== undefined && instanceOf.get(node.id) !== owner) unlinked.add(owner);
+    }
+    nodeIds.set(page.id, nodes);
     page.nodes.forEach((root, nodeIndex) => {
       const instance = root.componentInstance;
       if (!instance) return;
@@ -386,24 +404,25 @@ const resolvedProjectSchema = z.object({
         owners.add(id);
         if (id !== root.id && (!node.parentId || !mapped.has(node.parentId) || node.componentInstance)) ctx.addIssue({ code: 'custom', message: 'Every mapped member must remain inside its instance; nested instances are unsupported', path: [...location, 'nodeMap'] });
       }
-      if (page.nodes.some(node => node.parentId && mapped.has(node.parentId) && !mapped.has(node.id))) ctx.addIssue({ code: 'custom', message: 'Detach the instance before adding unlinked children', path: [...location, 'nodeMap'] });
+      if (unlinked.has(root.id)) ctx.addIssue({ code: 'custom', message: 'Detach the instance before adding unlinked children', path: [...location, 'nodeMap'] });
       if (definition && instance.version === definition.version && (definition.nodes.length !== mapped.size || definition.nodes.some(node => !Object.hasOwn(instance.nodeMap, node.id)))) ctx.addIssue({ code: 'custom', message: 'An instance must map all nodes in its linked component release', path: [...location, 'nodeMap'] });
     });
   });
   project.boards.forEach((board, boardIndex) => {
     if (!boardPageCounts.get(board.id)) ctx.addIssue({ code: 'custom', message: 'Each board must keep at least one page', path: ['boards', boardIndex] });
   });
-  if (nodeCount > 20_000) ctx.addIssue({ code: 'custom', message: 'A project may contain at most 20,000 nodes', path: ['pages'] });
+  if (nodeCount > MAX_PROJECT_NODES) ctx.addIssue({ code: 'custom', message: `A project may contain at most ${MAX_PROJECT_NODES.toLocaleString('en-US')} nodes`, path: ['pages'] });
   project.threads.forEach((thread, threadIndex) => {
     addId(thread.id, ['threads', threadIndex, 'id']);
     const page = pages.get(thread.pageId);
     if (!page) ctx.addIssue({ code: 'custom', message: 'Comment page does not exist', path: ['threads', threadIndex, 'pageId'] });
-    if (thread.nodeId !== null && !page?.nodes.some((node) => node.id === thread.nodeId)) {
+    if (thread.nodeId !== null && !(page && nodeIds.get(page.id)?.has(thread.nodeId))) {
       ctx.addIssue({ code: 'custom', message: 'Comment anchor does not exist on its page', path: ['threads', threadIndex, 'nodeId'] });
     }
     thread.messages.forEach((message, messageIndex) => addId(message.id, ['threads', threadIndex, 'messages', messageIndex, 'id']));
   });
-});
+}
+const resolvedProjectSchema = resolvedProjectObjectSchema.superRefine(projectInvariants);
 export const projectSchema: z.ZodType<DesignProject, z.ZodTypeDef, unknown> = z.preprocess(normalizeLegacyProject, resolvedProjectSchema);
 export const designLibrarySchema = z.object({ format: z.literal('codex-design-library'), version: z.literal(1), project: projectSchema }).strict()
   .refine(({ project }) => project.pages.every(page => page.nodes.length === 0) && project.threads.length === 0 && !project.designSystem.request && project.boards.every(board => !board.inspiration?.length), 'A library initializes an empty canvas without conversations, inspiration or queued requests');
@@ -468,3 +487,87 @@ export const canvasMapSettingsSchema = z.object({
   background: z.union([z.enum(['transparent', 'white', 'dark']), z.string().refine((value): value is `#${string}` => /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(value), 'Use a hexadecimal background color')]).optional(),
   scale: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(), labels: z.boolean().optional(), margin: z.number().finite().min(0).max(1000).optional(),
 }).strict();
+
+// Deep equality over JSON-shaped values; keys whose value is undefined count as absent, as they do once saved.
+/** JSON-equivalent deep equality (keys holding undefined count as absent), exiting at the first difference. */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index++) if (!sameJson(a[index], b[index])) return false;
+    return true;
+  }
+  if (Array.isArray(b)) return false;
+  const left = a as Record<string, unknown>, right = b as Record<string, unknown>;
+  let count = 0;
+  for (const key in left) {
+    if (left[key] === undefined) continue;
+    count++;
+    if (!sameJson(left[key], right[key])) return false;
+  }
+  for (const key in right) if (right[key] !== undefined) count--;
+  return count === 0;
+}
+
+type Issues = z.ZodIssue[];
+function parseInto<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, input: unknown, path: (string | number)[], issues: Issues): T | undefined {
+  const result = schema.safeParse(input);
+  if (result.success) return result.data;
+  for (const issue of result.error.issues) issues.push({ ...issue, path: [...path, ...issue.path] });
+  return undefined;
+}
+// Validated items that are deep-equal to their previous version are reused as-is (same object), so parsing
+// stays proportional to what changed. Matches by index first, then by id when items were inserted or removed.
+function reuseItems<T extends { id: string }>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, previous: readonly T[] | undefined, next: unknown[], path: (string | number)[], issues: Issues): T[] {
+  let byId: Map<string, T> | undefined;
+  return next.map((item, index) => {
+    const atIndex = previous?.[index];
+    if (atIndex && sameJson(atIndex, item)) return atIndex;
+    if (previous && isRecord(item) && typeof item.id === 'string' && atIndex?.id !== item.id) {
+      byId ??= new Map(previous.map(value => [value.id, value]));
+      const match = byId.get(item.id);
+      if (match && sameJson(match, item)) return match;
+    }
+    return parseInto(schema, item, [...path, index], issues) as T;
+  });
+}
+
+const projectShellSchema = resolvedProjectObjectSchema.extend({ pages: z.array(z.unknown()).min(1).max(MAX_PAGES), threads: z.array(z.unknown()).max(MAX_THREADS), designSystem: z.unknown() });
+const pageShellSchema = pageSchema.extend({ boardId: idSchema, nodes: z.array(z.unknown()).max(MAX_PAGE_NODES) });
+const designSystemShellSchema = designSystemObjectSchema.extend({ components: z.array(z.unknown()).max(MAX_COMPONENTS).default([]) });
+type ProjectPage = DesignProject['pages'][number];
+
+/**
+ * Same result as projectSchema.safeParse(next) for an edit of an already validated project, but only changed
+ * nodes, pages, threads and components are re-parsed; cross-entity invariants still run over the whole project.
+ * Disk reads, imports and restores keep the full projectSchema parse.
+ */
+export function validateProjectUpdate(previous: DesignProject, next: unknown): z.SafeParseReturnType<unknown, DesignProject> {
+  const issues: Issues = [];
+  const shell = parseInto(projectShellSchema, normalizeLegacyProject(next), [], issues);
+  if (!shell) return { success: false, error: new z.ZodError(issues) };
+  const previousPages = new Map(previous.pages.map(page => [page.id, page]));
+  const pages = shell.pages.map((input, index): ProjectPage => {
+    const prior = isRecord(input) && typeof input.id === 'string' ? previousPages.get(input.id) : undefined;
+    if (prior && sameJson(prior, input)) return prior;
+    const page = parseInto(pageShellSchema, input, ['pages', index], issues);
+    if (!page) return undefined as never;
+    return { ...page, nodes: reuseItems(nodeSchema, prior?.nodes, page.nodes, ['pages', index, 'nodes'], issues) };
+  });
+  const threads = sameJson(previous.threads, shell.threads) ? previous.threads : reuseItems(threadSchema, previous.threads, shell.threads, ['threads'], issues);
+  let designSystem = previous.designSystem;
+  if (!sameJson(previous.designSystem, shell.designSystem)) {
+    const system = parseInto(designSystemShellSchema, shell.designSystem, ['designSystem'], issues);
+    if (system) designSystem = { ...system, components: reuseItems(nativeComponentDefinitionSchema, previous.designSystem.components, system.components, ['designSystem', 'components'], issues) };
+    if (!issues.length) {
+      const ctx = { addIssue: (issue: z.IssueData) => issues.push({ ...issue, path: ['designSystem', ...(issue.path ?? [])] } as z.ZodIssue), path: [] } as z.RefinementCtx;
+      designSystemInvariants(designSystem as z.infer<typeof designSystemObjectSchema>, ctx);
+    }
+  }
+  if (issues.length) return { success: false, error: new z.ZodError(issues) };
+  const project = { ...shell, pages, threads, designSystem } as DesignProject;
+  const ctx = { addIssue: (issue: z.IssueData) => issues.push({ ...issue, path: issue.path ?? [] } as z.ZodIssue), path: [] } as z.RefinementCtx;
+  projectInvariants(project as z.infer<typeof resolvedProjectObjectSchema>, ctx);
+  return issues.length ? { success: false, error: new z.ZodError(issues) } : { success: true, data: project };
+}

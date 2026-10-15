@@ -1,7 +1,8 @@
 import type { DesignProject, LibraryScope, LibraryVersion, Operation, ProjectSummary, ProjectVersion, ProjectVersionSummary } from '../shared/types';
-import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadSchema, assetUploadCancellationSchema, cancelAssetUploadSchema, beginAssetUploadSchema, libraryVersionRequestSchema, libraryVersionSchema, projectSchema, projectVersionSchema, projectVersionSummarySchema, readAssetChunkSchema } from '../shared/validation';
+import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadSchema, assetUploadCancellationSchema, cancelAssetUploadSchema, beginAssetUploadSchema, libraryVersionRequestSchema, libraryVersionSchema, projectSchema, projectVersionSchema, projectVersionSummarySchema, readAssetChunkSchema, validateProjectUpdate } from '../shared/validation';
 import { MAX_ASSET_CHUNK_BYTES, type AssetChunk, type AssetMetadata, type AssetUpload } from '../shared/media';
 import { callTool, embedded } from './bridge';
+import { applyProjectDelta } from '../shared/project-delta';
 import { recordCanvasWork } from './canvas-profile';
 
 export const AUTH_REQUIRED_EVENT = 'codex-design:auth-required';
@@ -66,6 +67,17 @@ export function projectFromResult(result?: Record<string, unknown>): DesignProje
   if (result?.historyPreview === true || data?.historyPreview === true) return undefined;
   const parsed = projectSchema.safeParse(data?.project);
   return parsed.success ? parsed.data : undefined;
+}
+// A delta response is rebuilt on the editor's copy at its base revision: unchanged pages keep their validated objects and
+// only changed parts are parsed. undefined asks the caller to read the whole project (the base no longer matches).
+function savedProject(base: DesignProject, result: Record<string, unknown>): DesignProject | undefined {
+  const data = result?.structuredContent && typeof result.structuredContent === 'object' ? result.structuredContent as Record<string, unknown> : result;
+  if (data?.delta === undefined) return projectFromResult(result);
+  const merged = applyProjectDelta(base, data.delta);
+  if (merged === undefined) return undefined;
+  const parsed = validateProjectUpdate(base, merged);
+  if (!parsed.success) throw new ApiError('The server returned an invalid design update. Reopen the canvas and try again.', 502, 'invalid_response');
+  return parsed.data;
 }
 function requireProject(result: Record<string, unknown>): DesignProject {
   const project = projectFromResult(result);
@@ -187,11 +199,12 @@ export const client = {
     checkAborted(signal);
     return requireProject(result);
   },
-  async watch(id: string, afterRevision: number, signal?: AbortSignal): Promise<ProjectWatch> {
+  async watch(base: DesignProject, signal?: AbortSignal): Promise<ProjectWatch> {
     checkAborted(signal);
+    const id = base.id, afterRevision = base.revision;
     let result: Record<string, unknown>;
     try {
-      result = embedded ? await tool('canvas_watch_project', { projectId: id, afterRevision }) : await http(`/projects/${encodeURIComponent(id)}/changes?afterRevision=${encodeURIComponent(String(afterRevision))}`, undefined, signal);
+      result = embedded ? await tool('canvas_watch_project', { projectId: id, afterRevision, delta: true }) : await http(`/projects/${encodeURIComponent(id)}/changes?afterRevision=${encodeURIComponent(String(afterRevision))}&delta=1`, undefined, signal);
     } catch (error) {
       checkAborted(signal);
       const unsupported = error instanceof ApiError && (embedded
@@ -204,10 +217,10 @@ export const client = {
     if (result.projectId !== id || !Number.isSafeInteger(result.revision) || (result.revision as number) < 0 || typeof result.changed !== 'boolean') throw new ApiError('The server returned an invalid revision update.', 502, 'invalid_response');
     const revision = result.revision as number;
     if (!result.changed) {
-      if (result.project !== undefined || revision > afterRevision) throw new ApiError('The server returned an invalid revision heartbeat.', 502, 'invalid_response');
+      if (result.project !== undefined || result.delta !== undefined || revision > afterRevision) throw new ApiError('The server returned an invalid revision heartbeat.', 502, 'invalid_response');
       return { projectId: id, revision, changed: false };
     }
-    const project = requireProject(result);
+    const project = savedProject(base, result) ?? await client.get(id, signal);
     if (revision <= afterRevision || project.id !== id || project.revision !== revision) throw new ApiError('The server returned an invalid project revision.', 502, 'invalid_response');
     return { projectId: id, revision, changed: true, project };
   },
@@ -249,8 +262,10 @@ export const client = {
   async create(name: string, template: 'blank' | 'demo'): Promise<DesignProject> {
     return requireProject(embedded ? await tool('canvas_create_project', { name, template }) : { project: await http('/projects', { name, template }) });
   },
-  async mutate(id: string, expectedRevision: number, operations: Operation[]): Promise<DesignProject> {
-    return requireProject(embedded ? await tool('canvas_edit_project', { projectId: id, expectedRevision, operations }) : { project: await http(`/projects/${encodeURIComponent(id)}/operations`, { expectedRevision, operations }) });
+  async mutate(base: DesignProject, operations: Operation[]): Promise<DesignProject> {
+    const id = base.id, expectedRevision = base.revision;
+    const result = embedded ? await tool('canvas_edit_project', { projectId: id, expectedRevision, operations, delta: true }) : await http<Record<string, unknown>>(`/projects/${encodeURIComponent(id)}/operations?delta=1`, { expectedRevision, operations });
+    return savedProject(base, result) ?? await client.get(id);
   },
   async importProject(project: unknown): Promise<DesignProject> {
     return requireProject(embedded ? await tool('canvas_import_project', { project }) : { project: await http('/projects/import', { project }) });

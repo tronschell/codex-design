@@ -8,6 +8,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { ProjectStore } from './store.ts';
 import { createApiRouter } from './api.ts';
 import { createMcpServer } from './mcp.ts';
+import { MAX_DOCUMENT_BYTES } from '../shared/validation.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const port = Number(process.env.PORT || 4310), host = process.env.CODEX_DESIGN_HOST || '127.0.0.1';
@@ -48,7 +49,8 @@ const store = new ProjectStore(dataDir);
 await store.init();
 canonicalDataDir = await realpath(dataDir);
 app.use('/api', createApiRouter(store));
-app.post('/mcp', express.json({ limit: '2mb' }), async (req, res) => {
+// Imports carry a whole document, so MCP accepts the document limit; edit transactions are still bounded by operationsSchema.
+app.post('/mcp', express.json({ limit: MAX_DOCUMENT_BYTES + 64 * 1024 }), async (req, res) => {
   const server = createMcpServer(store, { baseUrl });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => { void transport.close(); void server.close(); });

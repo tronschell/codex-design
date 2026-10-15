@@ -6,7 +6,7 @@ import { createShaderRenderer, shaderRuntimeOptions } from '../shared/shaders';
 import { designSystemMarkdown, tokenCssVariables } from '../shared/design-system';
 import { canvasMapLayout, canvasMapPngReason, exportCanvasMap, exportFilename, exportHandoffPrompt, exportTargetHtml, exportTargetProject, exportTargetReact, exportTargetSvg, type CanvasMapSettings, type ExportFormat, type ExportTarget } from '../shared/export-formats';
 import { ASSET_MIME_TYPES, MAX_ASSET_BYTES, assetFilename, isAssetRef, projectAssetRefs, type AssetMetadata } from '../shared/media';
-import { MAX_INPUT_BYTES, projectSchema, projectImportSchema, designLibrarySchema } from '../shared/validation';
+import { MAX_DOCUMENT_BYTES, documentLimitLabel, projectSchema, projectImportSchema, designLibrarySchema } from '../shared/validation';
 import { exportLibrary, libraryProject, libraryReferenceFiles } from '../shared/library-export';
 import { MAX_ARCHIVE_BYTES, unzipFiles, zipFiles, type ArchiveFiles } from '../shared/zip';
 import { implementationNotesMarkdown } from '../shared/implementation-notes';
@@ -17,7 +17,7 @@ export interface ExportFile { name: string; data: string | Uint8Array<ArrayBuffe
 type LoadedAsset = { asset: AssetMetadata; bytes: Uint8Array };
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
-async function loadAssets(project: DesignProject, includeInspiration = true, signal?: AbortSignal, maxBytes = MAX_ARCHIVE_BYTES - MAX_INPUT_BYTES): Promise<LoadedAsset[]> {
+async function loadAssets(project: DesignProject, includeInspiration = true, signal?: AbortSignal, maxBytes = MAX_ARCHIVE_BYTES - MAX_DOCUMENT_BYTES): Promise<LoadedAsset[]> {
   const assets: LoadedAsset[] = [];
   let total = 0;
   const document = includeInspiration ? project : { ...project, boards: project.boards.map(board => ({ ...board, inspiration: undefined })) };
@@ -272,7 +272,7 @@ const archiveManifest = z.object({
 
 export async function importProjectFile(file: File): Promise<DesignProject> {
   const isZip = /\.zip$/i.test(file.name) || /(?:application\/zip|application\/x-zip-compressed)/i.test(file.type);
-  if (file.size > (isZip ? MAX_ARCHIVE_BYTES : MAX_INPUT_BYTES)) throw new Error(isZip ? 'Project archives must be no larger than 256 MiB.' : 'Project JSON files must be no larger than 2 MiB.');
+  if (file.size > (isZip ? MAX_ARCHIVE_BYTES : MAX_DOCUMENT_BYTES)) throw new Error(isZip ? 'Project archives must be no larger than 256 MiB.' : `Project JSON files must be no larger than ${documentLimitLabel}.`);
   if (!isZip) {
     let input: unknown;
     try { input = JSON.parse(await file.text()); } catch { throw new Error('The project JSON is unreadable. Choose a Codex Design project file.'); }
@@ -282,7 +282,7 @@ export async function importProjectFile(file: File): Promise<DesignProject> {
   }
   const files = unzipFiles(new Uint8Array(await file.arrayBuffer()));
   if (!files['design.json']) throw new Error('This archive has no editable design.json. Choose an editable project or source ZIP.');
-  if (files['design.json'].byteLength > MAX_INPUT_BYTES * 4) throw new Error('The editable document exceeds 8 MiB. Import a smaller scope.');
+  if (files['design.json'].byteLength > MAX_DOCUMENT_BYTES * 4) throw new Error(`The editable document exceeds ${MAX_DOCUMENT_BYTES * 4 / 1024 / 1024} MiB. Import a smaller scope.`);
   let input: unknown, manifestInput: unknown;
   try { input = JSON.parse(utf8.decode(files['design.json'])); manifestInput = files['manifest.json'] ? JSON.parse(utf8.decode(files['manifest.json'])) : undefined; }
   catch { throw new Error('The archive contains an unreadable document or manifest. Export the project again.'); }
@@ -290,7 +290,7 @@ export async function importProjectFile(file: File): Promise<DesignProject> {
   if (!parsed.success) throw new Error(`Invalid project document: ${parsed.error.issues[0]?.message ?? 'Unknown structure'}`);
   if (manifestInput && typeof manifestInput === 'object' && 'kind' in manifestInput && manifestInput.kind === 'library') {
     const manifest = archiveManifest.safeParse(manifestInput), libraryBytes = files['codex-design.library.json'];
-    if (!manifest.success || !libraryBytes || libraryBytes.byteLength > MAX_INPUT_BYTES) throw new Error('This library needs its original version-1 manifest and editable JSON.');
+    if (!manifest.success || !libraryBytes || libraryBytes.byteLength > MAX_DOCUMENT_BYTES) throw new Error('This library needs its original version-1 manifest and editable JSON.');
     let libraryInput: unknown;
     try { libraryInput = JSON.parse(utf8.decode(libraryBytes)); }
     catch { throw new Error('The library JSON is unreadable. Export the library again.'); }
@@ -298,7 +298,7 @@ export async function importProjectFile(file: File): Promise<DesignProject> {
     if (!library.success) throw new Error('This library format is unsupported or invalid. Use a version-1 Codex Design library.');
     if (JSON.stringify(library.data.project) !== JSON.stringify(parsed.data)) throw new Error('The library JSON and editable document disagree. Import an original library ZIP.');
   }
-  if (new TextEncoder().encode(JSON.stringify(parsed.data)).byteLength > MAX_INPUT_BYTES) throw new Error('The normalized project document exceeds 2 MiB. Import a smaller scope.');
+  if (new TextEncoder().encode(JSON.stringify(parsed.data)).byteLength > MAX_DOCUMENT_BYTES) throw new Error(`The normalized project document exceeds ${documentLimitLabel}. Import a smaller scope.`);
   const refs = projectAssetRefs(parsed.data);
   if (!refs.length) return client.importProject(parsed.data);
   const manifest = archiveManifest.safeParse(manifestInput);

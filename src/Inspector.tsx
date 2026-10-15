@@ -54,25 +54,94 @@ function ToggleField({ label, value, onChange }: { label: string; value: boolean
   return <label className="property-toggle"><span>{label}</span><input type="checkbox" checked={value} onChange={event => onChange(event.target.checked)}/></label>;
 }
 
+type LayerIndex = { byId: Map<string, DesignNode>; childrenByParent: Map<string, DesignNode[]>; roots: DesignNode[] };
+type LayerTreeProps = { index: LayerIndex; matchingIds: Set<string> | null; selectedIds: string[]; projectId: string; pageId: string; revealRequest: number; actions: React.RefObject<Pick<Props, 'onSelect' | 'onFocus'>> };
+// LAYER_LIST_PADDING mirrors .layer-tree padding-top in styles.css.
+const LAYER_ROW_HEIGHT = 22, LAYER_CHUNK = 20, LAYER_LIST_PADDING = 2;
+// Memoized apart from the inspector (whose callbacks change on every canvas drag move) and windowed: only the rows in view
+// render, so a page with thousands of layers costs a few dozen rows per update instead of every expanded row. The window
+// moves in whole chunks so ordinary scrolling re-renders only when it leaves the chunk, not on every scroll event.
+const layerChunk = (scrollTop: number) => Math.floor(scrollTop / LAYER_ROW_HEIGHT / LAYER_CHUNK) * LAYER_CHUNK;
+const LayerTree = memo(function LayerTree({ index, matchingIds, selectedIds, projectId, pageId, revealRequest, actions }: LayerTreeProps) {
+  const { byId, childrenByParent, roots } = index;
+  const selectedId = selectedIds.at(-1) ?? null;
+  const selectionSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [firstRow, setFirstRow] = useState(0), [viewHeight, setViewHeight] = useState(176);
+  const tree = useRef<HTMLDivElement>(null), revealedSelection = useRef(''), scrollTop = useRef(0);
+  const rows = useMemo(() => {
+    const rows: { node: DesignNode; depth: number; hasChildren: boolean; open: boolean }[] = [];
+    const visit = (node: DesignNode, depth: number) => {
+      const children = (childrenByParent.get(node.id) || []).filter(child => !matchingIds || matchingIds.has(child.id)), open = !!matchingIds || expanded.has(node.id);
+      rows.push({ node, depth, hasChildren: children.length > 0, open });
+      if (open) for (const child of children) visit(child, depth + 1);
+    };
+    for (const root of roots) if (!matchingIds || matchingIds.has(root.id)) visit(root, 0);
+    return rows;
+  }, [roots, childrenByParent, matchingIds, expanded]);
+  useLayoutEffect(() => {
+    const element = tree.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setViewHeight(element.clientHeight));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    if (!selectedId) { revealedSelection.current = ''; return; }
+    let current = byId.get(selectedId);
+    const ancestors = new Set<string>();
+    while (current?.parentId && !ancestors.has(current.parentId)) {
+      ancestors.add(current.parentId); current = byId.get(current.parentId);
+    }
+    const revealKey = JSON.stringify([projectId, pageId, selectedId, [...ancestors], revealRequest]);
+    if (revealedSelection.current === revealKey) return;
+    if ([...ancestors].some(id => !expanded.has(id))) {
+      setExpanded(previous => new Set([...previous, ...ancestors]));
+      return;
+    }
+    const element = tree.current, rowIndex = rows.findIndex(row => row.node.id === selectedId);
+    if (!element || rowIndex < 0) return;
+    // Scroll only the layer list, without moving the canvas or stealing keyboard focus.
+    // Rows have a fixed height below the list's 2px top padding, so this reads no layout unless it has to scroll.
+    const top = LAYER_LIST_PADDING + rowIndex * LAYER_ROW_HEIGHT, bottom = top + LAYER_ROW_HEIGHT, scrolled = scrollTop.current;
+    const next = top < scrolled ? top : bottom > scrolled + viewHeight ? bottom - viewHeight : scrolled;
+    if (next !== scrolled) { element.scrollTop = next; scrollTop.current = element.scrollTop; }
+    setFirstRow(layerChunk(scrollTop.current));
+    revealedSelection.current = revealKey;
+  }, [selectedId, projectId, pageId, byId, revealRequest, expanded, rows, viewHeight]);
+  const start = Math.max(0, firstRow - LAYER_CHUNK), end = Math.min(rows.length, firstRow + Math.ceil(viewHeight / LAYER_ROW_HEIGHT) + 2 * LAYER_CHUNK);
+  return <div ref={tree} className="layer-tree" aria-label="Layers" onScroll={event => { scrollTop.current = event.currentTarget.scrollTop; setFirstRow(layerChunk(scrollTop.current)); }}>
+    {rows.length > 0 && <div className="relative" style={{ height: rows.length * LAYER_ROW_HEIGHT }}><div className="absolute inset-x-0 top-0" style={{ transform: `translateY(${start * LAYER_ROW_HEIGHT}px)` }}>{rows.slice(start, end).map(({ node: n, depth, hasChildren, open }) => {
+      recordCanvasWork('inspectorRows');
+      const Icon = n.type === 'frame' ? Frame : n.type === 'text' ? Type : n.type === 'code' ? Code2 : n.type === 'image' ? ImageIcon : n.type === 'video' ? Video : n.type === 'shader' ? Sparkles : Square;
+      return <div key={n.id} className={`layer-row h-[22px] ${selectionSet.has(n.id) ? 'selected' : ''} ${selectedId === n.id ? 'primary-selection' : ''} ${n.hidden ? 'hidden-layer' : ''}`} style={{ paddingLeft: 5 + depth * 12 }}>
+        <button className="layer-expander" aria-label={`${open ? 'Collapse' : 'Expand'} ${n.name}`} disabled={!hasChildren || !!matchingIds} onClick={() => setExpanded(prev => { const next = new Set(prev); if (open) next.delete(n.id); else next.add(n.id); return next; })}>{hasChildren ? open ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}</button>
+        <button className="layer-select" aria-pressed={selectionSet.has(n.id)} onClick={event => actions.current.onSelect(n.id, event.shiftKey)} onDoubleClick={event => { if (!event.shiftKey) actions.current.onFocus(n.id); }}><Icon size={13}/><span>{n.name}</span>{n.locked && <LockKeyhole size={10}/>}</button>
+      </div>;
+    })}</div></div>}
+    {!byId.size ? <div className="tree-empty"><Layers size={21}/><p>Your layers will appear here.</p></div> : matchingIds?.size === 0 && <div className="layer-filter-empty">No matching layers.</div>}
+  </div>;
+});
+
 function Inspector({ project, page, selectedIds, navigationPending, onSelect, onChange, onClose, onDelete, onDuplicate, onFocus, onOpenDesignSystem, onStateView }: Props) {
   const selectedId = selectedIds.at(-1) ?? null, multiple = selectedIds.length > 1;
-  const selectionSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const panel = usePanelResize('codex-design:inspector-width');
   const [tab, setTab] = useState<'Properties' | 'Code' | 'Tweaks'>('Properties');
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [source, setSource] = useState(''), [copied, setCopied] = useState(false);
   const [query, setQuery] = useState(''), [assetError, setAssetError] = useState(''), [linkError, setLinkError] = useState('');
   const [revealRequest, setRevealRequest] = useState(0);
-  const layerTree = useRef<HTMLDivElement>(null), revealedSelection = useRef('');
   const [uploadState, setUploadState] = useState<'uploading' | 'stopping' | null>(null);
   const uploading = uploadState !== null;
   const uploadController = useRef<AbortController | null>(null);
   const mediaInput = useRef<HTMLInputElement>(null), posterInput = useRef<HTMLInputElement>(null);
   const currentProject = useRef(project), currentPage = useRef(page.id), mounted = useRef(false);
+  // A stable ref keeps LayerTree memoized while App's callbacks change identity during canvas gestures.
+  const layerActions = useRef({ onSelect, onFocus });
+  layerActions.current = { onSelect, onFocus };
   currentProject.current = project; currentPage.current = page.id;
   useLayoutEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useLayoutEffect(() => () => { uploadController.current?.abort(); }, [project.id, page.id, selectedId, multiple, navigationPending]);
-  const { byId, childrenByParent, roots } = useMemo(() => {
+  const layerIndex = useMemo<LayerIndex>(() => {
     const byId = new Map<string, DesignNode>(), childrenByParent = new Map<string, DesignNode[]>(), roots: DesignNode[] = [];
     for (const node of page.nodes) {
       byId.set(node.id, node);
@@ -85,9 +154,20 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
     }
     return { byId, childrenByParent, roots };
   }, [page.nodes]);
+  const { byId } = layerIndex;
   const node = selectedId ? byId.get(selectedId) : undefined;
   const resolved = useMemo(() => resolvedNodes(page.nodes, project.designSystem), [page.nodes, project.designSystem]);
   const effective = useMemo(() => resolved.find(item => item.id === selectedId), [resolved, selectedId]);
+  // Exports scope a linked layer's descendants to its states, and focus needs a link to land on.
+  const stateLink = useMemo(() => {
+    if (!node) return null;
+    const linked = (item: DesignNode) => !!item.href && isSafeLink(item.href), { byId, childrenByParent: children } = layerIndex;
+    if (linked(node)) return 'own' as const;
+    for (let parent = byId.get(node.parentId ?? ''), seen = new Set<string>(); parent && !seen.has(parent.id); seen.add(parent.id), parent = byId.get(parent.parentId ?? '')) if (linked(parent)) return 'ancestor' as const;
+    const pending = [node.id], visited = new Set<string>();
+    while (pending.length) { const id = pending.pop()!; if (visited.has(id)) continue; visited.add(id); for (const child of children.get(id) ?? []) { if (linked(child)) return 'contains' as const; pending.push(child.id); } }
+    return null;
+  }, [node, layerIndex]);
   const matchingIds = useMemo(() => {
     const search = query.trim().toLocaleLowerCase();
     if (!search) return null;
@@ -100,28 +180,6 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
     }
     return ids;
   }, [query, page.nodes, byId]);
-  useLayoutEffect(() => {
-    if (!selectedId) { revealedSelection.current = ''; return; }
-    let current = byId.get(selectedId);
-    const ancestors = new Set<string>();
-    while (current?.parentId && !ancestors.has(current.parentId)) {
-      ancestors.add(current.parentId); current = byId.get(current.parentId);
-    }
-    const revealKey = JSON.stringify([project.id, page.id, selectedId, [...ancestors], revealRequest]);
-    if (revealedSelection.current === revealKey) return;
-    if ([...ancestors].some(id => !expanded.has(id))) {
-      setExpanded(previous => new Set([...previous, ...ancestors]));
-      return;
-    }
-    const tree = layerTree.current, row = tree?.querySelector<HTMLElement>('.layer-row.primary-selection');
-    if (!tree || !row) return;
-    const bounds = tree.getBoundingClientRect(), selected = row.getBoundingClientRect();
-    const top = bounds.top + tree.clientTop, bottom = top + tree.clientHeight;
-    // Scroll only the layer list, without moving the canvas or stealing keyboard focus.
-    if (selected.top < top) tree.scrollTop += selected.top - top;
-    else if (selected.bottom > bottom) tree.scrollTop += selected.bottom - bottom;
-    revealedSelection.current = revealKey;
-  }, [selectedId, project.id, page.id, byId, revealRequest, expanded, matchingIds]);
   const savedSource = node?.type === 'shader' ? shaderCodeSource(node.shader) : node?.source || '';
   useEffect(() => { setSource(savedSource); }, [node?.id, savedSource]);
   useEffect(() => { setAssetError(''); }, [node?.id]);
@@ -168,15 +226,6 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
   const changeToken = (key: 'accent' | 'background' | 'foreground' | 'fontFamily', value: string) => {
     return onChange([{ type: 'set_tokens', tokens: { [key]: value } }]);
   };
-  const renderRow = (n: DesignNode, depth = 0): React.ReactNode => {
-    recordCanvasWork('inspectorRows');
-    const children = (childrenByParent.get(n.id) || []).filter(child => !matchingIds || matchingIds.has(child.id)), open = !!matchingIds || expanded.has(n.id);
-    const Icon = n.type === 'frame' ? Frame : n.type === 'text' ? Type : n.type === 'code' ? Code2 : n.type === 'image' ? ImageIcon : n.type === 'video' ? Video : n.type === 'shader' ? Sparkles : Square;
-    return <div key={n.id}><div className={`layer-row ${selectionSet.has(n.id) ? 'selected' : ''} ${selectedId === n.id ? 'primary-selection' : ''} ${n.hidden ? 'hidden-layer' : ''}`} style={{ paddingLeft: 5 + depth * 12 }}>
-      <button className="layer-expander" aria-label={`${open ? 'Collapse' : 'Expand'} ${n.name}`} disabled={!children.length || !!matchingIds} onClick={() => setExpanded(prev => { const next = new Set(prev); if (open) next.delete(n.id); else next.add(n.id); return next; })}>{children.length ? open ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}</button>
-      <button className="layer-select" aria-pressed={selectionSet.has(n.id)} onClick={event => onSelect(n.id,event.shiftKey)} onDoubleClick={event => { if (!event.shiftKey) onFocus(n.id); }}><Icon size={13}/><span>{n.name}</span>{n.locked && <LockKeyhole size={10}/>}</button>
-    </div>{open && children.map(child => renderRow(child, depth + 1))}</div>;
-  };
   const generated = useMemo(() => tab === 'Code' && !multiple && node && node.type !== 'code' && node.type !== 'shader' ? (recordCanvasWork('codeExports'), exportNodeCode(project, page.id, node.id)) : '', [tab, multiple, project, page.id, node?.id, node?.type]);
   const displayCode = useMemo(() => generated ? readableSource(generated) : '', [generated]);
   const shaderColors = node?.shader?.colors ?? defaultShader().colors!;
@@ -186,7 +235,7 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
     <div className="code-heading"><Code2 size={15}/><span>{node.type === 'code' ? 'Editable HTML / CSS' : node.type === 'shader' ? officialShader ? 'Shaders.com · JavaScript' : 'Fragment shader · GLSL' : `${node.type} · generated source`}</span><button className="icon-button" aria-label="Copy element code" onClick={() => { void navigator.clipboard.writeText(node.type === 'code' || node.type === 'shader' ? source : generated).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); }}>{copied ? <Check size={14}/> : <Copy size={14}/>}</button></div>
     {node.type === 'code' || (node.type === 'shader' && node.shader?.preset === 'custom') ? <>
       <AutosaveTextarea aria-label={node.type === 'shader' ? 'Fragment shader source' : 'Component source'} className="source-editor" spellCheck={false} maxLength={node.type === 'shader' ? 30000 : undefined} value={node.type === 'shader' ? shaderFragmentSource(node.shader) : node.source || ''} onInput={event => setSource(event.currentTarget.value)} onSave={source => node.type === 'shader' ? shader({ fragment: source }) : patch({ source })}/>
-      <p className="inspector-hint source-hint">{node.type === 'shader' ? 'Uniforms: u_resolution (vec2), u_time, u_scale, u_seed (float), u_color1–4 (vec4). Compiler errors appear on the layer.' : node.live ? 'Inline scripts run in a sandbox with no network, storage or parent access. Double-click the selected layer to interact; Esc or selecting elsewhere ends it. HTML and React exports run the scripts.' : 'HTML and CSS render in an isolated preview. Scripts are disabled.'}</p>
+      <p className="inspector-hint source-hint">{node.type === 'shader' ? 'Uniforms: u_resolution (vec2), u_time, u_scale, u_seed (float), u_color1–4 (vec4). Compiler errors appear on the layer.' : node.live ? 'Inline scripts run in a sandbox without storage or parent access; fetch, sockets and WebRTC are blocked, and a frame that navigates itself is reset. Double-click the selected layer to interact; Esc or selecting elsewhere ends it. HTML exports run it after Run is pressed; React exports run it on mount.' : 'HTML and CSS render in an isolated preview. Scripts are disabled.'}</p>
       {node.type === 'code' && <ToggleField label="Run scripts (live)" value={!!node.live} onChange={live => { setLiveFrame(null); void patch({ live: live ? true : false }); }}/>}
     </> : node.type === 'shader' ? <><pre className="code-preview shader-code-preview"><code>{source}</code></pre>{!officialShader && <button className="secondary-button save-source" onClick={() => shader({ preset: 'custom', fragment: shaderFragmentSource(node.shader) })}>Customize shader</button>}</> : <pre className="code-preview"><code>{displayCode}</code></pre>}
   </>;
@@ -194,7 +243,7 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
     <div {...panel.handleProps}/>
     <div className="inspector-tabs" role="tablist">{(['Properties', 'Code', 'Tweaks'] as const).map(name => <button key={name} role="tab" aria-selected={name === tab} className={name === tab ? 'active' : ''} onClick={() => setTab(name)}>{name}</button>)}<button className="icon-button close-inspector" aria-label="Close inspector" onClick={onClose}><X size={17}/></button></div>
     <div className="layer-filter"><Search size={13} aria-hidden="true"/><input aria-label="Filter layers" placeholder="Filter layers" value={query} onChange={event => setQuery(event.target.value)}/>{query && <button className="icon-button" aria-label="Clear layer filter" onClick={() => setQuery('')}><X size={12}/></button>}<button className="icon-button" aria-label="Reveal selected layer" title={query ? 'Clear filter and reveal selected layer' : 'Reveal selected layer'} disabled={!node} onClick={() => { setQuery(''); setRevealRequest(request => request + 1); }}><LocateFixed size={13}/></button></div>
-    <div ref={layerTree} className="layer-tree" aria-label="Layers">{roots.filter(root => !matchingIds || matchingIds.has(root.id)).map(n => renderRow(n))}{!page.nodes.length ? <div className="tree-empty"><Layers size={21}/><p>Your layers will appear here.</p></div> : matchingIds?.size === 0 && <div className="layer-filter-empty">No matching layers.</div>}</div>
+    <LayerTree index={layerIndex} matchingIds={matchingIds} selectedIds={selectedIds} projectId={project.id} pageId={page.id} revealRequest={revealRequest} actions={layerActions}/>
     <div className="inspector-content" key={`${project.id}/${page.id}/${tab}/${node?.id ?? ''}`}>
       {tab === 'Tweaks' ? <><Section title="Project"><Field label="Name" value={project.name} onChange={name => onChange([{ type: 'rename_project', name }])}/><p className="inspector-hint">Linked tokens update across every board. Custom values remain custom.</p>{onOpenDesignSystem && <button className="secondary-button" onClick={onOpenDesignSystem}><Layers size={13}/>Open design system</button>}</Section><Section title="Colors"><ColorField label="Accent" value={project.tokens.accent} onChange={value => changeToken('accent', value)}/><ColorField label="Background" value={project.tokens.background} onChange={value => changeToken('background', value)}/><ColorField label="Foreground" value={project.tokens.foreground} onChange={value => changeToken('foreground', value)}/></Section><Section title="Typography"><FontPicker label="Font family" value={project.tokens.fontFamily} onChange={value => changeToken('fontFamily', value)} disabled={navigationPending} families={project.designSystem.tokens.filter(token => token.kind === 'fontFamily').map(token => String(token.value))}/></Section><Section title="Design context"><p className="inspector-hint">{project.pages.length} pages · {project.pages.reduce((sum,p) => sum + p.nodes.filter(n => n.type === 'frame' && !n.parentId).length,0)} screens</p><p className="inspector-hint">All elements, code, tokens and component conversations are available to Codex through this plugin.</p><code className="project-id">{project.id}</code></Section></> : multiple ? <section className="inspector-section"><h3>{selectedIds.length} objects selected</h3><p className="inspector-hint">Shift-click to add or remove layers. Select one layer to edit its properties or source.</p><div className="selection-actions" role="toolbar" aria-label="Selected objects" tabIndex={-1}><button className="secondary-button" disabled={navigationPending} onClick={event=>{event.currentTarget.parentElement?.focus({preventScroll:true});onDuplicate();}}><Copy size={13}/>Duplicate</button><button className="secondary-button" disabled={navigationPending} onClick={event=>{event.currentTarget.parentElement?.focus({preventScroll:true});onDelete();}}><Trash2 size={13}/>Delete</button></div><p className="inspector-hint">Locked or hidden layers and stack positions stay protected. Free-positioned layers move together; nested selections are handled once.</p></section> : !node ? <div className="nothing-selected"><MouseIcon/><h3>Select something to inspect</h3><p>Click an element on the canvas or choose a layer above.</p><span>Double-click text to edit it.</span></div> : tab === 'Code' ? codePanel : <>
         <div className="selection-heading"><Field label="Layer name" value={node.name} onChange={name => patch({ name })}/><div className="selection-actions"><button className="icon-button" title={`Duplicate layer · ${shortcut('Ctrl+D')}`} aria-label="Duplicate layer" onClick={onDuplicate}><Copy size={14}/></button><button className="icon-button" aria-label={node.hidden ? 'Show layer' : 'Hide layer'} onClick={() => patch({ hidden: !node.hidden })}>{node.hidden ? <EyeOff size={15}/> : <Eye size={15}/>}</button><button className="icon-button" aria-label={node.locked ? 'Unlock layer' : 'Lock layer'} onClick={() => patch({ locked: !node.locked })}>{node.locked ? <LockKeyhole size={14}/> : <Unlock size={14}/>}</button><button className="icon-button danger" aria-label="Delete layer" onClick={onDelete}><Trash2 size={14}/></button></div></div>
@@ -230,7 +279,7 @@ function Inspector({ project, page, selectedIds, navigationPending, onSelect, on
           return value === undefined ? Promise.resolve(true) : style({ [property]: value }).then(Boolean);
         }}/>
         <Effects key={`${project.id}/${page.id}/${node.id}`} node={node} disabled={navigationPending} onChange={effects=>patch({effects}).then(Boolean)}/>
-        <StateStyles key={`states/${project.id}/${page.id}/${node.id}`} node={node} disabled={navigationPending} onChange={states=>style({states})} onView={onStateView}/>
+        <StateStyles key={`states/${project.id}/${page.id}/${node.id}`} node={node} link={stateLink} disabled={navigationPending} onChange={states=>style({states})} onView={onStateView}/>
         <Advanced key={`advanced/${project.id}/${page.id}/${node.id}`} node={effective??node} disabled={navigationPending} onChange={style}/>
         <details className="inspector-section inspector-link"><summary>Link<ChevronDown size={13}/></summary>
           <Field key={node.id} label="URL" value={node.href ?? ''} disabled={navigationPending} title="HTTP(S), mailto:, tel: and # links open in HTML and React exports." onChange={link}/>
