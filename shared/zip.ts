@@ -21,7 +21,7 @@ function safePath(path: string) {
 }
 
 // Store-only archives keep binary media portable without adding a compression dependency.
-export function zipFiles(files: ArchiveFiles): Uint8Array {
+export function zipFiles(files: ArchiveFiles): Uint8Array<ArrayBuffer> {
   const local: Uint8Array[] = [], central: Uint8Array[] = [];
   let offset = 0, centralSize = 0;
   if (Object.keys(files).length > 10_000) throw new Error('The export contains too many files. Export a smaller scope.');

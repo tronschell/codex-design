@@ -13,7 +13,7 @@ import { implementationNotesMarkdown } from '../shared/implementation-notes';
 import { client } from './client';
 
 export interface ExportText { label: string; text: string }
-export interface ExportFile { name: string; data: string | Uint8Array; mimeType: string }
+export interface ExportFile { name: string; data: string | Uint8Array<ArrayBuffer>; mimeType: string }
 type LoadedAsset = { asset: AssetMetadata; bytes: Uint8Array };
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
@@ -244,8 +244,7 @@ export async function exportFile(project: DesignProject, target: ExportTarget, f
 }
 
 export function downloadExport(file: ExportFile) {
-  const data = typeof file.data === 'string' ? file.data : file.data.slice().buffer as ArrayBuffer;
-  const url = URL.createObjectURL(new Blob([data], { type: file.mimeType }));
+  const url = URL.createObjectURL(new Blob([file.data], { type: file.mimeType }));
   const link = document.createElement('a'); link.href = url; link.download = file.name; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 3000);
 }
