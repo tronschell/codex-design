@@ -1,6 +1,6 @@
 import { stateRuleSchema } from '../shared/feature-schema';
 import { useState } from 'react';
-import { ArrowRight, ChevronDown, Code2, Eye, Highlighter, Plus, Trash2, X } from 'lucide-react';
+import { ArrowRight, Code2, Eye, Highlighter, Plus, Trash2, X } from 'lucide-react';
 import type { DesignNode, DesignPage, DesignProject, Operation, Viewport } from '../shared/types';
 import type { ApplicationStateContext, StatePreview, StateRule, StateValue, StateValues, StateVariable } from '../shared/application-state-types';
 import { conditionMatches, findStateOwner, membershipContext, resolveState, stateContextFor, stateDefaults, stateSubtree, validateValues, type StateDifference } from '../shared/application-state';

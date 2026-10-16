@@ -1153,3 +1153,23 @@ Direct `canvas_layout_diagram` observation against an isolated saved review proj
 All ten elements moved; the arranged example has five unobstructed horizontal connections. Worker computation was 45 ms for this observation, excluding startup and IPC. There is no comparable prior worker timing, so no speed improvement is claimed. This single small workload does not establish general optimality, large-graph throughput, or frame-rate improvement. UI inspection also confirmed Cancel preserved the saved diagram and Apply/Undo restored coordinates.
 
 No tests were added or run. See [diagramming.md](diagramming.md) for behavior and bounds.
+
+
+## Unused shared media reads — October 16, 2026
+
+The final consumer of an unfinished image/video/comment-attachment asset previously left its metadata/chunk/checksum pipeline running to completion. The shared URL entry now passes an AbortController signal through the existing client and releases work after its final consumer leaves. A microtask defers cleanup across the same effect flush, preserving immediate reacquisition and active shared consumers. Cache identity checks protect a newer entry from old completion/failure cleanup; a post-read abort guard prevents a late unused Blob URL. Completed URLs are still revoked after their last consumer leaves.
+
+Method and workload: two existing persisted PNGs, 2,168,304 B and 2,463,860 B (4,632,164 B total). No asset copies, verification designs or synthetic workloads were created. Node.js 24.19.0 runs the actual acquisition function extracted from before/after source and the unchanged metadata, chunk validation, base64 decoding and SHA-256 client pipeline. HTTP uses the production Express asset routes and ProjectStore on a temporary 127.0.0.1 port; a preceding middleware rejects non-GET and non-asset requests. The production store reads the original files. Profiling counters wrap complete JSON responses and do not replace response data. Consumer release is invoked directly after the first complete chunk JSON response for each image; this profiles abandoned-read continuation, not an actual canvas navigation gesture. Three alternating phase pairs run before/after, after/before, before/after, with a separate retained-consumer pass in each phase. All three pairs have identical counts below; reported values are per two-image pass.
+
+| Abandoned two-image workload | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Metadata requests | 2 | 2 | 0 | 0% |
+| Chunk requests | 6 | 2 | −4 | −66.7% |
+| Asset payload returned | 4,632,164 B | 2,097,152 B | −2,535,012 B | −54.7% |
+| JSON response bodies received | 6,177,489 B | 2,796,872 B | −3,380,617 B | −54.7% |
+
+The retained-consumer workload is unchanged: two metadata requests, six chunk requests, 4,632,164 B of asset payload and 6,177,489 B of JSON response bodies (0 absolute / 0% change). Both actual Blob snapshots retain their original asset SHA-256 hashes in every phase. Original saved asset sizes/hashes also match before and after the profile. JSON body counts use actual Content-Length values and include base64/metadata envelopes; they exclude HTTP headers, TCP overhead and connection setup.
+
+Practical effect: an abandoned read avoids the remaining four chunks in this measured workload, so media that is no longer displayed stops consuming that continuation data. This does not establish a whole-application speed or memory improvement. Browser navigation/scroll/pan latency, browser RAM, CPU, frame metrics, video decoding and installed-host behavior were not measured. Same-flush reacquisition and remaining shared consumers were inspected in source, including React's synchronous development effect disconnect/reconnect sequence; their gestures were not browser-exercised. An already dispatched embedded MCP chunk cannot be recalled; the existing signal checks stop the next read after it returns. HTTP fetches can also abort while in flight, but that earlier-abort case is not measured by this workload. Node Blob behavior does not establish host Blob/CSP compatibility.
+
+Strict unused-symbol TypeScript compilation passed after removing five unused imports in four recently committed diagram/state files; those removals change no behavior. No tests, assertions, fixtures, dependencies, project edits, media uploads, imports or visual verification designs were added or run. Raw read-only profiling source and results: `/private/tmp/codex-unused-media-profile/` (local scratch storage, not packaged). Baseline source is from d3a3823; the profile copies source code only and leaves saved assets in place.

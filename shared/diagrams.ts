@@ -1,6 +1,6 @@
 import { diamondGeometry, diamondPerimeter } from './diagram-geometry';
 import type { DesignNode, DesignProject } from './types';
-import type { DiagramEdge, DiagramEndpoint, DiagramPort, Point } from './diagram-types';
+import type { DiagramPort, Point } from './diagram-types';
 import { CONTAINERS, diagramById, stencilById } from './diagram-catalog';
 import { diagramShapeSvg, svgDocument } from './diagram-render';
 import { nodeWorldPoint, parentLocalPoint, visualBounds } from './effects';

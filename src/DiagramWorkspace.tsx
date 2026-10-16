@@ -3,7 +3,7 @@ import { ChevronLeft, X, Search, Plus, Workflow, Pin, WandSparkles, ArrowRight, 
 import type { DesignNode, DesignPage, DesignProject, Operation, Viewport } from '../shared/types';
 import type { DiagramEndpoint, DiagramKind, Point, RelationKind } from '../shared/diagram-types';
 import type { DiagramLayoutResult } from '../shared/diagram-layout-types';
-import { DIAGRAMS, STENCILS, diagramById, stencilById, makeDiagram, makeDiagramElement } from '../shared/diagram-catalog';
+import { DIAGRAMS, diagramById, stencilById, makeDiagram, makeDiagramElement } from '../shared/diagram-catalog';
 import { PORTS, choosePort, diagramFrame, diagramPerimeterDistance, portWorld } from '../shared/diagrams';
 import { stencilIcon } from '../shared/diagram-render';
 import { parentLocalPoint } from '../shared/effects';

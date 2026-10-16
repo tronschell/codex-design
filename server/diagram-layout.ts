@@ -1,5 +1,5 @@
 import { Worker } from 'node:worker_threads';
-import type { DesignPage, DesignProject, Operation } from '../shared/types';
+import type { DesignProject, Operation } from '../shared/types';
 import type { DiagramLayoutResult } from '../shared/diagram-layout-types';
 import { diagramFrame } from '../shared/diagrams';
 export function layoutDiagram(project:DesignProject,pageId:string,frameId:string,signal?:AbortSignal):Promise<DiagramLayoutResult>{

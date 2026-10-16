@@ -4,25 +4,30 @@ import type { DesignNode } from '../shared/types';
 import { isAssetRef } from '../shared/media';
 import { client } from './client';
 
-type AssetUrl = { users: number; promise: Promise<string>; url?: string };
+type AssetUrl = { users: number; controller: AbortController; promise: Promise<string>; url?: string };
 const assetUrls = new Map<string, AssetUrl>();
 
 function acquireAssetUrl(ref: string) {
   let entry = assetUrls.get(ref);
   if (!entry) {
-    const pending: AssetUrl = { users: 0, promise: Promise.resolve('') };
-    pending.promise = client.readAsset(ref).then(({ asset, bytes }) => {
+    const pending: AssetUrl = { users: 0, controller: new AbortController(), promise: Promise.resolve('') };
+    pending.promise = client.readAsset(ref, pending.controller.signal).then(({ asset, bytes }) => {
+      if (pending.controller.signal.aborted) throw new DOMException('The asset is no longer needed.', 'AbortError');
       const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: asset.mimeType }));
       pending.url = url;
-      if (!pending.users) { URL.revokeObjectURL(url); if (assetUrls.get(ref) === pending) assetUrls.delete(ref); }
       return url;
-    }, error => { if (assetUrls.get(ref) === pending) assetUrls.delete(ref); throw error; });
+    }).catch(error => { if (assetUrls.get(ref) === pending) assetUrls.delete(ref); throw error; });
     entry = pending; assetUrls.set(ref, entry);
   }
   entry.users++;
   return { promise: entry.promise, release() {
     entry.users--;
-    if (!entry.users && entry.url) { URL.revokeObjectURL(entry.url); if (assetUrls.get(ref) === entry) assetUrls.delete(ref); }
+    if (!entry.users) queueMicrotask(() => {
+      // React may reacquire this asset during the same effect flush (including Strict Mode).
+      if (entry.users || assetUrls.get(ref) !== entry) return;
+      assetUrls.delete(ref); entry.controller.abort();
+      if (entry.url) URL.revokeObjectURL(entry.url);
+    });
   } };
 }
 
