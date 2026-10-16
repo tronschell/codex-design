@@ -29,7 +29,7 @@ export function Select({ options, value, onChange, label, disabled, className = 
   const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
   const search = useRef({ text: '', time: 0 });
   const selected = options.find(option => option.value === value);
-  const visible = useMemo(() => searchable && query.trim() ? options.filter(option => `${option.label} ${option.value}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) : options, [options, searchable, query]);
+  const visible = useMemo(() => open && searchable && query.trim() ? options.filter(option => `${option.label} ${option.value}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) : options, [open, options, searchable, query]);
   const available = visible.map((option, index) => option.disabled ? -1 : index).filter(index => index !== -1);
 
   const close = (restoreFocus = false) => {
