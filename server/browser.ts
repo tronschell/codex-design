@@ -78,7 +78,7 @@ try {
   const address = httpServer.address();
   if (!address || typeof address === 'string') throw new Error('The local editor could not determine its port.');
   const baseUrl = `http://127.0.0.1:${address.port}`;
-  server = createMcpServer(store, { baseUrl, browser: { open: openBrowser } });
+  server = createMcpServer(store, { baseUrl, allowExportFiles: true, browser: { open: openBrowser } });
   server.server.onclose = shutdown;
   process.stdin.once('end', shutdown);
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);

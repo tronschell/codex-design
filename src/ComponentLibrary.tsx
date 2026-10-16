@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import ExportPanel from './ExportPanel';
+import { libraryProject } from '../shared/library-export';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Check, Component, Download, Plus, RefreshCw, Unlink } from 'lucide-react';
 import type { DesignProject, LibraryScope, Operation } from '../shared/types';
 import { uid } from './editor-utils';
@@ -29,6 +32,9 @@ export default function ComponentEditor({ discovery, project, pageId, selectedNo
   const page = project.pages.find(item => item.id === pageId), selected = page?.nodes.find(node => node.id === selectedNodeId);
   const instance = page?.nodes.find(node => node.componentInstance && Object.values(node.componentInstance.nodeMap).includes(selectedNodeId ?? ''));
   const definition = project.designSystem.components.find(item => item.id === componentId);
+  const [imageExport, setImageExport] = useState(false);
+  useEffect(()=>setImageExport(false),[componentId]);
+  const imageProject=useMemo(()=>{if(!definition)return null;const scoped=libraryProject(project,definition.id);return {...scoped,pages:[{...scoped.pages[0],nodes:definition.nodes}]};},[project,definition]);
   const local = useLocalDraft(`${project.id}/${pageId ?? ''}/${selectedNodeId ?? ''}/${componentId}/component-actions`, {name: selected?.name ?? '', description: '', label: ''});
   const {name, description, label} = local.value;
   const setName = (name: string) => local.setValue({name}), setDescription = (description: string) => local.setValue({description}), setLabel = (label: string) => local.setValue({label});
@@ -53,8 +59,9 @@ export default function ComponentEditor({ discovery, project, pageId, selectedNo
   const instances = definition ? project.pages.flatMap(item => item.nodes.filter(node => node.componentInstance?.componentId === definition.id).map(node => ({ page: item, node }))) : [];
 
   return <div className="library-panel-scroll" aria-busy={busy} onBlurCapture={local.onBlur} onCompositionStartCapture={local.onCompositionStart} onCompositionEndCapture={local.onCompositionEnd}>
+    {imageExport && imageProject && definition && createPortal(<ExportPanel key={definition.id} project={imageProject} componentId={definition.id} boardId={imageProject.boards[0].id} pageId={imageProject.pages[0].id} selectedIds={[]} savePending={busy||exportDisabled||disabled} onClose={()=>setImageExport(false)} onNotify={onNotify}/>,document.body)}
     {discovery}
-    <section className="library-section"><h3>Export library</h3><p className="library-field-note">Markdown, React, CSS and editable definitions.</p><div className="library-button-row"><button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport()}><Download size={13}/>Download library</button>{definition && <button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport(definition.id)}><Download size={13}/>Download component</button>}</div></section>
+    <section className="library-section"><h3>Export library</h3><p className="library-field-note">Markdown, React, CSS and editable definitions.</p><div className="library-button-row"><button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport()}><Download size={13}/>Download library</button>{definition && <button type="button" className="library-button" disabled={busy || exportDisabled} onClick={() => onExport(definition.id)}><Download size={13}/>Download .cxdp</button>}{definition && <button type="button" className="library-button" disabled={busy || exportDisabled || disabled} onClick={()=>setImageExport(true)}><Download size={13}/>Export image…</button>}</div></section>
     <section className="library-section library-editor-form">
       <h3>Create a component</h3>
       {selected && !instance ? <form onSubmit={event => {

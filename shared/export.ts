@@ -13,7 +13,7 @@ import { NODE_STATE_CASCADE, NODE_STATE_SELECTORS, applyNodeState } from './node
 export const textListStyle = { margin: 0, padding: 0, listStylePosition: 'inside' } as const;
 export const nodeLinkStyle = { position: 'absolute', inset: 0, display: 'block', borderRadius: 'inherit', pointerEvents: 'auto' } as const;
 
-export interface ExportOptions { assetUrls?: Record<string, string>; canvasSize?: { width: number; height: number }; nodeImages?: Record<string, string> }
+export interface ExportOptions { captureRuntime?: boolean; assetUrls?: Record<string, string>; canvasSize?: { width: number; height: number }; nodeImages?: Record<string, string> }
 interface RenderOptions extends ExportOptions { system: DesignSystem; styleFallbacks: ReadonlyMap<string, DesignNode['styles']>; hasLinks: boolean; staticMap?: boolean; included?: ReadonlySet<string>; stateRules?: string[] }
 
 // Callers holding immutable snapshots may pass a cache so stack children keep their positioned identity.
@@ -188,7 +188,7 @@ function renderNode(node: DesignNode, children: Map<string | null, DesignNode[]>
     : node.type === 'video'
       ? options.staticMap && node.media?.poster ? `<img alt="${escapeHtml(node.name)}" style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media.poster, options))}"/>` : `<video aria-label="${escapeHtml(node.media?.alt ?? node.name)}" playsinline=""${node.media?.autoplay ? ' autoplay=""' : ' controls=""'}${node.media?.loop ? ' loop=""' : ''}${node.media?.muted !== false ? ' muted=""' : ''}${node.media?.poster ? ` poster="${escapeHtml(exportMediaUrl(node.media.poster, options))}"` : ''} style="${mediaStyle}" src="${escapeHtml(exportMediaUrl(node.media?.src, options))}"></video>`
     : node.type === 'shader'
-      ? options.staticMap ? '' : `<canvas aria-label="${escapeHtml(node.name)}"${node.shader?.provider ? ' data-shader-provider="shaders.com"' : ''} data-shader="${escapeHtml(JSON.stringify(shaderRuntimeOptions(node.shader)))}" style="display:block;width:100%;height:100%"></canvas><span data-shader-status hidden style="position:absolute;inset:0;padding:8px;overflow:auto;color:#dddddd;background:#242424;font:11px/1.4 system-ui,sans-serif"></span>`
+      ? options.staticMap && !options.captureRuntime ? '' : `<canvas aria-label="${escapeHtml(node.name)}"${node.shader?.provider ? ' data-shader-provider="shaders.com"' : ''} data-shader="${escapeHtml(JSON.stringify(shaderRuntimeOptions(node.shader)))}" style="display:block;width:100%;height:100%"></canvas><span data-shader-status hidden style="position:absolute;inset:0;padding:8px;overflow:auto;color:#dddddd;background:#242424;font:11px/1.4 system-ui,sans-serif"></span>`
     : node.type === 'code'
     ? vector ? `<img alt="${escapeHtml(node.name)}" draggable="false" style="display:block;width:100%;height:100%;object-fit:${node.styles.objectFit ?? 'fill'};pointer-events:none" src="${escapeHtml(vector)}"/>`
       : node.live && !options.staticMap ? liveCodeMarkup(node, options.system)
@@ -199,7 +199,7 @@ function renderNode(node: DesignNode, children: Map<string | null, DesignNode[]>
     const tag = list === 'decimal' ? 'ol' : 'ul';
     content = `<${tag} style="${inlineCss({ ...textListStyle, listStyleType: list })}">${(node.content ?? '').split(/\r?\n/).map(line => `<li>${escapeHtml(line) || '<br/>'}</li>`).join('')}</${tag}>`;
   }
-  if (node.react && !snapshot) content = options.staticMap ? '<span>React screen — use HTML or React export</span>' : `<iframe title="${escapeHtml(node.name)}" sandbox="allow-scripts" referrerpolicy="no-referrer" onload="if(this.dataset.ready){this.onload=null;this.setAttribute('sandbox','');this.removeAttribute('src');this.srcdoc='Preview navigation stopped'}else{this.dataset.ready='1'}" style="display:block;width:100%;height:100%;border:0;color-scheme:normal" srcdoc="${escapeHtml(reactPreviewDocument(node, options.system))}"></iframe>`;
+  if (node.react && !snapshot) content = options.staticMap && !options.captureRuntime ? '<span>React screen — use HTML or React export</span>' : `<iframe title="${escapeHtml(node.name)}" sandbox="allow-scripts" referrerpolicy="no-referrer" onload="if(this.dataset.ready){this.onload=null;this.setAttribute('sandbox','');this.removeAttribute('src');this.srcdoc='Preview navigation stopped'}else{this.dataset.ready='1'}" style="display:block;width:100%;height:100%;border:0;color-scheme:normal" srcdoc="${escapeHtml(reactPreviewDocument(node, options.system))}"></iframe>`;
   if (shell) content = '';
   const link = href && !shell && !options.staticMap ? `<a aria-label="${escapeHtml(node.name)}" href="${escapeHtml(href)}"${href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"'} style="${inlineCss({ ...nodeLinkStyle, pointerEvents })}"></a>` : '';
   const body = node.type === 'video' ? link + content : content + link;

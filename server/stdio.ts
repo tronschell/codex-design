@@ -10,7 +10,7 @@ const dataDirectory = process.env.CODEX_DESIGN_DATA_DIR || (process.env.PLUGIN_D
 try {
   const store = new ProjectStore(dataDirectory);
   await store.init();
-  const server = createMcpServer(store, { allowGeneratedImageImport: true });
+  const server = createMcpServer(store, { allowGeneratedImageImport: true, allowExportFiles: true });
   await server.connect(new StdioServerTransport());
 } catch (error) {
   console.error('Codex Design MCP failed:', error instanceof Error ? error.message : error);

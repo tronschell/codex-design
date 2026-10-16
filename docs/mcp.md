@@ -63,7 +63,7 @@ Editable fields share a 650 ms idle debounce, blur/close flush, serialized saves
 | `canvas_get_pending_comments` | optional `projectId` | `{ comments }` with open queued threads and their anchors |
 | `canvas_reply_to_comment` | `projectId`, `expectedRevision`, `threadId`, `content`, optional `resolve` | `{ project }`; appends an assistant message and clears the queue flag |
 | `canvas_import_project` | `project` JSON or version-1 library envelope | `{ project }` saved with a fresh project ID |
-| `canvas_export_project` | `projectId`, optional `boardId`, `pageId`, `nodeIds`, `format: source / html / react / svg / svg-map / library`, optional `map` or library-only `componentId` | `{ projectId, revision, boardId?, files, assets, assetPaths }`; scoped text files and binary references |
+| `canvas_export_project` | `projectId`, optional `boardId`, `pageId`, `nodeIds`, `format: source / html / react / svg / svg-map / library / cxdp / png / jpeg`, optional `map` or library-only `componentId` | `{ projectId, revision, boardId?, files, assets, assetPaths }`; scoped text files and binary references; cxdp/png/jpeg return a prepared `file` handle |
 | `canvas_begin_asset_upload` | `name`, `mimeType`, `byteLength` | `{ uploadId, offset, byteLength }` |
 | `canvas_import_generated_image` | `filePath` | Local stdio/model only: `{ asset }` for a completed native PNG/JPEG/WebP result within `CODEX_HOME/generated_images`; does not place it |
 | `canvas_upload_asset_chunk` | `uploadId`, `offset`, base64 `data` | `{ uploadId, offset, byteLength, asset? }`; final chunk includes `asset` metadata |
@@ -277,3 +277,7 @@ React component selection: `canvas_write_react` accepts optional `components: Na
 The workspace browser provides Rename and Delete on project and board cards. Renames submit explicitly; deletion requires typing the exact name and pressing Delete. Requests use the revision shown when confirmation started, so concurrent edits cause rejection. Deleting the active board selects a remaining board; deleting the active project clears the canvas. The final board is protected; delete the entire project instead.
 
 `canvas_delete_project` atomically moves the current JSON into `<data directory>/.deleted-projects/<projectId>.json`. It checks the exact current name and revision under the write lock. History and shared media are retained. Deletion is a workspace removal, not secure erasure. The recovery JSON can be explicitly imported as a new project in the same store; historical journals do not transfer to the new ID. The plugin does not automatically expire recovery copies.
+
+## Portable files and raster images
+
+See [portable-exports.md](portable-exports.md) for `canvas_estimate_export`, `canvas_prepare_export`, `canvas_read_export_chunk`, local-only `canvas_save_export` and `canvas_import_file`. These supersede the earlier editor-only PNG limitation. `canvas_export_project` now accepts cxdp/project/png/jpeg and returns a prepared `file` handle; existing text exports are unchanged. `.cxdp` replaces the editable project/library ZIP download extension while legacy ZIP imports remain supported. PNG/JPEG use a local isolated Chrome/Chromium renderer with custom dimensions and embedded DPI metadata.

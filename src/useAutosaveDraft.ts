@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
 
 type Fields = Record<string, string>;
-type Options<T> = { onSave: (value: T, base: T) => unknown | Promise<unknown>; normalize?: (value: T) => T; enabled?: boolean };
+type Options<T> = { onSave: (value: T, base: T) => unknown | Promise<unknown>; normalize?: (value: T) => T; enabled?: boolean; track?: boolean };
 type Session<T extends Fields> = {
   key: string; value: T; base: T; conflicts: (keyof T)[]; deleted: boolean; hadSaved: boolean;
   sending: T | null; busy: boolean; error: string; requested: boolean; composing: boolean; mounted: boolean;
@@ -13,7 +13,7 @@ type SaveState = 'saved' | 'pending' | 'saving' | 'error';
 const tracked = new Map<object, {dirty: boolean; busy: boolean; error: boolean}>(), listeners = new Set<() => void>();
 let saveState: SaveState = 'saved';
 function track<T extends Fields>(session: Session<T>) {
-  if (session.mounted) tracked.set(session, {dirty: !same(session.value, session.base), busy: session.busy, error: !!session.error || session.conflicts.length > 0});
+  if (session.mounted && session.options.track !== false) tracked.set(session, {dirty: !same(session.value, session.base), busy: session.busy, error: !!session.error || session.conflicts.length > 0});
   else tracked.delete(session);
   const values = [...tracked.values()];
   const next = values.some(value => value.error) ? 'error' : values.some(value => value.busy) ? 'saving' : values.some(value => value.dirty) ? 'pending' : 'saved';

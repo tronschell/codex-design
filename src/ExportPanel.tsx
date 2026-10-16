@@ -1,4 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { imageExportDetails, formatBytes, type ImageExportSettings } from '../shared/image-export';
+import type { StatePreview } from '../shared/application-state-types';
+import { client } from './client';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpRight, Check, Code2, Copy, Download, FileArchive, FileCode2, FileJson2, Image, Layers, LoaderCircle, X } from 'lucide-react';
 import type { DesignProject } from '../shared/types';
 import { canvasMapLayout, canvasMapPngReason, exportFormatReason, exportHandoffPrompt, exportTargetProject, type CanvasMapSettings, type ExportFormat, type ExportScope, type ExportTarget } from '../shared/export-formats';
@@ -12,6 +15,9 @@ export interface ExportPanelProps {
   project: DesignProject;
   statePreviewProject?: DesignProject;
   statePreviewName?: string;
+  statePreview?: StatePreview;
+  savePending?: boolean;
+  componentId?: string;
   boardId: string;
   pageId: string;
   selectedIds: string[];
@@ -20,24 +26,26 @@ export interface ExportPanelProps {
 }
 
 const formats: { id: ExportFormat; name: string; detail: string; description: string; Icon: typeof Code2 }[] = [
-  { id: 'png', name: 'PNG canvas map', detail: 'Spatial overview · 1×–4×', description: 'One image of the whole canvas, with frames at their original positions. Independent pages are arranged in labeled groups for sharing.', Icon: Image },
+  { id: 'jpeg', name: 'JPEG image', detail: 'Adjustable quality · smaller files', description: 'A flattened image for sharing, with adjustable resolution and print DPI. Transparent areas use white.', Icon: Image },
+  { id: 'png', name: 'PNG image', detail: 'Lossless · optional transparency', description: 'One image of the whole canvas, with frames at their original positions. Independent pages are arranged in labeled groups for sharing.', Icon: Image },
   { id: 'svg-map', name: 'SVG canvas map', detail: 'Scalable browser document', description: 'The complete spatial canvas in a self-contained SVG. Native text and CSS stay scalable; HTML source, shaders and videos use embedded stills.', Icon: Layers },
   { id: 'react', name: 'React + CSS', detail: 'Application source and styles', description: 'React screens retain real modules, shared imports and npm dependencies. Native layers keep their canvas geometry; legacy HTML stays sandboxed.', Icon: Code2 },
   { id: 'html', name: 'HTML', detail: 'Standalone page', description: 'A browser preview with embedded media, original dimensions and isolated source layers. No build step is required.', Icon: FileCode2 },
   { id: 'svg', name: 'SVG source', detail: 'Original vector layer', description: 'The original passive SVG source, sized to the selected layer. Select a single SVG source layer without container styling.', Icon: Image },
   { id: 'source', name: 'Source ZIP', detail: 'Code, media and context', description: 'HTML previews, React and CSS, original media, editable design.json, shared tokens and component conversations for this scope.', Icon: FileArchive },
-  { id: 'project', name: 'Editable backup', detail: 'Project ZIP with media', description: 'The editable document, source, media, tokens and conversations. Import this ZIP through the project menu to create a new saved copy.', Icon: FileJson2 },
+  { id: 'project', name: 'Codex Design · .cxdp', detail: 'Portable editable file', description: 'One file containing editable boards, components, diagrams, source, media, tokens and conversations. Save it in your repository and import it on another computer.', Icon: FileJson2 },
 ];
 
-export default function ExportPanel({ project: baseProject, statePreviewProject, statePreviewName, boardId, pageId, selectedIds, onClose, onNotify }: ExportPanelProps) {
+export default function ExportPanel({ project: baseProject, statePreviewProject, statePreviewName, statePreview, savePending, componentId, boardId, pageId, selectedIds, onClose, onNotify }: ExportPanelProps) {
   const [includeState, setIncludeState] = useState(false);
   const [format, setFormat] = useState<ExportFormat>(selectedIds.length ? 'react' : 'png');
   const project = includeState && statePreviewProject && !['source','project'].includes(format) ? statePreviewProject : baseProject;
-  const [scope, setScope] = useState<ExportScope>(selectedIds.length ? 'selection' : 'board');
-  const preferences = useLocalDraft(`${project.id}/export-settings`, {background: 'dark', customColor: '#171717', scale: '2', labels: 'true', margin: '80'});
+  const [scope, setScope] = useState<ExportScope>(componentId ? 'project' : selectedIds.length ? 'selection' : 'board');
+  const preferences = useLocalDraft(`${project.id}/export-settings`, {background: 'dark', customColor: '#171717', scale: '2', labels: 'true', margin: '80', dpi: '96', quality: '90', width: '', height: ''}, false);
   const {background, customColor} = preferences.value, scale = ([1,2,3,4].includes(Number(preferences.value.scale)) ? Number(preferences.value.scale) : 2) as 1 | 2 | 3 | 4, labels = preferences.value.labels === 'true', margin = Number(preferences.value.margin);
   const setBackground = (background: string) => preferences.setValue({background}), setCustomColor = (customColor: string) => preferences.setValue({customColor}), setScale = (scale: number) => preferences.setValue({scale: String(scale)}), setLabels = (labels: boolean) => preferences.setValue({labels: String(labels)}), setMargin = (margin: string) => preferences.setValue({margin});
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [copied, setCopied] = useState('');
+  const [actualSize, setActualSize] = useState<number | null>(null), [portableEstimate, setPortableEstimate] = useState<{estimatedMinBytes:number;estimatedMaxBytes:number}|null>(null);
   const [sources, setSources] = useState<ExportText[]>([]), [sourceIndex, setSourceIndex] = useState(0);
   const panel = useRef<HTMLElement>(null), busyRef = useRef(false), mounted = useRef(true), activeRequest = useRef<AbortController | null>(null);
   const page = project.pages.find(page => page.id === pageId), board = project.boards.find(board => board.id === boardId);
@@ -47,10 +55,12 @@ export default function ExportPanel({ project: baseProject, statePreviewProject,
   const details = formats.find(item => item.id === format)!;
   const scoped = useMemo(() => exportTargetProject(project, target), [project, target]);
   const layerCount = scoped.pages.reduce((count, page) => count + page.nodes.length, 0);
-  const map = useMemo<CanvasMapSettings>(() => ({ background: (background === 'custom' ? customColor : background) as CanvasMapSettings['background'], scale, labels, margin }), [background, customColor, scale, labels, margin]);
-  const isMap = format === 'png' || format === 'svg-map';
+  const map = useMemo<ImageExportSettings>(() => ({ background: (background === 'custom' ? customColor : background) as CanvasMapSettings['background'], scale, labels, margin, dpi:Number(preferences.value.dpi), quality:Number(preferences.value.quality), ...(preferences.value.width ? {width:Number(preferences.value.width)} : {}), ...(preferences.value.height ? {height:Number(preferences.value.height)} : {}) }), [background, customColor, scale, labels, margin, preferences.value.dpi, preferences.value.quality, preferences.value.width, preferences.value.height]);
+  const isImage = format === 'png' || format === 'jpeg';
+  const isMap = isImage || format === 'svg-map';
+  const imageDetails = useMemo(() => {if(!isImage)return null;try{return {details:imageExportDetails(project,target,format as 'png'|'jpeg',map),error:''};}catch(error){return {details:null,error:error instanceof Error?error.message:'Invalid image settings.'};}},[project,target,format,map,isImage]);
   const mapDetails = useMemo(() => { if (!isMap) return null; try { return { layout: canvasMapLayout(project, target, map), error: '' }; } catch (error) { return { layout: null, error: error instanceof Error ? error.message : 'This scope cannot be exported.' }; } }, [project, target, map, isMap]);
-  const reason = exportFormatReason(project, target, format) ?? (mapDetails?.error || (format === 'png' && mapDetails?.layout ? canvasMapPngReason(mapDetails.layout) : null)), textFormat = ['react', 'html', 'svg', 'svg-map'].includes(format);
+  const reason = (savePending ? 'Finish saving or resolve unsaved fields before exporting.' : includeState && isImage && availableScope !== 'page' && availableScope !== 'selection' ? 'Choose a page or selection to export its preview state.' : null) ?? exportFormatReason(project, target, format) ?? (mapDetails?.error || imageDetails?.error || null), textFormat = ['react', 'html', 'svg', 'svg-map'].includes(format);
   const source = sources[sourceIndex];
   const handoff = exportHandoffPrompt(project, target);
 
@@ -63,9 +73,21 @@ export default function ExportPanel({ project: baseProject, statePreviewProject,
   useLayoutEffect(() => {
     const interrupted = !!activeRequest.current && !activeRequest.current.signal.aborted;
     activeRequest.current?.abort();
-    setSources([]); setSourceIndex(0); setCopied('');
+    setSources([]); setSourceIndex(0); setCopied(''); setActualSize(null);
     setError(interrupted ? 'The design or export scope changed. Export again for the current revision.' : '');
   }, [project.revision, target, format, map, includeState]);
+
+  useEffect(() => {
+    setPortableEstimate(null);
+    if(format !== 'project')return;
+    const controller=new AbortController();
+    const input={projectId:baseProject.id,expectedRevision:baseProject.revision,format:'cxdp' as const,
+      ...(target.scope!=='project'?{boardId:target.boardId}:{}),
+      ...(target.scope==='page'||target.scope==='selection'?{pageId:target.pageId}:{}),
+      ...(target.scope==='selection'?{nodeIds:target.nodeIds}:{} )};
+    void client.estimateExport(input,controller.signal).then(value=>{if(!controller.signal.aborted)setPortableEstimate(value);}).catch(()=>{});
+    return ()=>controller.abort();
+  },[baseProject.id,baseProject.revision,target,format]);
 
   const close = () => { activeRequest.current?.abort(); onClose(); };
   const run = async (label: string, action: (signal: AbortSignal) => Promise<void>) => {
@@ -114,15 +136,15 @@ export default function ExportPanel({ project: baseProject, statePreviewProject,
     }}>
       <header className="export-panel-header"><h2 id="export-heading">Export</h2><span>v{project.revision}</span><button type="button" className="icon-button" aria-label="Close export" title={busy ? 'Close and cancel export' : 'Close export'} onClick={close}><X size={16}/></button></header>
       {statePreviewProject&&<label className="tw:mx-5 tw:my-3 tw:flex tw:items-center tw:gap-2 tw:text-xs tw:text-[#ccc]"><input type="checkbox" checked={includeState} disabled={!!busy||['source','project'].includes(format)} onChange={event=>setIncludeState(event.target.checked)}/><span>{['source','project'].includes(format)?'Editable exports preserve the base and all state definitions.':'Export current state: '+(statePreviewName||'Custom inputs')+' · without inspection highlights'}</span></label>}
-      <div className="export-scope-row"><span className="export-scope-label">Scope</span><Select label="Export scope" value={availableScope} disabled={!!busy} onChange={value=>changeScope(value as ExportScope)} options={[
+      {!componentId && <div className="export-scope-row"><span className="export-scope-label">Scope</span><Select label="Export scope" value={availableScope} disabled={!!busy} onChange={value=>changeScope(value as ExportScope)} options={[
         {value:'selection',label:`Selection · ${selected.length > 1 ? `${selected.length} objects` : selected[0]?.name ?? 'Select a layer first'}`,disabled:!selected.length},
         {value:'page',label:`Page · ${page?.name}`},
         {value:'board',label:`Board · ${board?.name}`},
         {value:'project',label:`Project · ${project.name}`},
-      ]}/></div>
+      ]}/></div>}
       <div className="export-scope-summary"><Layers size={12}/><span>{scoped.pages.length} {scoped.pages.length === 1 ? 'page' : 'pages'} · {layerCount} {layerCount === 1 ? 'layer' : 'layers'} · {scoped.threads.length} conversations</span></div>
       <div className="export-format-layout">
-        <nav className="export-format-list" aria-label="Export format">{formats.map(item => {
+        <nav className="export-format-list" aria-label="Export format">{formats.filter(item=>!componentId || item.id==='png' || item.id==='jpeg').map(item => {
           const disabledReason = exportFormatReason(project, target, item.id);
           return <button type="button" key={item.id} className={format === item.id ? 'selected' : ''} disabled={!!busy || !!disabledReason} aria-pressed={format === item.id} title={disabledReason ?? item.detail} onClick={() => setFormat(item.id)}><item.Icon size={15}/><span><strong>{item.name}</strong><small>{disabledReason && item.id !== 'png' ? item.id === 'svg' ? 'Single SVG layer only' : 'Selection or page only' : item.detail}</small></span>{format === item.id && <Check size={12}/>}</button>;
         })}</nav>
@@ -132,23 +154,36 @@ export default function ExportPanel({ project: baseProject, statePreviewProject,
               { value: 'transparent', label: 'Transparent · no color', color: 'transparent' }, { value: 'white', label: 'White', color: '#ffffff' }, { value: 'dark', label: 'Neutral dark', color: '#171717' }, { value: 'custom', label: 'Custom color', color: customColor },
             ]}/></label>
             {background === 'custom' && <label className="export-map-field"><span>Color</span><span className="export-map-color"><input type="color" aria-label="Choose canvas map color" value={/^#[\da-f]{6}$/i.test(customColor) ? customColor : '#171717'} disabled={!!busy} onChange={event => setCustomColor(event.target.value)}/><input type="text" aria-label="Canvas map hexadecimal color" spellCheck={false} value={customColor} disabled={!!busy} onChange={event => setCustomColor(event.target.value)} placeholder="#171717" maxLength={9}/></span></label>}
-            <label className="export-map-field"><span>{format === 'png' ? 'Scale' : 'Still quality'}</span><Select label="Canvas map export scale" value={String(scale)} disabled={!!busy} onChange={value => setScale(Number(value) as 1 | 2 | 3 | 4)} options={[1, 2, 3, 4].map(value => ({ value: String(value), label: `${value}×${value === 1 ? ' · design size' : ''}`, disabled: format === 'png' && !!mapDetails?.layout && !!canvasMapPngReason({ pixelWidth: mapDetails.layout.width * value, pixelHeight: mapDetails.layout.height * value }) }))}/></label>
+            <label className="export-map-field"><span>{isImage ? 'Scale' : 'Still quality'}</span><Select label="Canvas map export scale" value={String(scale)} disabled={!!busy} onChange={value => setScale(Number(value) as 1 | 2 | 3 | 4)} options={[1, 2, 3, 4].map(value => ({ value: String(value), label: `${value}×${value === 1 ? ' · design size' : ''}`, disabled: isImage && !map.width && !map.height && !!mapDetails?.layout && !!canvasMapPngReason({ pixelWidth: mapDetails.layout.width * value, pixelHeight: mapDetails.layout.height * value }) }))}/></label>
             <label className="export-map-field"><span>Margin</span><span className="export-map-margin"><input type="number" aria-label="Canvas map margin in design pixels" value={preferences.value.margin} min={0} max={1000} step={8} disabled={!!busy} onChange={event => setMargin(event.target.value)}/><span>px</span></span></label>
             <label className="export-map-labels"><input type="checkbox" checked={labels} disabled={!!busy} onChange={event => setLabels(event.target.checked)}/>Frame and page labels</label>
-            {mapDetails?.layout && <output className="export-map-size" aria-live="polite"><strong>{(format === 'png' ? mapDetails.layout.pixelWidth : mapDetails.layout.width).toLocaleString()} × {(format === 'png' ? mapDetails.layout.pixelHeight : mapDetails.layout.height).toLocaleString()} {format === 'png' ? 'px' : 'design px'}</strong><span>{format === 'png' ? `${scale}× resolution · pixel dimensions determine print size` : `Scalable canvas · embedded stills at ${scale}×`}</span></output>}
-            <p className="export-format-note">HTML source is flattened without running scripts. Video uses its poster or first frame; shaders use time zero. Fonts depend on this device. SVG requires a browser with HTML/CSS support.</p>
+            {isImage && <>
+              <div className="tw:grid tw:grid-cols-2 tw:gap-2">
+                <label className="tw:flex tw:flex-col tw:gap-1 tw:text-xs">Width (px)<input className="tw:w-full tw:rounded-md tw:border tw:border-[#444] tw:bg-[#242424] tw:px-2 tw:py-1" type="number" min={1} max={16384} placeholder={String(imageDetails?.details?.width??'Auto')} value={preferences.value.width} disabled={!!busy} onChange={event=>preferences.setValue({width:event.target.value})}/></label>
+                <label className="tw:flex tw:flex-col tw:gap-1 tw:text-xs">Height (px)<input className="tw:w-full tw:rounded-md tw:border tw:border-[#444] tw:bg-[#242424] tw:px-2 tw:py-1" type="number" min={1} max={16384} placeholder={String(imageDetails?.details?.height??'Auto')} value={preferences.value.height} disabled={!!busy} onChange={event=>preferences.setValue({height:event.target.value})}/></label>
+              </div>
+              <p className="export-format-note">Leave dimensions blank to use scale. Set one to preserve proportions, or both to fit within that size.</p>
+              <label className="export-map-field"><span>Print DPI</span><input className="tw:w-24 tw:rounded-md tw:border tw:border-[#444] tw:bg-[#242424] tw:px-2 tw:py-1" type="number" min={1} max={2400} value={preferences.value.dpi} disabled={!!busy} onChange={event=>preferences.setValue({dpi:event.target.value})}/></label>
+              {format==='jpeg' && <label className="export-map-field"><span>Quality (%)</span><input className="tw:w-24 tw:rounded-md tw:border tw:border-[#444] tw:bg-[#242424] tw:px-2 tw:py-1" type="number" min={1} max={100} value={preferences.value.quality} disabled={!!busy} onChange={event=>preferences.setValue({quality:event.target.value})}/></label>}
+              {format==='jpeg' && background==='transparent' && <p className="export-format-note">JPEG does not support transparency; the background will be white. Use PNG to retain alpha.</p>}
+              {imageDetails?.details && <output className="export-map-size" aria-live="polite"><strong>{imageDetails.details.width.toLocaleString()} × {imageDetails.details.height.toLocaleString()} px</strong><span>{imageDetails.details.printWidth.toFixed(2)} × {imageDetails.details.printHeight.toFixed(2)} in at {imageDetails.details.dpi} DPI</span><span>Estimated {formatBytes(imageDetails.details.estimatedMinBytes)}–{formatBytes(imageDetails.details.estimatedMaxBytes)} · varies with content</span></output>}
+            </>}
+            {!isImage && mapDetails?.layout && <output className="export-map-size"><strong>{mapDetails.layout.width.toLocaleString()} × {mapDetails.layout.height.toLocaleString()} design px</strong></output>}
+            <p className="export-format-note">{isImage?'Images render using Chrome/Chromium on the design server. React uses its initial render. DPI sets print size without changing pixels.':'SVG requires a browser with HTML/CSS support.'} HTML scripts stay disabled. Video uses its poster or first frame; shaders use time zero. Fonts depend on the rendering device.</p>
           </div>}
           {(format === 'react' || format === 'html') && <p className="export-format-note">Visual structure is exported at its design size. Connect application behavior in your codebase.</p>}
           {(format === 'source' || format === 'project') && availableScope === 'selection' && <p className="export-format-note">Ancestor shells keep the selection in place. Original layout settings are retained in original-scope.json. Previews contain only the selected subtree.</p>}
+          {format==='project' && <p className="export-format-note">{portableEstimate?`Estimated ${formatBytes(portableEstimate.estimatedMaxBytes)} including media.`:'Size estimate unavailable or loading.'} Imports start a new history baseline; earlier revisions stay in the original project.</p>}
+          {actualSize!==null && <output className="tw:my-2 tw:block tw:text-xs tw:text-[#ccc]">Actual file size: {formatBytes(actualSize)} ({actualSize.toLocaleString()} bytes)</output>}
           {textFormat && !reason && <button type="button" className="text-button export-preview-button" disabled={!!busy} onClick={() => void run('preview', async signal => { await prepare(signal); })}>{busy === 'preview' ? <LoaderCircle size={13} className="spin"/> : <Code2 size={13}/>}Preview source</button>}
           <div className="export-file-actions">{textFormat && !reason && <><button type="button" className="secondary-button" disabled={!!busy} onClick={() => copy(0)}>{copied === (format === 'react' ? 'React' : format === 'svg-map' ? 'SVG' : format.toUpperCase()) ? <Check size={13}/> : <Copy size={13}/>}Copy {format === 'react' ? 'React' : format === 'svg-map' ? 'SVG' : format.toUpperCase()}</button>{format === 'react' && <button type="button" className="secondary-button" disabled={!!busy} onClick={() => copy(1)}>{copied === 'CSS' ? <Check size={13}/> : <Copy size={13}/>}Copy CSS</button>}</>}
-            <button type="button" className="primary-button" disabled={!!busy || !!reason} onClick={() => void run('download', async signal => { const file = await exportFile(project, target, format, signal, map); signal.throwIfAborted(); downloadExport(file); onNotify('Export downloaded.'); })}>{busy === 'download' ? <LoaderCircle size={13} className="spin"/> : <Download size={13}/>}Download {format === 'source' || format === 'project' || format === 'react' ? 'ZIP' : format === 'svg-map' ? 'SVG' : format.toUpperCase()}</button>
+            <button type="button" className="primary-button" disabled={!!busy || !!reason} onClick={() => void run('download', async signal => { const state=includeState&&statePreview?{frameId:statePreview.frameId,scenarioId:statePreview.scenarioId,values:statePreview.values??{}}:undefined; const file = await exportFile(project, target, format, signal, map, state, componentId); signal.throwIfAborted(); const bytes=typeof file.data==='string'?new TextEncoder().encode(file.data).byteLength:file.data.byteLength; setActualSize(bytes); downloadExport(file); onNotify(`Export downloaded · ${formatBytes(bytes)}.`); })}>{busy === 'download' ? <LoaderCircle size={13} className="spin"/> : <Download size={13}/>}Download {format === 'project' ? '.cxdp' : format === 'source' || format === 'react' ? 'ZIP' : format === 'svg-map' ? 'SVG' : format.toUpperCase()}</button>
           </div>
         </div>
       </div>
       {!!sources.length && <div className="export-source"><div role="tablist" aria-label="Exported source">{sources.map((item, index) => <button type="button" key={item.label} role="tab" aria-selected={sourceIndex === index} onClick={() => setSourceIndex(index)}>{item.label}</button>)}<span>{source?.text.length.toLocaleString()} characters</span></div><textarea aria-label={`${source?.label} source`} readOnly spellCheck={false} value={source?.text.slice(0, 100_000) ?? ''}/>{(source?.text.length ?? 0) > 100_000 && <p>Preview limited to 100,000 characters. Copy and download include the complete source.</p>}</div>}
       {error && <p className="export-error" role="alert">{error}</p>}
-      <footer className="export-handoff"><div><strong>Build with Codex</strong><p>Hand off this {scope} with its IDs, source context and approved revision.</p></div><button type="button" className="secondary-button" disabled={!!busy} aria-label="Copy Codex implementation prompt" title="Copy implementation prompt" onClick={() => void run('prompt', async signal => { signal.throwIfAborted(); if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable in this browser.'); await navigator.clipboard.writeText(handoff); signal.throwIfAborted(); onNotify('Implementation prompt copied.'); })}><Copy size={13}/></button><button type="button" className="primary-button" disabled={!!busy} onClick={() => void run('handoff', async signal => {
+      {!componentId && <footer className="export-handoff"><div><strong>Build with Codex</strong><p>Hand off this {scope} with its IDs, source context and approved revision.</p></div><button type="button" className="secondary-button" disabled={!!busy} aria-label="Copy Codex implementation prompt" title="Copy implementation prompt" onClick={() => void run('prompt', async signal => { signal.throwIfAborted(); if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable in this browser.'); await navigator.clipboard.writeText(handoff); signal.throwIfAborted(); onNotify('Implementation prompt copied.'); })}><Copy size={13}/></button><button type="button" className="primary-button" disabled={!!busy} onClick={() => void run('handoff', async signal => {
         signal.throwIfAborted();
         if (embedded) {
           const delivered = await sendFollowUp(handoff);
@@ -157,7 +192,7 @@ export default function ExportPanel({ project: baseProject, statePreviewProject,
         }
         if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable in this browser.');
         await navigator.clipboard.writeText(handoff); signal.throwIfAborted(); onNotify('Implementation prompt copied. Paste it into Codex.');
-      })}>{busy === 'handoff' ? <LoaderCircle size={13} className="spin"/> : <ArrowUpRight size={13}/>} {embedded ? 'Build with Codex' : 'Copy prompt'}</button></footer>
+      })}>{busy === 'handoff' ? <LoaderCircle size={13} className="spin"/> : <ArrowUpRight size={13}/>} {embedded ? 'Build with Codex' : 'Copy prompt'}</button></footer>}
     </section>
   </div>;
 }

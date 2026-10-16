@@ -1,3 +1,6 @@
+import { portableFile, readPortable, PROJECT_EXTENSION, PROJECT_MIME } from '../shared/portable';
+import type { ImageExportSettings } from '../shared/image-export';
+import type { FileExportInput } from '../server/file-exports';
 import { z } from 'zod';
 import type { DesignNode, DesignProject } from '../shared/types';
 import { exportProjectBundle, safeCodeDocument, vectorDataUrl } from '../shared/export';
@@ -185,26 +188,29 @@ export async function exportTexts(project: DesignProject, target: ExportTarget, 
   return [{ label: 'React', text: generated.jsx }, { label: 'CSS', text: generated.css }];
 }
 
-export async function exportFile(project: DesignProject, target: ExportTarget, format: ExportFormat, signal?: AbortSignal, map: CanvasMapSettings = {}): Promise<ExportFile> {
+export async function exportFile(project: DesignProject, target: ExportTarget, format: ExportFormat, signal?: AbortSignal, map: ImageExportSettings = {}, state?: FileExportInput['state'], componentId?: string): Promise<ExportFile> {
   signal?.throwIfAborted();
   const scoped = exportTargetProject(project, target), scopeName = target.scope === 'selection' ? scoped.pages[0]?.nodes.find(node => node.id === target.nodeIds?.[0])?.name : target.scope === 'page' ? scoped.pages[0]?.name : target.scope === 'board' ? scoped.boards[0]?.name : 'project';
   const name = exportFilename(`${project.name}-${scopeName ?? target.scope}`);
+  if (format === 'png' || format === 'jpeg') {
+    return client.prepareExport({projectId:project.id,expectedRevision:project.revision,format,
+      ...(componentId ? {componentId} : {}),
+      ...(target.scope !== 'project' ? {boardId:target.boardId} : {}),
+      ...(target.scope === 'page' || target.scope === 'selection' ? {pageId:target.pageId} : {}),
+      ...(target.scope === 'selection' ? {nodeIds:target.nodeIds} : {}),image:map,state},signal);
+  }
+  if (format === 'project') {
+    const assets=await loadAssets(scoped,true,signal);signal?.throwIfAborted();
+    const extra: Record<string,string>=target.scope === 'selection' ? {'original-scope.json':JSON.stringify(exportTargetProject(project,target,{originalSelectionLayout:true}),null,2)} : {};
+    return {name:`${name}.${PROJECT_EXTENSION}`,mimeType:PROJECT_MIME,data:portableFile(scoped,assets,target.scope,extra)};
+  }
   if (format === 'html' || format === 'svg') {
     const [source] = await exportTexts(project, target, format, signal);
     return { name: `${name}.${format}`, data: source.text, mimeType: format === 'svg' ? 'image/svg+xml' : 'text/html' };
   }
-  if (format === 'png' || format === 'svg-map') {
-    const layout = canvasMapLayout(project, target, map), reason = format === 'png' ? canvasMapPngReason(layout) : null;
-    if (reason) throw new Error(reason);
-    const generated = await prepareCanvasMap(project, target, map, signal);
-    if (format === 'svg-map') return { name: `${name}-canvas.svg`, data: generated.svg, mimeType: 'image/svg+xml' };
-    const canvas = await rasterizeMapSvg(generated.svg, generated.pixelWidth, generated.pixelHeight, signal);
-    try {
-      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG encoding failed. Choose a lower scale or SVG canvas map.')), 'image/png'));
-      signal?.throwIfAborted();
-      return { name: `${name}-canvas-${map.scale ?? 2}x.png`, data: new Uint8Array(await blob.arrayBuffer()), mimeType: 'image/png' };
-    } catch (error) { if (error instanceof DOMException && error.name === 'SecurityError') throw new Error('This browser does not support HTML/CSS canvas capture. Download SVG canvas map or use another browser.'); throw error; }
-    finally { canvas.width = canvas.height = 0; }
+  if (format === 'svg-map') {
+    const generated = await prepareCanvasMap(project,target,map,signal);
+    return {name:`${name}-canvas.svg`,data:generated.svg,mimeType:'image/svg+xml'};
   }
   const assets = await loadAssets(scoped, format !== 'react', signal);
   signal?.throwIfAborted();
@@ -240,8 +246,8 @@ export async function exportFile(project: DesignProject, target: ExportTarget, f
   files['manifest.json'] = JSON.stringify({ format: 'codex-design-archive', version: 1, kind: format, projectId: project.id, revision: project.revision, target, assets: manifestAssets }, null, 2);
   files['BUILD_WITH_CODEX.md'] = `${exportHandoffPrompt(project, target)}\n`;
   const notes = `\n\n## Portable media and editable source\n\nMedia bytes are included in assets/ and described in manifest.json. Import this unmodified ZIP through the project menu to restore its design.json and media as a new project. React files use the included design.css; import Design.jsx into an existing React app. Their fixed canvas coordinates preserve the approved visual design; application behavior still needs implementation. HTML code layers remain script-free, network-blocked sandboxed iframes. Shader layers run only the included controlled WebGL renderer. Video playback is subject to browser codec support and autoplay policy.\n\nExport scope: ${target.scope}. Revision: ${project.revision}. ${target.scope === 'selection' ? 'The editable document includes ancestor shells with frozen layout positions so omitted siblings do not reflow the selection. original-scope.json retains the original scoped node coordinates, layout settings and source context. selection.html and Design.jsx contain only the selected subtree.' : ''}\n`;
-  files['README.md'] = `${files['README.md'] ?? `# ${project.name}\n\n${format === 'project' ? 'Editable Codex Design backup. Import this ZIP through the project menu.' : 'React and CSS implementation source.'}`}${notes}`;
-  return { name: `${name}-${format === 'project' ? 'editable' : format}.zip`, data: zipFiles(files), mimeType: 'application/zip' };
+  files['README.md'] = `${files['README.md'] ?? `# ${project.name}\n\n${'React and CSS implementation source.'}`}${notes}`;
+  return { name: `${name}-${format}.zip`, data: zipFiles(files), mimeType: 'application/zip' };
 }
 
 export function downloadExport(file: ExportFile) {
@@ -255,15 +261,13 @@ export async function exportLibraryFile(project: DesignProject, componentId?: st
   const portable = libraryProject(project, componentId), assets = await loadAssets(portable, false, signal);
   signal?.throwIfAborted();
   const files: ArchiveFiles = {}, assetUrls: Record<string, string> = {};
-  const manifestAssets = assets.map(({ asset, bytes }) => {
+  assets.forEach(({ asset, bytes }) => {
     const path = `assets/${assetFilename(asset)}`;
     assetUrls[asset.ref] = path; files[path] = bytes;
-    return { ...asset, path };
   });
   Object.assign(files, exportLibrary(project, { assetUrls }, componentId).files);
-  files['manifest.json'] = JSON.stringify({ format: 'codex-design-archive', version: 1, kind: 'library', projectId: project.id, revision: project.revision, assets: manifestAssets }, null, 2);
   signal?.throwIfAborted();
-  return { name: `${exportFilename(project.designSystem.name)}-${componentId ? 'component' : 'library'}.zip`, data: zipFiles(files), mimeType: 'application/zip' };
+  return { name: `${exportFilename(componentId ? project.designSystem.components.find(item=>item.id===componentId)?.name ?? project.designSystem.name : project.designSystem.name)}-${componentId ? 'component' : 'library'}.${PROJECT_EXTENSION}`, data: portableFile(portable,assets,componentId?'component':'library',files), mimeType: PROJECT_MIME };
 }
 
 const archiveManifest = z.object({
@@ -272,6 +276,12 @@ const archiveManifest = z.object({
 }).passthrough();
 
 export async function importProjectFile(file: File): Promise<DesignProject> {
+  if (file.name.toLowerCase().endsWith(`.${PROJECT_EXTENSION}`) || file.type === PROJECT_MIME) {
+    if(file.size>MAX_ARCHIVE_BYTES)throw new Error('Portable projects must be no larger than 256 MiB.');
+    const portable=await readPortable(new Uint8Array(await file.arrayBuffer()));
+    for(const {asset,bytes} of portable.assets){const uploaded=await client.uploadAsset(new Blob([bytes.slice().buffer as ArrayBuffer],{type:asset.mimeType}),asset.name);if(uploaded.ref!==asset.ref)throw new Error('Portable media changed during import.');}
+    return client.importProject(portable.project);
+  }
   const isZip = /\.zip$/i.test(file.name) || /(?:application\/zip|application\/x-zip-compressed)/i.test(file.type);
   if (file.size > (isZip ? MAX_ARCHIVE_BYTES : MAX_DOCUMENT_BYTES)) throw new Error(isZip ? 'Project archives must be no larger than 256 MiB.' : `Project JSON files must be no larger than ${documentLimitLabel}.`);
   if (!isZip) {

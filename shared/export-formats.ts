@@ -10,7 +10,7 @@ import { implementationNotesMarkdown } from './implementation-notes.js';
 
 export type ExportScope = 'selection' | 'page' | 'board' | 'project';
 export interface ExportTarget { scope: ExportScope; boardId?: string; pageId?: string; nodeIds?: string[] }
-export type ExportFormat = 'react' | 'html' | 'svg' | 'svg-map' | 'source' | 'project' | 'png';
+export type ExportFormat = 'react' | 'html' | 'svg' | 'svg-map' | 'source' | 'project' | 'png' | 'jpeg';
 export interface CanvasMapSettings { background?: 'transparent' | 'white' | 'dark' | `#${string}`; scale?: 1 | 2 | 3 | 4; labels?: boolean; margin?: number }
 export const MAX_MAP_SIDE = 16_384, MAX_MAP_PIXELS = 64_000_000;
 export const exportFilename = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 96).replace(/-$/, '') || 'design';
@@ -138,7 +138,7 @@ export function exportTargetSvg(project: DesignProject, target: ExportTarget): s
 }
 
 export function exportFormatReason(project: DesignProject, target: ExportTarget, format: ExportFormat): string | null {
-  if (['svg', 'svg-map', 'png'].includes(format) && exportTargetProject(project, target).pages.some(page => page.nodes.some(node => node.react))) return 'React screens need a running browser. Export HTML, React or Source ZIP to preserve their appearance and behavior.';
+  if (['svg', 'svg-map'].includes(format) && exportTargetProject(project, target).pages.some(page => page.nodes.some(node => node.react))) return 'React screens need a running browser. Export HTML, React or Source ZIP to preserve their appearance and behavior.';
   if (format === 'svg') return svgExportReason(project, target);
   if ((format === 'react' || format === 'html') && (target.scope === 'board' || target.scope === 'project')) return 'Choose a selection or page. Source ZIP includes HTML and React for multiple pages.';
   if (target.scope === 'selection' && !target.nodeIds?.length) return 'Select a layer or frame on the canvas first.';
@@ -173,7 +173,7 @@ export function canvasMapLayout(project: DesignProject, target: ExportTarget, se
 }
 
 export function canvasMapPngReason(layout: Pick<ReturnType<typeof canvasMapLayout>, 'pixelWidth' | 'pixelHeight'>): string | null {
-  return layout.pixelWidth > MAX_MAP_SIDE || layout.pixelHeight > MAX_MAP_SIDE || layout.pixelWidth * layout.pixelHeight > MAX_MAP_PIXELS ? 'PNG is limited to 16,384 pixels per side and 64 megapixels. Choose a lower scale, a smaller scope, or SVG canvas map.' : null;
+  return layout.pixelWidth > MAX_MAP_SIDE || layout.pixelHeight > MAX_MAP_SIDE || layout.pixelWidth * layout.pixelHeight > MAX_MAP_PIXELS ? 'Image export is limited to 16,384 pixels per side and 64 megapixels. Choose a lower scale, a smaller scope, or SVG canvas map.' : null;
 }
 
 export function exportCanvasMap(project: DesignProject, target: ExportTarget, settings: CanvasMapSettings = {}, options: ExportOptions = {}) {

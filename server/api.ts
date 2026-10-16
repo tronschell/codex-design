@@ -1,3 +1,4 @@
+import { fileExportSchema, prepareFileExport, estimateFileExport, readExportChunk } from './file-exports';
 import { layoutDiagram } from './diagram-layout.ts';
 import { json, Router, type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
@@ -19,6 +20,9 @@ export function createApiRouter(store: ProjectStore): Router {
   });
   router.use(json({ limit: MAX_INPUT_BYTES }));
 
+  router.post('/exports/prepare', async (request, response) => { response.json(await prepareFileExport(store, parse(fileExportSchema, request.body))); });
+  router.post('/exports/estimate', async (request, response) => { response.json(await estimateFileExport(store, parse(fileExportSchema, request.body))); });
+  router.post('/exports/chunk', async (request, response) => { const {exportId,offset}=parse(z.object({exportId:z.string().uuid(),offset:z.number().int().nonnegative()}).strict(),request.body); response.json(readExportChunk(exportId,offset)); });
   router.get('/health', (_request, response) => { response.json({ ok: true }); });
   router.post('/assets/uploads', async (request, response) => {
     response.status(201).json(await store.beginAssetUpload(parse(beginAssetUploadSchema, request.body)));

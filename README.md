@@ -85,3 +85,5 @@ New shader effects use the official [shaders.com](https://shaders.com/) componen
 ## License
 
 Original Codex Design contributions are available under the [MIT License](LICENSE), copyright 2026 tronschell. Third-party materials keep their separate rights and notices; see [third-party notices](THIRD_PARTY_NOTICES.md). The imported authoring snapshot has unresolved redistribution rights and is not covered by this new MIT grant.
+
+Portable `.cxdp` project, board, selection and library files include editable content and media. PNG/JPEG exports support custom resolution, print DPI, backgrounds and size estimates, including agent export/save/import tools. See [Portable files and image exports](docs/portable-exports.md).

@@ -1,3 +1,4 @@
+import type { FileExportInput } from '../server/file-exports';
 import type { DiagramLayoutResult } from '../shared/diagram-layout-types';
 import type { DesignProject, LibraryScope, LibraryVersion, Operation, ProjectSummary, ProjectVersion, ProjectVersionSummary } from '../shared/types';
 import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadSchema, assetUploadCancellationSchema, cancelAssetUploadSchema, beginAssetUploadSchema, libraryVersionRequestSchema, libraryVersionSchema, projectSchema, projectVersionSchema, projectVersionSummarySchema, readAssetChunkSchema, validateProjectUpdate } from '../shared/validation';
@@ -109,6 +110,31 @@ function base64ToBytes(data: string): Uint8Array {
 }
 
 export const client = {
+  async estimateExport(input: FileExportInput, signal?: AbortSignal) {
+    checkAborted(signal);
+    const result = embedded ? await tool('canvas_estimate_export', input) : await http<Record<string, unknown>>('/exports/estimate', input, signal);
+    checkAborted(signal); return result as {estimatedMinBytes:number;estimatedMaxBytes:number;estimateMethod:string};
+  },
+  async prepareExport(input: FileExportInput, signal?: AbortSignal) {
+    checkAborted(signal);
+    const result = embedded ? await tool('canvas_prepare_export', input) : await http<Record<string, unknown>>('/exports/prepare', input, signal);
+    checkAborted(signal);
+    if (typeof result.exportId !== 'string' || typeof result.name !== 'string' || typeof result.mimeType !== 'string' || typeof result.sha256 !== 'string' || typeof result.byteLength !== 'number' || result.byteLength < 1 || result.byteLength > 256 * 1024 * 1024) throw new Error('The export response is invalid.');
+    const bytes = new Uint8Array(result.byteLength);
+    for (let offset = 0; offset < bytes.length;) {
+      checkAborted(signal);
+      const input = {exportId: result.exportId, offset};
+      const chunk = embedded ? await tool('canvas_read_export_chunk', input) : await http<Record<string, unknown>>('/exports/chunk', input, signal);
+      if (chunk.offset !== offset || chunk.totalBytes !== bytes.length || typeof chunk.data !== 'string' || typeof chunk.byteLength !== 'number' || chunk.byteLength < 1 || chunk.byteLength > 1024 * 1024 || offset + chunk.byteLength > bytes.length) throw new Error('The export returned an invalid byte range.');
+      const data = Uint8Array.from(atob(chunk.data), c => c.charCodeAt(0));
+      if (data.length !== chunk.byteLength) throw new Error('The exported byte range is incomplete.');
+      bytes.set(data, offset); offset += data.length;
+    }
+    checkAborted(signal);
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
+    if (digest !== result.sha256) throw new Error('The export checksum does not match. Export again.');
+    return {name: result.name, mimeType: result.mimeType, data: bytes};
+  },
   async layoutDiagram(projectId: string, pageId: string, frameId: string, signal?: AbortSignal): Promise<DiagramLayoutResult> {
     const result = embedded ? await tool('canvas_layout_diagram', {projectId,pageId,frameId}) : await http<DiagramLayoutResult>('/projects/'+encodeURIComponent(projectId)+'/diagram-layout',{pageId,frameId},signal);
     checkAborted(signal); return result as unknown as DiagramLayoutResult;

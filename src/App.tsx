@@ -907,7 +907,7 @@ export default function App() {
       {library&&project&&board&&<ProjectLibrary key={project.id} componentId={libraryComponentId ?? undefined} onComponentChange={setLibraryComponentId} project={project} boardId={board.id} mode={library} pageId={page?.id} selectedNodeId={selectionIds.length===1?selectionIds[0]:undefined} insertionPosition={{x:((stageRef.current?.clientWidth||800)/2-view.x)/view.zoom,y:((stageRef.current?.clientHeight||600)/2-view.y)/view.zoom}} onModeChange={setLibrary} onApply={applyLibraryVersion} onInserted={nodeId=>{setLibrary(null);setSelection(nodeId);}} readOnly={historyOpen||loading} onChange={changeLibrary} onClose={()=>setLibrary(null)} onNotify={notify}/>}
       {!historyOpen&&!library&&inspector&&project&&page&&<Inspector project={project} page={page} selectedIds={selectionIds} navigationPending={loading} onSelect={selectLayer} onChange={changeLayer} onClose={closeInspector} onDelete={remove} onDuplicate={duplicate} onFocus={focus} onOpenDesignSystem={()=>openLibrary('system')} onStateView={setStateView} applicationState={{preview:applicationPreview,onPreview:setApplicationPreview,differences:application.differences,previewError:application.error,onNavigate:navigateApplication}}/>}
     </div>
-    <input type="file" hidden ref={importRef} accept="application/json,.json,application/zip,.zip" onChange={async e => {
+    <input type="file" hidden ref={importRef} accept=".cxdp,application/vnd.codex-design.project+zip,application/json,.json,application/zip,.zip" onChange={async e => {
       const file = e.target.files?.[0]; e.target.value = '';
       if (!file) return;
       setProjectImportError('');
@@ -920,7 +920,7 @@ export default function App() {
       } catch (error) { const message = error instanceof Error ? error.message : 'Could not import this project. Try another file.'; setProjectImportError(message); setError(message); }
     }}/>
     <input type="file" hidden ref={mediaRef} aria-label="Import images or videos" accept={mediaAccept} multiple onChange={e=>{const files=Array.from(e.currentTarget.files||[]);e.currentTarget.value='';void importMedia(files);}}/>
-    {modal==='export'&&project&&board&&page&&<ExportPanel key={`${project.id}/${board.id}/${page.id}`} project={project} statePreviewProject={applicationPreview&&!application.error?application.project??undefined:undefined} statePreviewName={applicationPreview?.scenarioId} boardId={board.id} pageId={page.id} selectedIds={selectionIds} onClose={()=>setModal(null)} onNotify={notify}/>}
+    {modal==='export'&&project&&board&&page&&<ExportPanel key={`${project.id}/${board.id}/${page.id}`} project={project} statePreviewProject={applicationPreview&&!application.error?application.project??undefined:undefined} statePreviewName={applicationPreview?.scenarioId} statePreview={applicationPreview??undefined} savePending={!!saving||fieldSaveState!=='saved'} boardId={board.id} pageId={page.id} selectedIds={selectionIds} onClose={()=>setModal(null)} onNotify={notify}/>}
     {(modal==='help'||modal==='auth')&&<div className="modal-backdrop" onPointerDown={()=>{if(modal!=='auth')setModal(null);}}>
       <section className="modal" role="dialog" aria-modal="true" aria-label={modal==='help'?'Keyboard shortcuts':'Connect to workspace'} onPointerDown={e=>e.stopPropagation()}>
         <div className="modal-header"><h2>{modal==='help'?'Keyboard shortcuts':'Connect to your workspace'}</h2>{modal!=='auth'&&<IconButton label="Close dialog" onClick={()=>setModal(null)}><X size={19}/></IconButton>}</div>
