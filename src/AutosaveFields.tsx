@@ -36,10 +36,14 @@ export function AutosaveInput({ value, onSave, normalize, showStatus = false, on
       return { value: text };
     },
   });
-  return <><input {...props} ref={input} value={draft.value.value} disabled={props.disabled && !draft.busy} aria-invalid={!!draft.error || draft.conflicts.length > 0 || undefined} aria-busy={draft.busy || undefined} onChange={event => draft.setValue({ value: event.target.value })} onBlur={draft.onBlur} onCompositionStart={draft.onCompositionStart} onCompositionEnd={draft.onCompositionEnd} onKeyDown={event => {
+  return <><input {...props} ref={input} value={draft.value.value} disabled={props.disabled && !draft.busy} aria-invalid={!!draft.error || draft.conflicts.length > 0 || undefined} aria-busy={draft.busy || undefined} onChange={event => {
+    draft.setValue({ value: event.target.value });
+    // A number field reads empty while it holds a partial entry such as "-"; wait for a number, blur or Enter before validating.
+    if (props.type === 'number') (event.target.value ? draft.onCompositionEnd : draft.onCompositionStart)();
+  }} onBlur={draft.onBlur} onCompositionStart={draft.onCompositionStart} onCompositionEnd={draft.onCompositionEnd} onKeyDown={event => {
     if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
       if (event.key === 'Escape') { event.preventDefault(); draft.reset(); }
-      if (event.key === 'Enter') { event.preventDefault(); void draft.flush(); }
+      if (event.key === 'Enter') { event.preventDefault(); draft.onCompositionEnd(); void draft.flush(); }
     }
     onKeyDown?.(event);
   }}/><AutosaveStatus state={draft} compact={!showStatus} anchor={input}/></>;

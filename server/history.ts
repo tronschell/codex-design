@@ -139,14 +139,21 @@ export class ProjectHistory {
   async list(project: DesignProject): Promise<ProjectVersionSummary[]> {
     const { revisions } = await this.ensure(project);
     const versions: ProjectVersionSummary[] = [];
-    for (const revision of revisions) {
+    const check = async (revision: number) => {
       const record = await this.readRecord(project.id, revision);
       const filename = path.join(this.directory(project.id), String(revision), 'format' in record ? 'snapshot.json' : 'project.json');
       let info;
       try { info = await lstat(filename); } catch (error) { if (missing(error)) throw corrupt(`Snapshot for revision ${revision} is missing.`); throw error; }
       if (!info.isFile() || info.size < 1 || info.size > snapshotLimit) throw corrupt(`Snapshot for revision ${revision} has an invalid size or file type.`);
       if (record.version.restoredFrom !== undefined && record.version.restoredFrom < revisions[0]) throw corrupt(`Restore source for revision ${revision} is missing from history.`);
-      versions.push(record.version);
+      return record.version;
+    };
+    // Revisions are independent reads; bounded batches overlap the file I/O while reporting the earliest failing revision as before.
+    for (let index = 0; index < revisions.length; index += 32) {
+      for (const result of await Promise.allSettled(revisions.slice(index, index + 32).map(check))) {
+        if (result.status === 'rejected') throw result.reason;
+        versions.push(result.value);
+      }
     }
     return versions.reverse();
   }
@@ -176,10 +183,13 @@ export class ProjectHistory {
 
   async listLibrary(project: DesignProject, scope: LibraryScope, componentId?: string): Promise<ProjectVersionSummary[]> {
     const versions = await this.list(project), relevant: ProjectVersionSummary[] = [];
+    // ponytail: history saved before removals were dropped from summaries may still list one; only checked while the component is gone, so a since-restored component can keep a stale removal entry.
+    const removed = scope === 'component' && !project.designSystem.components.some(component => component.id === componentId);
     let previous: string | undefined;
     for (const version of [...versions].reverse()) {
       if (version.library) {
-        if (scope === 'system' ? version.library.system : version.library.componentIds.includes(componentId!)) relevant.push(version);
+        if (scope === 'system' ? version.library.system : version.library.componentIds.includes(componentId!)
+          && (!removed || (await this.readVersion(project.id, version.revision)).project.designSystem.components.some(component => component.id === componentId))) relevant.push(version);
         continue;
       }
       // Older snapshots have no scope metadata; compare their immutable library content once.

@@ -9,7 +9,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult, Icon } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { CanvasSelection, DesignProject, Operation } from '../shared/types.ts';
-import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadCancellationSchema, assetUploadSchema, beginAssetUploadSchema, cancelAssetUploadSchema, canvasSelectionSchema, canvasMapSettingsSchema, createProjectSchema, deleteProjectSchema, designSystemRequestSchema, designSystemSchema, designSystemTokenSchema, idSchema, inspirationItemSchema, libraryScopeSchema, libraryVersionSchema, messageSchema, nativeComponentDefinitionSchema, nodeSchema, nodeStyleSchema, operationsSchema, projectImportSchema, projectVersionSummarySchema, readAssetChunkSchema, revisionSchema, threadSchema, tokensSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
+import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadCancellationSchema, assetUploadSchema, beginAssetUploadSchema, cancelAssetUploadSchema, canvasSelectionSchema, canvasMapSettingsSchema, createProjectSchema, deleteProjectSchema, designSystemRequestSchema, designSystemTokenSchema, idSchema, inspirationItemSchema, libraryScopeSchema, messageSchema, nodeSchema, operationsSchema, projectImportSchema, projectVersionSummarySchema, readAssetChunkSchema, revisionSchema, threadSchema, tokensSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
 import { exportProjectBundle } from '../shared/export.ts';
 import { exportLibrary, libraryProject, libraryReferenceFiles } from '../shared/library-export.ts';
 import { exportCanvasMap, exportTargetHtml, exportTargetProject, exportTargetReact, exportTargetSvg, type ExportTarget } from '../shared/export-formats.ts';
@@ -53,7 +53,11 @@ const boardSummarySchema = z.object({
   id: idSchema, name: z.string(), createdAt: z.string(), updatedAt: z.string(), pageCount: z.number().int(), screenCount: z.number().int(),
 });
 const boundsSchema = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() });
-const contextNodeSchema = nodeSchema.extend({ resolvedStyles: nodeStyleSchema.optional(), resolvedLocalBounds: boundsSchema.optional() });
+// Same shallow-output reasoning as projectOutputSchema: these read tools return stored, already validated nodes and libraries.
+const nodeOutputSchema = z.object({ id: idSchema, type: z.string(), name: z.string(), parentId: idSchema.nullable() }).passthrough().describe('DesignNode; see docs/mcp.md');
+const contextNodeSchema = nodeOutputSchema.extend({ resolvedStyles: z.record(z.unknown()).optional(), resolvedLocalBounds: boundsSchema.optional() });
+const componentOutputSchema = z.object({ id: idSchema, name: z.string(), rootNodeId: idSchema, version: revisionSchema, nodes: z.array(nodeOutputSchema) }).passthrough().describe('Native component definition; see docs/mcp.md');
+const designSystemOutputSchema = z.object({ name: z.string(), tokens: z.array(designSystemTokenSchema), components: z.array(componentOutputSchema) }).passthrough().describe('Saved design system; see docs/mcp.md');
 const imageLayoutSchema = z.object({ direction: z.enum(['free', 'vertical', 'horizontal']), align: z.enum(['start', 'center', 'end']), justify: z.enum(['start', 'center', 'end', 'space-between']), gap: z.number(), padding: z.number(), paddingX: z.number(), paddingY: z.number(), marginX: z.number(), marginY: z.number() });
 const imageTargetSchema = z.object({
   id: idSchema, type: nodeSchema.shape.type, name: z.string(), parentId: idSchema.nullable(),
@@ -295,7 +299,7 @@ export function createMcpServer(store: ProjectStore, options: McpOptions = {}): 
   server.registerTool('canvas_get_design_system', {
     title: 'Read the project design system', description: 'Read the single editable project-wide design system shared by every board, its typed semantic tokens, documentation, source evidence and queued generator/finder request. Returns current DESIGN.md and CSS variables derived from authoritative structured tokens, plus explicit node-binding counts. Read before designing or importing screens. If the app has no DESIGN.md, derive rules/tokens from inspected themes, styles and component usages and save with update_design_system/upsert_design_token; generated DESIGN.md appears in the dedicated Design system tab. Do not create a documentation frame. Reuse named token IDs through node.tokenBindings; custom literal styles remain independent. Reading never scans repositories, changes files or navigates the canvas.',
     inputSchema: { projectId: idSchema },
-    outputSchema: { projectId: idSchema, revision: revisionSchema, designSystem: designSystemSchema, markdown: z.string(), css: z.string(), usage: z.array(z.object({ tokenId: idSchema, nodeCount: z.number().int(), bindingCount: z.number().int() })) }, annotations: readOnly, _meta: appMetadata,
+    outputSchema: { projectId: idSchema, revision: revisionSchema, designSystem: designSystemOutputSchema, markdown: z.string(), css: z.string(), usage: z.array(z.object({ tokenId: idSchema, nodeCount: z.number().int(), bindingCount: z.number().int() })) }, annotations: readOnly, _meta: appMetadata,
   }, async ({ projectId }) => {
     try {
       const project = await store.get(projectId), counts = new Map<string, { nodes: Set<string>; bindings: number }>();
@@ -323,7 +327,7 @@ export function createMcpServer(store: ProjectStore, options: McpOptions = {}): 
   server.registerTool('canvas_get_component', {
     title: 'Read a reusable component definition', description: 'Read the current native component definition or the definition from an immutable project revision. Definition node IDs are stable source identities; each linked instance maps them to its own canvas IDs and preserves per-property overrides. Historical reads never change the live canvas. Read root and child notes for implementation intent. Source/JSX stays passive.',
     inputSchema: { projectId: idSchema, componentId: idSchema, revision: revisionSchema.optional() },
-    outputSchema: { projectId: idSchema, revision: revisionSchema, component: nativeComponentDefinitionSchema, tokens: z.array(designSystemTokenSchema), historyPreview: z.boolean() }, annotations: readOnly, _meta: appMetadata,
+    outputSchema: { projectId: idSchema, revision: revisionSchema, component: componentOutputSchema, tokens: z.array(designSystemTokenSchema), historyPreview: z.boolean() }, annotations: readOnly, _meta: appMetadata,
   }, async ({ projectId, componentId, revision }) => {
     try {
       const project = revision === undefined ? await store.get(projectId) : (await store.getVersion(projectId, revision)).project;
@@ -408,7 +412,7 @@ export function createMcpServer(store: ProjectStore, options: McpOptions = {}): 
 
   server.registerTool('canvas_get_library_version', {
     title: 'Read a design system or component version', description: 'Read a saved scoped library version for comparison without changing live data. Returns historical design-system tokens/documentation and the selected component when scope:component. Only the person clicking Apply can restore it.',
-    inputSchema: { projectId: idSchema, revision: revisionSchema, scope: libraryScopeSchema, componentId: idSchema.optional() }, outputSchema: { ...libraryVersionSchema.shape, historyPreview: z.literal(true) }, annotations: readOnly, _meta: appMetadata,
+    inputSchema: { projectId: idSchema, revision: revisionSchema, scope: libraryScopeSchema, componentId: idSchema.optional() }, outputSchema: { designSystem: designSystemOutputSchema, version: projectVersionSummarySchema, component: componentOutputSchema.optional(), historyPreview: z.literal(true) }, annotations: readOnly, _meta: appMetadata,
   }, async ({ projectId, revision, scope, componentId }) => {
     try { const saved = await store.getLibraryVersion(projectId, revision, scope, componentId); return result({ ...saved, historyPreview: true }, `Historical ${scope === 'system' ? 'design system' : 'component'} preview, revision ${revision}.`); } catch (error) { return toolError(error); }
   });

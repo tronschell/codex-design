@@ -44,6 +44,7 @@ export function duplicateNodes(nodeIds: string[], nodes: DesignNode[]) {
     const copy = { ...structuredClone(node), id: ids.get(node.id)!, parentId: root ? node.parentId : ids.get(node.parentId!)!, name: root ? `${node.name} copy` : node.name, x: node.x + offset.x, y: node.y + offset.y };
     remapComponentInstance(copy, ids);
     remapFeatureReferences(copy, ids);
+    if (copy.href?.startsWith('#') && ids.has(copy.href.slice(1))) copy.href = `#${ids.get(copy.href.slice(1))!}`;
     return copy;
   });
 }

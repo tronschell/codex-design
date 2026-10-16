@@ -54,6 +54,8 @@ export function stateContextFor(project:DesignProject,node:DesignNode):{owner:De
  return owner?.applicationState?{owner,context:owner.applicationState}:undefined;
 }
 export function validateStateNodes(nodes:DesignNode[],allNodes:DesignNode[]=nodes):string[]{
+ // Every check below needs one of these fields; skipping the whole-project id map saves O(pages × nodes) per edit.
+ if(!nodes.some(n=>n.applicationState||n.stateBinding||n.stateRules?.length||n.journey))return[];
  const errors:string[]=[],all=new Map([...allNodes,...nodes].map(n=>[n.id,n])),globalWriters=new Map<string,{rule:StateRule;owner:string}[]>();
  for(const node of nodes){
   const contextNode=node.stateBinding&&node.stateBinding.contextNodeId!==node.id?all.get(node.stateBinding.contextNodeId):node,context=contextNode?.applicationState;

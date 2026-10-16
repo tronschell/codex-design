@@ -24,8 +24,11 @@ export default function LibraryVersions({ project, scope, componentId, disabled,
   const identity = `${project.id}/${scope}/${componentId ?? ''}`;
   const context = useRef({ identity, revision: project.revision }); context.current = { identity, revision: project.revision };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; epoch.current++; listEpoch.current++; }; }, []);
+  const listed = useRef('');
   useEffect(() => {
-    const request = ++listEpoch.current; epoch.current++; setLoading(true); setError(''); setSnapshot(null); setSelected(null);
+    // Saved versions never change, so a new project revision only refreshes the list; the open preview stays.
+    const request = ++listEpoch.current;
+    if (listed.current !== identity) { listed.current = identity; epoch.current++; setLoading(true); setError(''); setSnapshot(null); setSelected(null); }
     void client.listLibraryVersions(project.id, scope, componentId).then(result => {
       if (mounted.current && request === listEpoch.current) setVersions(result);
     }).catch(failure => { if (mounted.current && request === listEpoch.current) setError(failure instanceof Error ? failure.message : 'Versions could not be loaded.'); }).finally(() => { if (mounted.current && request === listEpoch.current) setLoading(false); });

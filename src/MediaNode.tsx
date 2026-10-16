@@ -4,29 +4,41 @@ import type { DesignNode } from '../shared/types';
 import { isAssetRef } from '../shared/media';
 import { client } from './client';
 
-type AssetUrl = { users: number; controller: AbortController; promise: Promise<string>; url?: string };
+type AssetUrl = { users: number; controller: AbortController; promise: Promise<string>; url?: string; byteLength: number };
 const assetUrls = new Map<string, AssetUrl>();
+// Loaded media no node currently shows, oldest first. The canvas unmounts root frames outside the viewport, so without this
+// panning back downloads and decodes the same file again on the main thread.
+const unused = new Map<string, AssetUrl>();
+const UNUSED_BYTES = 64 * 1024 * 1024;
+let unusedBytes = 0;
 
 function acquireAssetUrl(ref: string) {
   let entry = assetUrls.get(ref);
   if (!entry) {
-    const pending: AssetUrl = { users: 0, controller: new AbortController(), promise: Promise.resolve('') };
+    const pending: AssetUrl = { users: 0, controller: new AbortController(), promise: Promise.resolve(''), byteLength: 0 };
     pending.promise = client.readAsset(ref, pending.controller.signal).then(({ asset, bytes }) => {
       if (pending.controller.signal.aborted) throw new DOMException('The asset is no longer needed.', 'AbortError');
       const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: asset.mimeType }));
-      pending.url = url;
+      pending.url = url; pending.byteLength = bytes.byteLength;
       return url;
     }).catch(error => { if (assetUrls.get(ref) === pending) assetUrls.delete(ref); throw error; });
     entry = pending; assetUrls.set(ref, entry);
   }
+  if (unused.delete(ref)) unusedBytes -= entry.byteLength;
   entry.users++;
   return { promise: entry.promise, release() {
     entry.users--;
     if (!entry.users) queueMicrotask(() => {
       // React may reacquire this asset during the same effect flush (including Strict Mode).
       if (entry.users || assetUrls.get(ref) !== entry) return;
-      assetUrls.delete(ref); entry.controller.abort();
-      if (entry.url) URL.revokeObjectURL(entry.url);
+      // Unfinished reads are still cancelled; finished files stay until the unused budget is exceeded.
+      if (!entry.url) { assetUrls.delete(ref); entry.controller.abort(); return; }
+      unused.set(ref, entry); unusedBytes += entry.byteLength;
+      for (const [oldest, stale] of unused) {
+        if (unusedBytes <= UNUSED_BYTES) break;
+        unused.delete(oldest); assetUrls.delete(oldest); unusedBytes -= stale.byteLength;
+        URL.revokeObjectURL(stale.url!);
+      }
     });
   } };
 }

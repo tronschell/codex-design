@@ -1197,3 +1197,404 @@ The three per-process wall medians are 228.901, 229.412 and 229.591 ms before ve
 Practical effect: complete media preparation does less CPU work in this measured workload while transferring and decoding identical content. The measurements include the full local client/HTTP preparation path rather than only an isolated character loop. They do not establish browser main-thread responsiveness, installed MCP latency or full-application load time. Browser memory, browser CPU, displayed-image timing, scrolling/panning FPS and video decoding were not measured; no memory reduction is inferred from the new allocation expression. Node's runtime, Blob and base64 behavior can differ from the installed host.
 
 Strict unused-symbol TypeScript compilation passed. No tests, assertions, fixtures, dependencies, saved-project edits, media uploads, imports or visual verification designs were added or run. Baseline source is 10bf450. Raw source profiles, six process reports, input/output provenance and pooled summary remain in `/private/tmp/codex-media-decode-profile/` (local scratch storage, not packaged).
+
+## Workflow benchmark, state validation and shallow read schemas — October 16, 2026
+
+This pass benchmarks the main ways the app is used: an agent session over the stdio MCP runtime, and a person editing in the browser editor. It then fixes the two largest measured server costs that could be removed without changing behavior.
+
+**Changes**
+
+- `validateStateNodes` now returns early when none of the nodes being checked has `applicationState`, `stateBinding`, `stateRules` or `journey`. Every check in the function requires one of these fields, so the result is unchanged. `featureErrors` calls this function once per page and once per component on every save. Before the change, each call built a `Map` of every node in the project, which costs O(pages × total nodes) per edit.
+- `canvas_get_node_context`, `canvas_get_design_system`, `canvas_get_component` and `canvas_get_library_version` now declare shallow output schemas with passthrough (`id`/`type`/`name`/`parentId` nodes; full token schema kept). This follows the existing `projectOutputSchema` precedent. Before, these four tools carried the deep node, component and design-system schemas, which inflated every `tools/list` response, and the SDK re-validated each result against them. Input schemas are untouched.
+
+**Workload:** a scratch copy of the installed plugin library: 11 projects, 162 MB. The two largest targets are:
+
+| Target | Nodes | Pages | Size |
+| --- | ---: | ---: | ---: |
+| Codex Design — Diagramming | 4,419 | 36 | 2.4 MB |
+| Lot | 598 | 4 | |
+
+Every process started from a fresh copy of the library, so no saved design was touched.
+
+**MCP method:** a harness drives the built `dist/mcp.mjs` over stdio JSON-RPC, the way an agent session does. Each run times:
+
+- cold start through `initialize` and the first `tools/list`
+- 5 warm `tools/list` calls
+- 6 widget `resources/read` calls
+- design guidance
+- 7 `canvas_list_projects` calls
+- on both targets: full and board `canvas_get_project`, node context, design system, page HTML export, source export and version list, 3–5 times each
+- 20 chained `canvas_edit_project` `update_node` moves per target; the edit median uses edits 3–20
+
+Timing and measurement:
+
+- Wall time comes from client `performance.now()`.
+- Phase CPU comes from `ps` cumulative CPU time, at 10 ms resolution.
+- Peak RSS and total CPU come from `/usr/bin/time -l`.
+
+There were three fresh processes per build, run alternately (before, after, before, …). Tables report the median of the three run medians.
+
+The baseline is the current working tree with only these two edits reverted, built in a scratch copy. It includes the uncommitted export work present in the tree. Every benchmarked read and export result's `structuredContent` SHA-256 is identical before and after. That covers project, board, node context, design system, HTML/source export, versions, listing and guidance. The `[name, inputSchema]` list from `tools/list` is also identical.
+
+A separate check ran the two re-schema'd tools the benchmark does not call. It made 131 calls on every library project with components:
+
+- 68 live `canvas_get_component` calls
+- 6 historical `canvas_get_component` calls
+- 29 design-system `canvas_get_library_version` calls, covering the oldest, middle and newest revisions
+- 28 component-scope `canvas_get_library_version` calls
+
+There were no errors on either build, and every hash was identical. The widget HTML differs only by the shared early-return line it bundles (+127 B).
+
+| Agent (MCP stdio) workflow | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| `tools/list` response | 821,557 B | 478,130 B | −343,427 B | −41.8% |
+| First `tools/list` | 31.36 ms | 19.15 ms | −12.21 ms | −38.9% |
+| Warm `tools/list` | 23.25 ms | 13.36 ms | −9.89 ms | −42.5% |
+| Cold start → first `tools/list` | 132.79 ms | 118.76 ms | −14.03 ms | −10.6% |
+| Node context, 4,419-node project | 9.01 ms | 5.79 ms | −3.22 ms | −35.8% |
+| Design system, 4,419-node project | 14.47 ms | 8.19 ms | −6.28 ms | −43.4% |
+| Node context, 598-node project | 2.47 ms | 1.41 ms | −1.06 ms | −42.8% |
+| Design system, 598-node project | 1.75 ms | 1.28 ms | −0.47 ms | −26.9% |
+| Edit round trip, 4,419 nodes / 36 pages | 68.11 ms | 54.88 ms | −13.24 ms | −19.4% |
+| CPU for 20 edits, 4,419 nodes / 36 pages | 710 ms | 480 ms | −230 ms | −32.4% |
+| Edit round trip, 598 nodes / 4 pages | 48.39 ms | 48.10 ms | −0.28 ms | −0.6% (noise) |
+| CPU, all read workflows | 1,320 ms | 1,200 ms | −120 ms | −9.1% |
+| Total process CPU, whole session | 2.70 s | 2.30 s | −0.40 s | −14.8% |
+
+Per-run results:
+
+- Diagramming edit round trip: 68.06 / 68.21 / 68.11 ms before, 55.00 / 54.88 / 54.18 ms after.
+- Warm `tools/list`: 23.25 / 24.20 / 23.12 ms before, 13.36 / 13.49 / 13.13 ms after.
+
+Neither metric's ranges overlap.
+
+The small project's edit time and CPU did not change. With 4 pages there is little repeated work for the early return to skip; its CPU figure (260 vs 280 ms) is within the 10 ms `ps` resolution across 20 edits.
+
+The remaining edit time is mostly I/O: each save `fsync`s the project file and its history entry. That protects against data loss and was not changed.
+
+Peak RSS was higher after the change in 2 of the 3 pairings:
+
+| Build | Peak RSS per run | End RSS (median) |
+| --- | --- | ---: |
+| Before | 670.7 / 532.2 / 535.4 MB | 528.0 MB |
+| After | 590.6 / 590.2 / 584.8 MB | 482.8 MB |
+
+The higher after peak is consistent across runs but is not attributed to this change. The edits only remove work, and peak RSS here follows garbage-collector timing around the 12.9 MB source export. End-of-session RSS moved the other way. No memory reduction is claimed, and none is ruled out. The measured memory-related gain is that every `tools/list` response is 343 KB smaller. That response is also context the host model has to load.
+
+**Browser editor method:** the built-in browser pane at a 1,280 × 800 emulated viewport, loading the production server (`NODE_ENV=production tsx server/index.ts`).
+
+- Each build ran on its own loopback port, with its own fresh library copy.
+- The editor page was loaded top level. It treats any iframe as an MCP host, so an iframe harness cannot load projects.
+- `requestAnimationFrame` was mapped to `MessageChannel`, so a step measures work rather than vsync waits. A step is: dispatch the event, run two macrotask ticks, then force layout.
+- Pan and zoom: 20 synthetic wheel steps each.
+- Select: 7 frame-label selections, each followed by Escape.
+- Drag: 30 pointer moves on a frame label, then pointerup. The resulting save `POST` is timed with Resource Timing.
+
+Diagramming was measured in two rounds in reverse order (before→after, then after→before). Saves are reported warm, excluding each page load's first save.
+
+| Browser editor workflow | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Drag-save request, 4,419 nodes / 36 pages, median of 6 warm saves | 85.00 ms | 69.20 ms | −15.80 ms | −18.6% |
+| Drag-save request, 1,192-node project, 2 warm saves each | 66.3 / 66.7 ms | 64.7 / 66.1 ms | ≈0 | ≈0% |
+| Drag-save request, 598 nodes / 4 pages, 2 warm saves each | 58.4 / 64.4 ms | 57.2 / 59.2 ms | ≈0 | ≈0% |
+
+Warm saves on the 36-page project were 83.9, 83.5, 88.4, 88.3, 86.1 and 81.4 ms before, and 69.7, 67.7, 71.4, 67.2, 68.7 and 73.1 ms after; the ranges do not overlap. Client-side numbers are unchanged within noise, as expected, since the client code did not change.
+
+**Editor baseline (informational, after build):**
+
+| Workflow, per step | Lot (230 rendered nodes) | Project browser (1,189 rendered) | Diagramming page (125 rendered of 4,419) |
+| --- | ---: | ---: | ---: |
+| Wheel pan, median / p95 | 2.2 ms / — | 4.2 / 9.1 ms | 1.7–2.3 / 7.6 ms |
+| Ctrl-wheel zoom, median | 1.6 ms | 2.5 ms | 1.2 ms |
+| Select frame | 6.4 ms | 7.1 ms | 6.5 ms |
+| Inspector open | — | 9.4 ms | 11.4 ms |
+| Drag pointermove, median | 1.7–2.0 ms | 3.4–3.8 ms | 1.2–1.4 ms |
+| Project GET | 57 ms, 241 KB | 72 ms, 508 KB | 53–56 ms, 2,356 KB |
+
+Every interaction step stays well under a 16.7 ms frame at these sizes, so no editor-side change was made.
+
+Agent workflows left unchanged (median of the six runs):
+
+| Workflow | Diagramming (4,419 nodes) | Lot (598 nodes) |
+| --- | ---: | ---: |
+| Full `canvas_get_project` | ≈25.5 ms (2.41 MB) | ≈2.5 ms |
+| Board `canvas_get_project` | ≈8 ms | ≈2.3 ms |
+| Page HTML export | ≈27 ms | ≈4 ms |
+| Full source export | ≈400 ms (12.86 MB, 78 files) | ≈17 ms (1.26 MB) |
+| List versions | ≈26 ms | ≈11 ms |
+
+Other unchanged workflows:
+
+- Widget `resources/read`: ≈50 ms for 4.52 MB.
+- Project listing and design guidance: under 0.5 ms.
+
+**Practical effect**
+
+- Agents start a session about 14 ms sooner.
+- Every `tools/list` response is 343 KB smaller and about 10 ms faster.
+- Node-context and design-system reads are 36–43% faster.
+- On large multi-page projects, each edit — whether an agent edit or a canvas drag-save — returns 13–16 ms sooner and uses about a third less server CPU.
+- Small and single-page projects are unaffected.
+
+**Measured costs that remain (not changed)**
+
+- The bundled shaders.com runtime is 2.5 MB, 61% of the widget's 4.1 MB of JavaScript. It ships in the single-file widget even for projects with no shaders. Making it lazy would require splitting the file or a blob-script loader, which the host loader and CSP constrain.
+- Input schemas still make up most of `tools/list`. The largest are `canvas_edit_project` (114 KB) and `canvas_import_project` (107 KB). Shrinking them would change what the model sees, so it needs separate evaluation.
+- `structuredClone` in `ProjectStore.read` costs about 129 ms of CPU across the session's reads. Removing it would need every read-only caller audited.
+- Source export writes near-duplicate `pages/` and `screens/` HTML and a pretty-printed 3.4 MB `design.json`.
+- Peak MCP RSS is about 530–670 MB after a 12.9 MB source export.
+
+**Not measured:** paint and frame timing; first paint and LCP (the browser pane was not foregrounded, so paint entries were unreliable); browser process memory; the installed host's MCP transport; and Windows or Linux.
+
+**Verification:** `npm run typecheck` and `npm run build` passed. No tests, fixtures, dependencies or saved-project edits were added, and no tests were run.
+
+Raw results are in `artifacts/perf-2026-10-16/`:
+
+- six MCP run reports and the pooled summary
+- browser A/B and baseline JSON
+- the harness scripts
+- the component and library-version check output (`chk-*.txt`)
+
+## Other surfaces and version history — October 16, 2026
+
+This pass covers the surfaces the first section did not: the standalone web editor's HTTP MCP endpoint and REST API, switching projects, the version-history panel, the idle editor, the layer list, and the widget bundle. Only version-history listing changed.
+
+**Change:** `HistoryStore.list` (`server/history.ts`) used to read each revision's record and `lstat` its snapshot one at a time. It now checks revisions in parallel batches of 32. It still reports the earliest failing revision, with the same corruption messages as before.
+
+**Method and workload**
+
+- Library: a copy of the 11-project library.
+- Timed project: Diagramming, 234 versions.
+- Timing: `canvas_list_versions` over stdio from the `S/before` and `S/after2` builds, in 3 alternating runs.
+- Warm: median of repeat calls in the same process. First open: the first call after process start.
+- Output check: every version list in all 11 projects (511 versions) hashed with sha256 before and after. The hashes are identical (`hist-before.txt`, `hist-after.txt`), and error results hashed the same too.
+
+| `canvas_list_versions` (Diagramming, 234 versions) | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Warm | 26.1 ms | 12.0 ms | −14.1 ms (−54%) |
+| First open in a new process | 90.6 ms | 61.0 ms | −29.6 ms (−33%) |
+
+**Practical effect:** for a long-lived project, the version-history panel, and agent calls that list versions, return in about half the time. CPU and memory were not measured separately for this change. The change overlaps file I/O; it does not reduce work.
+
+**Surfaces measured and left unchanged**
+
+| Surface | Measured | Why it was left alone |
+| --- | --- | --- |
+| HTTP MCP (`POST /mcp`, stateless) | `initialize` 3 ms; `tools/list` 12.96 ms; `canvas_list_projects` 2.2 ms; `canvas_get_project` (Lot) 4 ms | Building a server per request costs little next to schema serialization, which the first section already reduced. |
+| `canvas_list_projects`, cold | 90–97 ms | The cost is Zod validation of 4.8 MB of project JSON on first read. That validation is the integrity check at the trust boundary. |
+| REST project list, cold | 122 ms | Same cause; it runs once per server start. |
+| Project switch (Diagramming) | ≈50 ms cold vs ≈14 ms warm | The store caches one project. A multi-project cache would raise memory use, which this work was meant to lower. |
+| Idle editor | Event-driven updates plus a 10 s long-poll answered from cache | No CPU work found between polls. |
+| Layer list scroll (production build, 105 rows, 48 rendered) | median 0.1–1.3 ms, p95 5.8–8.7 ms, max 10.5 ms per step | Already windowed, and well under one frame. Slower scrolling seen earlier came from the development build. |
+| Widget bundle | 4.3 MB, of which the shaders runtime is 61% | The widget must stay a single file; see the first section. |
+
+**Not measured:** history-listing CPU and RSS, HTTP MCP under concurrent clients, and history on network or slow disks, where batching probably helps more (an estimate, not measured).
+
+Scripts and raw output are in `artifacts/perf-2026-10-16/`:
+
+- `cold-list.mjs`
+- `hist-check.mjs` and `hist-*.txt`
+- `http-mcp.mjs`
+- `switch.mjs`
+
+## Re-verification on the current tree, diagram worker reuse and media cache — October 16, 2026
+
+Everything above was re-measured on a fresh isolated build of the current working tree. That tree includes the recent commits and the uncommitted portable-export work. This pass also benchmarked agent surfaces the earlier passes skipped: React screens, diagrams, states, media upload and read-back, history snapshots, `.cxdp` export and import, and PNG/JPEG rendering. The editor was measured with real frames, not just script time. Three regressions turned up, all from recent work, and all three are fixed here.
+
+**Fixes**
+
+1. **`.cxdp` files that contain media could not be imported from a file path.** `canvas_import_file` always failed with "Media checksum does not match". `readPortable` (`shared/portable.ts`) hashed `data.slice().buffer`, but the server reads the file into a Node `Buffer`, whose `slice()` returns a view. `.buffer` was therefore the whole archive. The reader now hashes a copy of the entry. Editor imports were unaffected because they pass a plain `Uint8Array`.
+2. **Every diagram layout started a new worker thread.** `server/diagram-layout.ts` reloaded the 3.3 MB ELK bundle on each `canvas_layout_diagram` call and on each auto-arranged diagram edit. A single long-lived, unreferenced worker now serves all requests, which are matched by id. A timeout still terminates it, and the next request starts a fresh one. Cancelling now drops only that caller's result. The worker timing in "Diagram arrangement — October 15, 2026" excluded this startup cost.
+3. **Panning re-downloaded images.** Since "Cancel media reads after their last consumer leaves", `src/MediaNode.tsx` freed a decoded image as soon as its node unmounted. The canvas unmounts clipped root frames outside the viewport (`visibleRootIds` in `src/App.tsx`), so panning frames back in downloaded the file again and base64-decoded it on the main thread. Finished files now stay in a least-recently-used set capped at 64 MiB of unused media. Reads that are still in flight are cancelled as before. This partly reverses the memory behavior described in "Unused shared media reads" above: up to 64 MiB of finished, unshown media now stays in memory as blob URLs, while unfinished reads are still cancelled.
+
+**Diagram workload:** a new project with 10 `canvas_create_diagram` plus `canvas_layout_diagram` pairs cycling through flowchart, sequence, class, architecture and state-machine. Builds alternated over 3 runs per build; medians are shown, from the stdio runtime.
+
+| Diagram workflow | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `canvas_layout_diagram` | 80.7 ms | 7.5 ms | −73.2 ms (−91%) |
+| `canvas_create_diagram`, graph kinds after the first | 122 ms | 50 ms | −72 ms (−59%) |
+| Server CPU for the session | 2,040 ms | 480 ms | −1,560 ms (−76%) |
+
+- The first diagram in a process still pays the worker start, about 130 ms.
+- Layout geometry (operations, crossings, moved nodes, warnings) hashed identically on both builds: `0f98f9d8323011f3`.
+- Three concurrent layouts on the shared worker returned the same per-frame operations as sequential calls.
+- The stdio process still exits when its input closes.
+
+**Editor pan workload:** the densest single page in the library, "Codex Design — Project browser". It has 1,189 drawn nodes, 14 images and 2 iframes. The page was zoomed out to scale 0.13. The pan was 120 frames of real `requestAnimationFrame`, one wheel event per frame, on a 120 Hz display with the browser pane visible. Three passes ran per build. Build: production (`NODE_ENV=production`).
+
+| Zoomed-out pan, per 120-frame pass | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Frames over 20 ms | 6–7 | 0 | −100% |
+| p95 frame interval | 25.0 ms | 9.3 ms | −15.7 ms (−63%) |
+| Worst frame | 50.9–58.3 ms | 16.7–16.8 ms | |
+| Asset requests | 41–43 | 0 | −100% |
+| Asset bytes downloaded | 32.7 MB | 0 MB | −100% |
+
+Long Animation Frame entries attributed the slow frames to `Response.json` callbacks of about 15 ms each, one for every 1 MiB base64 chunk. Style, layout and render were each 4 ms or less. In practice, panning around image-heavy pages stays at the display rate and stops re-downloading tens of megabytes. The cost is up to 64 MiB of browser blob memory for images no longer on screen.
+
+**`.cxdp` import of Lot (11 media files), via `canvas_import_file`:** failed every time before the fix. After the fix it succeeds in a median of 202 ms with 130 ms of server CPU.
+
+**Other surfaces, re-measured (unchanged)**
+
+| Surface | Today | Note |
+| --- | ---: | --- |
+| Original agent workflow benchmark (all rows) | within ±1 ms of the first section's "after", except `canvas_list_versions` | Outputs hash identically, except `warmWidgetRead`, whose widget HTML was rebuilt from newer source. Versions list 12.9 ms on Diagramming, the history change. |
+| Editor, Diagramming: real-frame pan, zoom and drag | 8.3 ms median, p95 ≤ 9.4 ms, no frame over 20 ms | Zoomed in or out |
+| Editor, Project browser zoomed in: pan, zoom, drag | 8.3 ms median, p95 ≤ 9.2 ms, no frame over 20 ms | |
+| Editor, drag-save request (Diagramming) | 63–76 ms | |
+| React `canvas_write_react`, first screen | 1.17 s | Includes dependency installation; whether npm used its local cache or the network was not checked |
+| React, second screen or shared-component edit | 205–235 ms, about 300 ms of CPU | Mostly esbuild re-bundling React and lucide; not changed |
+| `canvas_edit_state` context edit / `canvas_preview_state` | 43 ms / 4 ms | |
+| 2.6 MB image upload, 3 chunks | 116 ms | |
+| 2.6 MB image read-back, 3 chunks | 26–29 ms | |
+| `canvas_get_version`, Diagramming mid-history (1.1 MB) | 69–72 ms | |
+| `.cxdp` prepare + read + save, Lot (5.1 MB) | 18 + 52 + 7 ms | |
+| `.cxdp` import, Diagramming | 390–402 ms | |
+| PNG/JPEG render (warm Chrome) | 460–790 ms | The first render after a cold OS start took 4.3 s once |
+| HTTP MCP `tools/list` / REST cold vs warm project switch | 12.9 ms / 45 vs 13 ms | Single-project server cache |
+
+Server RSS climbed to 500–730 MB during the broad agent run, mostly after image renders and large exports. It ended at 505–642 MB after the fixes, versus 559–662 MB before. That is three runs per build, with RSS sampled with `ps`; no attribution is claimed.
+
+**Not measured:** paint cost on lower-end GPUs or 60 Hz displays; Windows and Linux; HTTP MCP under concurrent clients; React compile CPU inside esbuild's own process.
+
+**Verification:** `npx tsc --noEmit` and `npm run build` passed on the working tree. No tests, fixtures or dependencies were added, and no tests were run. All measurements used copies of the library in scratch directories.
+
+Scripts and raw runs are in `artifacts/perf-2026-10-16/reverify/`.
+
+## Shared state-condition schema levels — October 16, 2026
+
+After the workflow pass above, input schemas made up 381,873 B of the 478,130 B `tools/list` response. Four tools carried 361 KB of that:
+
+- `canvas_edit_project`
+- `canvas_import_project`
+- `canvas_write_react`
+- `canvas_edit_state`
+
+The duplicate-subtree analysis showed one cause. The state-condition schema (`key`/`eq`, `key`/`in`, `all`, `any`, up to depth 5) was unrolled 63 times wherever a node or state rule appears. That is 1 + 2 + 4 + 8 + 16 + 32 copies.
+
+**Change**
+
+- `stateConditionSchema` in `shared/feature-schema.ts` now builds one union per depth, from depth 5 up to depth 0. `all` and `any` at the same depth share that instance, and the two leaf objects are shared by every depth.
+- Before the change, `conditionAt` called `z.lazy(() => conditionAt(depth + 1))` separately for `all` and for `any`. Every branch was therefore a new zod instance, and zod-to-json-schema can only `$ref` a schema it has already seen.
+- The JSON Schema now `$ref`s the earlier copy of each depth, the same way the existing 463 refs in `canvas_edit_project` already work.
+- Depth limit, bounds, strictness and error issues are unchanged. Handlers still parse with the full zod schemas.
+
+No descriptions were moved, and no fields were loosened or removed. After the change, the analysis finds no duplicated subtree larger than 200 characters in any of the four tools, so further `$ref` deduplication has nothing left to take. The descriptions that remain total 6.3 KB, 4.0 KB, 4.2 KB and 0 KB in these tools. Moving them to `docs/mcp.md` would change model-visible guidance, so it was not done.
+
+**Equivalence checks**
+
+- **Resolved schemas:** every `$ref` in both `tools/list` responses was resolved, with cycles marked by loop distance so pre-existing recursive refs compare path-independently. All 50 tools are deep-equal before and after: input schema, output schema, name, title, description, annotations and `_meta`. As a negative control, changing one `maxItems` in one condition made the comparator report that tool.
+- **Parse parity:** the old and new `stateConditionSchema` returned the same `success` and identical data or `issues` JSON on 19 inputs. The inputs covered both leaves, depth 5 (accepted), depths 6 and 7 (rejected), empty and 33-item `in`, empty `all`, 8- and 9-item `any`, stray keys at the root and nested, invalid IDs, `all`+`any` together, `Infinity`, a 2,001-character value, `null`, an array and a mixed depth-5 tree. `stateRuleSchema` accepts a depth-5 `when` and rejects depth 6.
+- **Benchmark results:** every benchmarked read, export, listing, guidance and edit result's `structuredContent` SHA-256 is identical before and after.
+  - The `[name, inputSchema]` hash differs by design.
+  - The widget HTML differs only by the rewritten schema code it bundles (+10 B).
+
+**Workload and method:** the same harness, library, run order and timing sources as "Workflow benchmark, state validation and shallow read schemas" above (`bench-mcp.mjs`, 11 projects, 162 MB, fresh copy per process). There were three fresh processes per build, run alternately (before, after, before, …). The tables report the median of the three run medians.
+
+The before build is the working tree after that workflow section's changes, including the uncommitted export work. It does not include the later `HistoryStore.list` batching from "Other surfaces and version history". The after build differs from it only in `shared/feature-schema.ts`.
+
+| `tools/list` input schema | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| `canvas_edit_project` | 113,616 B | 57,301 B | −56,315 B | −49.6% |
+| `canvas_import_project` | 107,371 B | 47,095 B | −60,276 B | −56.1% |
+| `canvas_write_react` | 85,864 B | 35,141 B | −50,723 B | −59.1% |
+| `canvas_edit_state` | 54,779 B | 9,562 B | −45,217 B | −82.5% |
+| All 50 input schemas | 381,873 B | 169,342 B | −212,531 B | −55.7% |
+
+| Agent (MCP stdio) workflow | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| `tools/list` response | 478,130 B | 265,599 B | −212,531 B | −44.5% |
+| Warm `tools/list` | 13.27 ms | 5.62 ms | −7.65 ms | −57.6% |
+| First `tools/list` | 19.69 ms | 10.13 ms | −9.56 ms | −48.6% |
+| Cold start → first `tools/list` | 121.58 ms | 112.67 ms | −8.91 ms | −7.3% |
+| CPU after startup | 120 ms | 110 ms | −10 ms | −8.3% (one 10 ms `ps` tick) |
+
+Per-run results:
+
+- Warm `tools/list`: 12.90 / 13.27 / 13.33 ms before, 5.37 / 5.79 / 5.62 ms after.
+- First `tools/list`: 19.14 / 19.69 / 20.22 ms before, 12.22 / 9.74 / 10.13 ms after.
+- Cold start → first `tools/list`: 124.62 / 120.67 / 121.58 ms before, 112.67 / 112.80 / 112.63 ms after.
+
+None of these ranges overlap. The SDK converts every zod input schema to JSON Schema on each `tools/list` request without caching, so conversion time falls along with the number of nodes it emits.
+
+Unchanged within noise:
+
+- Reads, exports and the edit chain: 54.8 vs 55.0 ms on 4,419 nodes, 45.7 vs 45.2 ms on 598 nodes. These edits carry no conditions.
+- Cold start to `initialize`: 78.7 vs 80.1 ms.
+- RSS after initialize: 105.8 vs 105.9 MB.
+- Peak RSS: 591.0 vs 589.8 MB.
+- Total process CPU: 2.23 vs 2.21 s.
+
+No memory change is claimed.
+
+**Condition validation (microbenchmark, not the MCP harness):** each schema ran in its own `tsx` process on Node 24, in three alternating processes per schema. Each process parsed each input 5,000 times, in seven rounds after a warm-up. The table reports the median of the three per-process medians.
+
+| Condition parsed | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| `all` of two leaves | 56.31 µs | 27.70 µs | −28.61 µs | −50.8% |
+| Depth-5 `all`/`any` tree | 182.78 µs | 73.90 µs | −108.88 µs | −59.6% |
+
+Per process: 60.22 / 56.31 / 55.30 µs before and 28.85 / 27.70 / 26.67 µs after for two leaves; 185.15 / 179.95 / 182.78 µs before and 74.42 / 73.45 / 73.90 µs after at depth 5.
+
+A single `key`/`eq` leaf matches the first union option in both versions and runs the same validators. Its persistent 0.75 vs 0.48 µs gap is not attributed to this change.
+
+zod v3's `ZodLazy` calls its getter on every parse. The old getter built a new union subtree each time, so every rule, journey or constraint validation rebuilt schemas. Saves that validate many conditions benefit by this per-condition amount. That effect was not measured end to end, because the benchmark library's edits carry no conditions.
+
+**Practical effect**
+
+- Every agent session receives a `tools/list` response that is 213 KB (44%) smaller (measured wire size). Whether the model's context shrinks too depends on the host passing `$ref` through rather than dereferencing it. That was not measured.
+- The response is ready about 8 ms sooner warm and about 10 ms sooner on first request.
+- Agents reach their first tool list about 9 ms sooner after spawn.
+- Validating a nested state condition costs about half as much CPU or less.
+- Nothing the model can express, and nothing the server accepts or rejects, changed.
+
+**Measured costs that remain (not changed)**
+
+- `canvas_edit_project` (57 KB) and `canvas_import_project` (47 KB) are still the largest schemas, because they contain the full node, design-system and component shapes once each.
+- Removing more would mean dropping fields or descriptions from what the model sees, or replacing schemas with passthrough. Either needs model-behaviour evaluation, not byte measurement.
+
+**Not measured:**
+
+- model token counts or quality with the new schema text
+- installed-host `$ref` handling, beyond the fact that the previous schemas already relied on it
+- HTTP MCP `tools/list`. The stateless endpoint converts schemas on every request and measured 12.96 ms in "Other surfaces and version history". It should fall too, but it was not re-measured.
+- end-to-end save time for condition-heavy projects
+- Windows or Linux
+
+**Verification:** `npm run typecheck` and `npm run build` passed for both builds. No tests, fixtures, dependencies or saved-project edits were added, and no tests were run.
+
+Raw results are in `artifacts/perf-2026-10-16-input-schemas/`:
+
+- six MCP run reports and the pooled summary
+- before and after `tools/list` dumps
+- the equivalence, parse-parity and parse-timing scripts
+
+## Component history removals and editor field fixes — October 16, 2026
+
+**Component history removals.** Component history listed revisions that removed the component, and opening one returned `component_not_found`.
+- `libraryChanges` in `server/store.ts` no longer records removed components in a revision's component scope. The design-system scope still records the removal.
+- `listLibrary` in `server/history.ts` drops those removal entries from history saved before this change. It reads the saved snapshots only when the component no longer exists in the live project.
+- The first version of this fix read a snapshot for every listed entry, which made listing about 3.2× slower.
+
+| Component-history listing (all 68 components, 11-project library copy) | Before | After |
+| --- | ---: | ---: |
+| First version of the fix (one run each) | 585.4 ms | 1,896.3 ms (+224%) |
+| Final version (two runs each) | 582.7 / 586.6 ms | 583.4 / 589.6 ms (≈0%, noise) |
+
+Method: stdio MCP from builds before and after the fix, on fresh copies of the library. Each component was listed once warm, then once timed. Every listed entry was then opened, and none failed on either build.
+
+Reproduction: on a scratch project, save a component, edit it, then restore a project version from before it existed.
+- The old build lists 3 entries, and the newest returns 404.
+- The new build lists the 2 entries that can be opened, both for history recorded by the old build and for new history.
+
+Practical effect: component history no longer offers versions that cannot be opened, and listing is no slower.
+
+**Editor field fixes.** These were checked in the production web editor on a scratch copy of the library.
+
+| Fix | Check | Result |
+| --- | --- | --- |
+| Color fields that use `ColorField` (`src/InspectorFields.tsx`) preview the color in the swatch while you drag in the picker, and save once when the picker commits. This matches `AppearanceControls`. | 10 picker input events, then a change event, on Decoration color | 0 saves during the drag, 1 save on commit (revision 8 → 9) with the last color; the swatch showed each color |
+| A number field holding only a partial entry such as "-" waits for blur or Enter before validating (`src/AutosaveFields.tsx`) | Type "-" into X and wait 1.5 s; type "40"; separately type "-" and blur | No error while typing; "-40" saved; "Enter a valid number." appears on blur |
+| An open library-version preview stays open when the project changes, and the list refreshes quietly (`src/LibraryVersions.tsx`) | Open v6, then make a node move and a design-system edit over HTTP MCP | Preview v6 stays selected; the list gains v11 without showing "Loading versions…" |
+
+Before the `ColorField` change, each picker input event called the field's `onChange`, which saves the project. That means one revision, one version-history entry and one undo entry per tick, and undo keeps only 60 entries. This is from reading the code; the old save count was not measured.

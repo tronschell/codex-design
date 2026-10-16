@@ -2,17 +2,30 @@ import { Worker } from 'node:worker_threads';
 import type { DesignProject, Operation } from '../shared/types';
 import type { DiagramLayoutResult } from '../shared/diagram-layout-types';
 import { diagramFrame } from '../shared/diagrams';
+type Settle=(error?:Error,value?:any)=>void;
+let shared:{worker:Worker;pending:Map<number,Settle>;kill:(error:Error)=>void}|undefined,nextRequest=0;
+// One long-lived worker: loading the ELK bundle costs about 70–100 ms per start. A stuck layout kills it; the next call starts a fresh one.
+function layoutWorker(){
+ if(shared)return shared;
+ const worker=new Worker(new URL('../dist/diagram-layout-worker.mjs',import.meta.url)),pending=new Map<number,Settle>();
+ const kill=(error:Error)=>{if(shared?.worker===worker)shared=undefined;const waiting=[...pending.values()];pending.clear();void worker.terminate();for(const settle of waiting)settle(error);};
+ worker.on('error',kill);worker.on('exit',code=>kill(new Error('Layout worker exited ('+code+').')));
+ worker.on('message',({id,...value})=>pending.get(id)?.(value.error?new Error(value.error):undefined,value));
+ // An idle worker never keeps the process alive; each pending layout's timeout timer does until it settles.
+ worker.unref();
+ return shared={worker,pending,kill};
+}
 export function layoutDiagram(project:DesignProject,pageId:string,frameId:string,signal?:AbortSignal):Promise<DiagramLayoutResult>{
  const page=project.pages.find(p=>p.id===pageId);if(!page)throw Error('Page does not exist.');
  return new Promise((resolve,reject)=>{
-  const worker=new Worker(new URL('../dist/diagram-layout-worker.mjs',import.meta.url));let done=false;
-  const finish=(error?:Error,value?:any)=>{if(done)return;done=true;clearTimeout(timeout);signal?.removeEventListener('abort',abort);void worker.terminate();if(error)reject(error);else resolve({frameId,revision:project.revision,...value});};
+  const {worker,pending,kill}=layoutWorker(),id=nextRequest++;let done=false;
+  const finish:Settle=(error,value)=>{if(done)return;done=true;pending.delete(id);clearTimeout(timeout);signal?.removeEventListener('abort',abort);if(error)reject(error);else resolve({frameId,revision:project.revision,...value});};
+  // Cancelling drops this caller's result without stopping layouts queued by other callers.
   const abort=()=>finish(new Error('Layout cancelled.'));
-  const timeout=setTimeout(()=>finish(new Error('Layout took too long. Pin settled groups or split this diagram into smaller frames.')),15000);
-  worker.on('error',error=>finish(error));worker.on('exit',code=>{if(!done)finish(new Error('Layout worker exited ('+code+').'));});
-  worker.on('message',value=>value.error?finish(new Error(value.error)):finish(undefined,value));
+  const timeout=setTimeout(()=>{const error=new Error('Layout took too long. Pin settled groups or split this diagram into smaller frames.');finish(error);kill(error);},15000);
+  pending.set(id,finish);
   signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted){abort();return;}
-  worker.postMessage({nodes:page.nodes,pageId,frameId});
+  worker.postMessage({id,nodes:page.nodes,pageId,frameId});
  });
 }
 export async function autoArrange(project:DesignProject,previous:DesignProject,operations:Operation[]){

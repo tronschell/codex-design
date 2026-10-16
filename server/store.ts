@@ -122,9 +122,8 @@ function libraryChanges(previous: DesignProject, current: DesignProject, release
   // validateProjectUpdate reuses unchanged objects, so identity settles most comparisons without serializing.
   if (previous.designSystem === current.designSystem) return { system: released, componentIds: [] };
   const before = new Map(previous.designSystem.components.map(component => [component.id, component]));
+  // Removals are left out: a component's history only offers revisions where it can be opened. The system scope still records them.
   const componentIds = current.designSystem.components.filter(component => { const prior = before.get(component.id); return prior !== component && JSON.stringify(component) !== JSON.stringify(prior); }).map(component => component.id);
-  const ids = new Set(current.designSystem.components.map(component => component.id));
-  for (const component of previous.designSystem.components) if (!ids.has(component.id)) componentIds.push(component.id);
   return { system: released || JSON.stringify(previous.designSystem) !== JSON.stringify(current.designSystem), componentIds };
 }
 

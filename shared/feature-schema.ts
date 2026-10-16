@@ -7,11 +7,11 @@ const coord=z.number().finite().min(-10_000_000).max(10_000_000), size=z.number(
 const color=z.string().max(500).refine(safeColor,'Use a safe color');
 const value=z.union([z.string().max(2000),z.boolean(),z.number().finite().min(-1e9).max(1e9)]);
 export const stateValuesSchema=z.record(id,value).refine(v=>Object.keys(v).length<=32,'At most 32 state inputs');
-const conditionAt=(depth:number):z.ZodType<StateCondition>=>z.union([
- z.object({key:id,eq:value}).strict(),z.object({key:id,in:z.array(value).min(1).max(32)}).strict(),
- ...(depth<5?[z.object({all:z.array(z.lazy(()=>conditionAt(depth+1))).min(1).max(8)}).strict(),z.object({any:z.array(z.lazy(()=>conditionAt(depth+1))).min(1).max(8)}).strict()]:[])
-] as [z.ZodTypeAny,z.ZodTypeAny,...z.ZodTypeAny[]]) as z.ZodType<StateCondition>;
-export const stateConditionSchema=conditionAt(0);
+// One shared instance per depth (0-5) so tool JSON Schemas $ref repeated levels instead of unrolling 2^depth copies.
+const conditionLeaves=[z.object({key:id,eq:value}).strict(),z.object({key:id,in:z.array(value).min(1).max(32)}).strict()] as const;
+let condition:z.ZodType<StateCondition>=z.union(conditionLeaves) as z.ZodType<StateCondition>;
+for(let depth=4;depth>=0;depth--)condition=z.union([...conditionLeaves,z.object({all:z.array(condition).min(1).max(8)}).strict(),z.object({any:z.array(condition).min(1).max(8)}).strict()]) as z.ZodType<StateCondition>;
+export const stateConditionSchema=condition;
 export const stateScenarioSchema=z.object({id,name,values:stateValuesSchema}).strict();
 export const stateContextSchema=z.object({name,variables:z.array(z.object({id,name,type:z.enum(['enum','boolean','number','string']),default:value,options:z.array(z.string().min(1).max(160)).min(1).max(32).optional(),min:z.number().finite().optional(),max:z.number().finite().optional()}).strict()).min(1).max(32),scenarios:z.array(stateScenarioSchema).max(100),constraints:z.array(z.object({id,message:z.string().min(1).max(500),forbidden:stateConditionSchema}).strict()).max(32).optional()}).strict();
 export const stateBindingSchema=z.object({contextNodeId:id,inputs:stateValuesSchema.optional()}).strict();

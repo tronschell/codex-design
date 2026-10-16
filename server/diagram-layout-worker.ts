@@ -5,7 +5,7 @@ import { diagramById, CONTAINERS } from '../shared/diagram-catalog';
 import { PORTS, crossingCount, resolveDiagramNodes } from '../shared/diagrams';
 import { portLocal } from '../shared/diagrams';
 const elk=new ELK();
-parentPort!.on('message',async({nodes,frameId,pageId}:{nodes:DesignNode[];frameId:string;pageId:string})=>{
+parentPort!.on('message',async({id,nodes,frameId,pageId}:{id:number;nodes:DesignNode[];frameId:string;pageId:string})=>{
  try {
   const began=performance.now(), frame=nodes.find(n=>n.id===frameId);
   if(!frame?.diagram)throw Error('Select a diagram frame.');
@@ -55,6 +55,6 @@ parentPort!.on('message',async({nodes,frameId,pageId}:{nodes:DesignNode[];frameI
   const operations:Operation[]=[...changed.values()].filter(n=>{const old=nodes.find(a=>a.id===n.id)!;return old.x!==n.x||old.y!==n.y||old.width!==n.width||old.height!==n.height;}).map(n=>({type:'update_node',pageId,nodeId:n.id,patch:{x:n.x,y:n.y,width:n.width,height:n.height}}));
   const beforeCrossings=crossingCount(resolveDiagramNodes(nodes.filter(n=>descendants.has(n.id)))),afterCrossings=crossingCount(resolveDiagramNodes(output.filter(n=>descendants.has(n.id))));
   if(afterCrossings>beforeCrossings)warnings.push('This arrangement has more crossings than the current layout. Keep the current layout if it reads better.');
-  parentPort!.postMessage({operations,metrics:{beforeCrossings,afterCrossings,durationMs:Math.round(performance.now()-began),movedNodes:operations.filter(o=>'nodeId'in o&&o.nodeId!==frameId).length},warnings:[...new Set(warnings)]});
- }catch(error){parentPort!.postMessage({error:error instanceof Error?error.message:'Layout failed.'});}
+  parentPort!.postMessage({id,operations,metrics:{beforeCrossings,afterCrossings,durationMs:Math.round(performance.now()-began),movedNodes:operations.filter(o=>'nodeId'in o&&o.nodeId!==frameId).length},warnings:[...new Set(warnings)]});
+ }catch(error){parentPort!.postMessage({id,error:error instanceof Error?error.message:'Layout failed.'});}
 });
