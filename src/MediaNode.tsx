@@ -26,7 +26,7 @@ function acquireAssetUrl(ref: string) {
   } };
 }
 
-function useAssetSource(ref?: string) {
+export function useAssetSource(ref?: string) {
   const [state, setState] = useState({ ref, url: '', error: '' });
   useEffect(() => {
     setState({ ref, url: '', error: '' });

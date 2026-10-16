@@ -1,0 +1,224 @@
+.cd-component-app-state-controls .cd-component-app-state-controls { position: relative; width: 312px; height: 138px; }
+
+.cd-component-app-state-controls .cd-layer-0 {
+  position:absolute;
+  left:0;
+  top:0;
+  width:312px;
+  height:138px;
+  box-sizing:border-box;
+  opacity:1;
+  background:transparent;
+  border-radius:0;
+}
+
+.cd-component-app-state-controls .cd-layer-1 {
+  position:absolute;
+  left:0;
+  top:6px;
+  width:108px;
+  height:20px;
+  box-sizing:border-box;
+  opacity:1;
+  color:#ababab;
+  font-size:12px;
+  font-weight:400;
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align:left;
+  line-height:1.4;
+  white-space:pre-wrap;
+  overflow-wrap:break-word;
+  letter-spacing:-0.01em;
+}
+
+.cd-component-app-state-controls .cd-layer-2 {
+  position:absolute;
+  left:116px;
+  top:0;
+  width:196px;
+  height:28px;
+  box-sizing:border-box;
+  opacity:1;
+  background:#292929;
+  border-radius:4px;
+  border:1px solid #3b3b3b;
+}
+
+.cd-component-app-state-controls .cd-layer-3 {
+  position:absolute;
+  left:9px;
+  top:5px;
+  width:178px;
+  height:18px;
+  box-sizing:border-box;
+  opacity:1;
+  color:#e8eaed;
+  font-size:12px;
+  font-weight:500;
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align:left;
+  line-height:1.4;
+  white-space:pre-wrap;
+  overflow-wrap:break-word;
+  letter-spacing:-0.01em;
+}
+
+.cd-component-app-state-controls .cd-layer-4 {
+  position:absolute;
+  left:174px;
+  top:7px;
+  width:14px;
+  height:14px;
+  box-sizing:border-box;
+  opacity:1;
+  background:transparent;
+  border-radius:0;
+  overflow:hidden;
+}
+
+.cd-component-app-state-controls .cd-layer-5 {
+  position:absolute;
+  left:0;
+  top:49px;
+  width:108px;
+  height:20px;
+  box-sizing:border-box;
+  opacity:1;
+  color:#ababab;
+  font-size:12px;
+  font-weight:400;
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align:left;
+  line-height:1.4;
+  white-space:pre-wrap;
+  overflow-wrap:break-word;
+  letter-spacing:-0.01em;
+}
+
+.cd-component-app-state-controls .cd-layer-6 {
+  position:absolute;
+  left:116px;
+  top:43px;
+  width:196px;
+  height:28px;
+  box-sizing:border-box;
+  opacity:1;
+  background:#292929;
+  border-radius:4px;
+  border:1px solid #3b3b3b;
+}
+
+.cd-component-app-state-controls .cd-layer-7 {
+  position:absolute;
+  left:9px;
+  top:5px;
+  width:178px;
+  height:18px;
+  box-sizing:border-box;
+  opacity:1;
+  color:#e8eaed;
+  font-size:12px;
+  font-weight:500;
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align:left;
+  line-height:1.4;
+  white-space:pre-wrap;
+  overflow-wrap:break-word;
+  letter-spacing:-0.01em;
+}
+
+.cd-component-app-state-controls .cd-layer-8 {
+  position:absolute;
+  left:174px;
+  top:7px;
+  width:14px;
+  height:14px;
+  box-sizing:border-box;
+  opacity:1;
+  background:transparent;
+  border-radius:0;
+  overflow:hidden;
+}
+
+.cd-component-app-state-controls .cd-layer-9 {
+  position:absolute;
+  left:0;
+  top:92px;
+  width:108px;
+  height:20px;
+  box-sizing:border-box;
+  opacity:1;
+  color:#ababab;
+  font-size:12px;
+  font-weight:400;
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align:left;
+  line-height:1.4;
+  white-space:pre-wrap;
+  overflow-wrap:break-word;
+  letter-spacing:-0.01em;
+}
+
+.cd-component-app-state-controls .cd-layer-10 {
+  position:absolute;
+  left:116px;
+  top:86px;
+  width:196px;
+  height:28px;
+  box-sizing:border-box;
+  opacity:1;
+  background:#292929;
+  border-radius:4px;
+  border:1px solid #3b3b3b;
+}
+
+.cd-component-app-state-controls .cd-layer-11 {
+  position:absolute;
+  left:9px;
+  top:5px;
+  width:178px;
+  height:18px;
+  box-sizing:border-box;
+  opacity:1;
+  color:#e8eaed;
+  font-size:12px;
+  font-weight:500;
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align:left;
+  line-height:1.4;
+  white-space:pre-wrap;
+  overflow-wrap:break-word;
+  letter-spacing:-0.01em;
+}
+
+.cd-component-app-state-controls .cd-layer-12 {
+  position:absolute;
+  left:151px;
+  top:7px;
+  width:29px;
+  height:14px;
+  box-sizing:border-box;
+  opacity:1;
+  background:#446c98;
+  border-radius:7px;
+}
+
+.cd-component-app-state-controls .cd-layer-13 {
+  position:absolute;
+  left:166px;
+  top:9px;
+  width:10px;
+  height:10px;
+  box-sizing:border-box;
+  opacity:1;
+  background:#dfedff;
+  border-radius:5px;
+}
+
+.cd-component-app-state-controls .cd-media { display: block; width: 100%; height: 100%; pointer-events: none; }
+
+.cd-component-app-state-controls .cd-code { border: 0; }
+
+.cd-component-app-state-controls .cd-shader-status { position: absolute; inset: 0; padding: 8px; overflow: auto; color: #ddd; background: #242424; font: 11px/1.4 system-ui, sans-serif; }
+
+.cd-component-app-state-controls .cd-arrow { position: absolute; right: 0; top: -5px; width: 9px; height: 9px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; transform: rotate(45deg); }

@@ -1,0 +1,292 @@
+{
+  "schemaVersion": 1,
+  "scope": "local concept model",
+  "context": {
+    "id": "member-experience",
+    "name": "Member experience",
+    "variables": [
+      {
+        "id": "membership",
+        "name": "Membership",
+        "type": "enum",
+        "values": [
+          "free",
+          "pro",
+          "team"
+        ],
+        "default": "free"
+      },
+      {
+        "id": "billing",
+        "name": "Billing",
+        "type": "enum",
+        "values": [
+          "current",
+          "attention"
+        ],
+        "default": "current"
+      },
+      {
+        "id": "onboarding",
+        "name": "Onboarding complete",
+        "type": "boolean",
+        "default": true
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "free",
+      "name": "Free member",
+      "values": {
+        "membership": "free",
+        "billing": "current",
+        "onboarding": true
+      }
+    },
+    {
+      "id": "pro",
+      "name": "Pro member",
+      "values": {
+        "membership": "pro",
+        "billing": "current",
+        "onboarding": true
+      }
+    },
+    {
+      "id": "payment",
+      "name": "Payment issue",
+      "values": {
+        "membership": "pro",
+        "billing": "attention",
+        "onboarding": true
+      }
+    },
+    {
+      "id": "new",
+      "name": "New member",
+      "values": {
+        "membership": "free",
+        "billing": "current",
+        "onboarding": false
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "plan-pro",
+      "name": "Pro label",
+      "priority": 10,
+      "enabled": true,
+      "when": {
+        "all": [
+          {
+            "key": "membership",
+            "eq": "pro"
+          }
+        ]
+      },
+      "effects": [
+        {
+          "target": "plan",
+          "set": {
+            "content": "Pro member"
+          }
+        }
+      ]
+    },
+    {
+      "id": "plan-team",
+      "name": "Team label",
+      "priority": 10,
+      "enabled": true,
+      "when": {
+        "all": [
+          {
+            "key": "membership",
+            "eq": "team"
+          }
+        ]
+      },
+      "effects": [
+        {
+          "target": "plan",
+          "set": {
+            "content": "Team member"
+          }
+        }
+      ]
+    },
+    {
+      "id": "paid-benefits",
+      "name": "Paid membership benefits",
+      "priority": 10,
+      "enabled": true,
+      "when": {
+        "all": [
+          {
+            "key": "membership",
+            "in": [
+              "pro",
+              "team"
+            ]
+          }
+        ]
+      },
+      "effects": [
+        {
+          "target": "allowance",
+          "set": {
+            "content": "Unlimited collections"
+          }
+        },
+        {
+          "target": "action",
+          "set": {
+            "content": "Manage membership"
+          }
+        },
+        {
+          "target": "access",
+          "set": {
+            "content": "Available"
+          }
+        },
+        {
+          "target": "upgrade",
+          "set": {
+            "visible": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "export-access",
+      "name": "Export collection",
+      "priority": 20,
+      "enabled": true,
+      "when": {
+        "all": [
+          {
+            "key": "membership",
+            "in": [
+              "pro",
+              "team"
+            ]
+          },
+          {
+            "key": "billing",
+            "eq": "current"
+          }
+        ]
+      },
+      "effects": [
+        {
+          "target": "export",
+          "set": {
+            "visible": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "billing-attention",
+      "name": "Payment recovery",
+      "priority": 30,
+      "enabled": true,
+      "when": {
+        "all": [
+          {
+            "key": "membership",
+            "in": [
+              "pro",
+              "team"
+            ]
+          },
+          {
+            "key": "billing",
+            "eq": "attention"
+          }
+        ]
+      },
+      "effects": [
+        {
+          "target": "payment",
+          "set": {
+            "visible": true
+          }
+        },
+        {
+          "target": "action",
+          "set": {
+            "content": "Update payment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-member",
+      "name": "First collection journey",
+      "priority": 10,
+      "enabled": true,
+      "when": {
+        "all": [
+          {
+            "key": "onboarding",
+            "eq": false
+          }
+        ]
+      },
+      "effects": [
+        {
+          "target": "onboarding",
+          "set": {
+            "visible": true
+          }
+        }
+      ]
+    }
+  ],
+  "baseNodes": {
+    "plan": {
+      "name": "Plan badge",
+      "content": "Free member",
+      "visible": true
+    },
+    "allowance": {
+      "name": "Collection allowance",
+      "content": "3 collections",
+      "visible": true
+    },
+    "action": {
+      "name": "Membership action",
+      "content": "Upgrade to Pro",
+      "visible": true
+    },
+    "export": {
+      "name": "Export collection",
+      "content": "Export collection",
+      "visible": false
+    },
+    "access": {
+      "name": "Product strategy access",
+      "content": "Locked",
+      "visible": true
+    },
+    "upgrade": {
+      "name": "Upgrade prompt",
+      "content": "Make room for more.",
+      "visible": true
+    },
+    "payment": {
+      "name": "Billing notice",
+      "content": "Your payment needs attention. Update your payment method.",
+      "visible": false
+    },
+    "onboarding": {
+      "name": "Getting started",
+      "content": "Welcome. Create your first collection to get started.",
+      "visible": false
+    }
+  }
+}

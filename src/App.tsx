@@ -1,7 +1,12 @@
+import { useDiagramWorkspace } from './DiagramWorkspace';
+import { StateCanvasOverlay } from './ApplicationStates';
+import { useApplicationPreview } from './useApplicationPreview';
+import type { StatePreview } from '../shared/application-state-types';
+import { resolveDiagramNodes } from '../shared/diagrams';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { flushSync } from 'react-dom';
-import { ArrowRight, ArrowUpRight, Check, ChevronDown, Circle, Code2, Copy, Download, Frame, Hand, HelpCircle, History, ImagePlus, LoaderCircle, Maximize2, MessageCircle, Monitor, MoreHorizontal, MousePointer2, Palette, PanelRight, Pencil, Plus, Presentation, RectangleHorizontal, Redo2, Smartphone, StickyNote, Tablet, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import type { CommentMessage, CommentThread, DesignNode, DesignPage, DesignProject, LibraryScope, Operation, ShaderConfig, Viewport } from '../shared/types';
+import { Workflow, ArrowRight, ArrowUpRight, Check, ChevronDown, Circle, Code2, Copy, Download, Frame, Hand, HelpCircle, History, ImagePlus, LoaderCircle, Maximize2, MessageCircle, Monitor, MoreHorizontal, MousePointer2, Palette, PanelRight, Pencil, Plus, Presentation, RectangleHorizontal, Redo2, Smartphone, StickyNote, Tablet, Trash2, Type, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import type { CommentThread, DesignNode, DesignPage, DesignProject, LibraryScope, Operation, ShaderConfig, Viewport } from '../shared/types';
 import { resolvedNodes } from '../shared/export';
 import { CanvasNodes } from './DesignNode';
 import Inspector from './Inspector';
@@ -23,7 +28,9 @@ import { createSnapScene, snapBox, type SnapBox, type SnapScene, type SnapGuide 
 import { importProjectFile } from './export-utils';
 import InsertMenu from './InsertMenu';
 import { mediaAccept, mediaDimensions, mediaFile } from './media-import';
+import type { CommentAttachment } from '../shared/media';
 import CommentPopover, { CommentList, type CommentTarget } from './Comments';
+import ChatGptLogo from './ChatGptLogo';
 import { commentPrompt } from '../shared/comments';
 import { client, configureToken } from './client';
 import { embedded, sendFollowUp, updateModelContext } from './bridge';
@@ -105,9 +112,11 @@ function finishCanvasTextEdit() {
 
 export default function App() {
   const fieldSaveState = useAutosaveState();
-  const { project: liveProject, projects, ref: projectRef, loading, hydrated, paneSelection, bindSelection, saving, error, setError, load, refreshProjects, setSnapshot, captureNavigation, commit, restoreVersion, boardNavigation } = useProject();
+  const { project: liveProject, projects, ref: projectRef, loading, hydrated, paneSelection, bindSelection, saving, error, setError, load, refreshProjects, setSnapshot, captureNavigation, commit, manageProject, restoreVersion, boardNavigation } = useProject();
   const [historyOpen, setHistoryOpen] = useState(false), [historyPreview, setHistoryPreview] = useState<DesignProject | null>(null);
+  const [libraryComponentId, setLibraryComponentId] = useState<string | null>(null);
   const [library, setLibrary] = useState<'system' | 'components' | 'inspiration' | null>(null);
+  const componentDraftPending = !!library && !!libraryComponentId && fieldSaveState !== 'saved';
   const [changeFlash, setChangeFlash] = useState<{ key: number; pageId: string; boxes: ChangeBox[] } | null>(null);
   const historyReturn = useRef<{ boardId: string; pageId: string; view: Viewport; inspector: boolean } | null>(null);
   const project = historyOpen && historyPreview?.id === liveProject?.id ? historyPreview : liveProject;
@@ -149,6 +158,7 @@ export default function App() {
   }, []);
   const [commentNavigation, setCommentNavigation] = useState<{ projectId: string; pageId: string; threadId: string } | null>(null);
   const commentMore = useRef<HTMLButtonElement>(null);
+  const [projectImportError, setProjectImportError] = useState('');
   const [toast, setToast] = useState(''), [modal, setModal] = useState<'export' | 'help' | 'auth' | null>(null);
   const [renamingPage, setRenamingPage] = useState(false);
   const newPageDraft = useLocalDraft(`${project?.id ?? ''}/${boardId}/new-page`, {name: ''});
@@ -186,7 +196,19 @@ export default function App() {
   useEffect(() => () => { activeCanvas.current = null; }, []);
   useLayoutEffect(() => () => { mediaController.current?.abort(); }, [project?.id, page?.id, historyOpen, loading, library]);
   useEffect(() => { if (liveProject && page) recordCanvasReady(); }, [liveProject?.id, page?.id]);
-  const renderProject = useMemo(() => project ? resolveProjectTokens(project, tokenCache) : null, [project]);
+  const previewScope = JSON.stringify([project?.id, board?.id, page?.id]);
+  const [applicationSession, setApplicationSession] = useState<{scope:string;value:StatePreview}|null>(null);
+  const [applicationNavigation, setApplicationNavigation] = useState<{projectId:string;pageId:string;nodeId:string}|null>(null);
+  const applicationPreview = !historyOpen && applicationSession?.scope === previewScope ? applicationSession.value : null;
+  const setApplicationPreview = useCallback((value:StatePreview|null) => {
+    setApplicationSession(value ? {scope:previewScope,value} : null);
+  }, [previewScope]);
+  useEffect(() => {
+    setApplicationSession(current => !historyOpen && current?.scope === previewScope ? current : null);
+  }, [previewScope, historyOpen]);
+  const [diagramsOpen, setDiagramsOpen] = useState(false);
+  const application = useApplicationPreview(project, page?.id, applicationPreview);
+  const renderProject = useMemo(() => application.project ? resolveProjectTokens(application.project, tokenCache) : null, [application.project]);
   const renderPage = renderProject?.pages.find(item => item.id === page?.id);
   const baseNodes = useMemo(() => resolvedNodes(renderPage?.nodes || [], undefined, stackCache), [renderPage?.nodes]);
   const baseIndex = useMemo(() => new Map(baseNodes.map((node, index) => [node.id, index])), [baseNodes]);
@@ -203,7 +225,7 @@ export default function App() {
     if (!moveOnly) return resolvedNodes((renderPage?.nodes || []).map(node => previewPatch[node.id] ? { ...node, ...previewPatch[node.id] } : node), undefined, stackCache);
     const next = baseNodes.slice();
     for (const id of ids) { const index = baseIndex.get(id)!; next[index] = { ...next[index], ...previewPatch[id] }; }
-    return next;
+    return next.some(node => node.diagramEdge) ? resolveDiagramNodes(next) : next;
   }, [baseNodes, baseIndex, renderPage?.nodes, previewPatch]);
   const [stateView, setStateView] = useState<StateView>(null);
   // Previewing a hover/pressed/focus state restyles only the selected layer; with no state chosen the canvas list is untouched.
@@ -223,14 +245,14 @@ export default function App() {
     while (current) { if (current.hidden || seen.has(current.id)) return false; seen.add(current.id); current = current.parentId ? nodeById.get(current.parentId) : undefined; }
     return true;
   }), [selectedNodes, nodeById]);
-  const liveEligible = selected?.type === 'code' && !!selected.live && !multiple && !selectionLocked && visibleSelection.length === 1 && !historyOpen && !library && !loading && tool === 'select';
+  const liveEligible = (!!selected?.react || (selected?.type === 'code' && !!selected.live)) && !multiple && !selectionLocked && visibleSelection.length === 1 && !historyOpen && !library && !loading && menu !== 'project' && tool === 'select';
   // Activation belongs to this canvas, even when another page reuses its node IDs.
   const liveTarget = useMemo(() => liveEligible && project && page && selection ? { nodeId: selection, key: JSON.stringify([project.id, page.id, selection]) } : undefined, [liveEligible, project?.id, page?.id, selection]);
   useEffect(() => { if (getLiveFrame() !== liveTarget?.key) setLiveFrame(null); }, [liveTarget?.key]);
-  const movableSelection = useMemo(() => selectedRoots.length > 0 && selectedRoots.every(node => objectEditable(node,nodeById) && !['vertical','horizontal'].includes(nodeById.get(node.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(node,baseNodes,{x:0,y:0}) !== null), [selectedRoots, nodeById, baseNodes]);
+  const movableSelection = useMemo(() => selectedRoots.length > 0 && selectedRoots.every(node => !node.diagramEdge && objectEditable(node,nodeById) && !['vertical','horizontal'].includes(nodeById.get(node.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(node,baseNodes,{x:0,y:0}) !== null), [selectedRoots, nodeById, baseNodes]);
   const roots = useMemo(() => nodes.filter(node => !node.parentId), [nodes]);
   const cancelGesture = useCallback(() => { gesture.current = null; setMarquee(null); setPreviewPatch(null); setDrawing(null); setSnapGuides([]); }, []);
-  useLayoutEffect(() => { cancelGesture(); }, [project?.id, project?.revision, page?.id, loading, historyOpen, library, tool, modal, cancelGesture]);
+  useLayoutEffect(() => { cancelGesture(); }, [project?.id, project?.revision, page?.id, loading, historyOpen, library, tool, modal, menu === 'project', cancelGesture]);
   useLayoutEffect(() => { const g=gesture.current; if(g&&(g.kind==='drag'||g.kind==='resize')&&selectionKey!==g.selectionKey)cancelGesture(); }, [selectionKey,cancelGesture]);
   useEffect(() => {
     const releaseSpace = () => { space.current = false; if (stageRef.current) stageRef.current.style.cursor = ''; };
@@ -293,8 +315,13 @@ export default function App() {
     finishCanvasTextEdit(); flushView(); space.current = false;
     if (stageRef.current) stageRef.current.style.cursor = '';
     cancelGesture(); setCommentTarget(null); setMenu(null); setModal(null); setTool('select'); setHovered(null); setDropActive(false);
-    setLibrary(current => current ? null : mode);
+    setLibraryComponentId(null); setLibrary(current => current ? null : mode);
   };
+  const openReactComponent = useCallback((id: string) => {
+    if (!project || historyOpen || loading || applicationPreview || tool !== 'select' || !project.designSystem.components.some(item => item.id === id)) return;
+    finishCanvasTextEdit(); flushView(); cancelGesture(); setLiveFrame(null);
+    setCommentTarget(null); setMenu(null); setModal(null); setLibraryComponentId(id); setLibrary('components');
+  }, [project, historyOpen, loading, applicationPreview, tool, flushView, cancelGesture]);
   const previewVersion = (snapshot: DesignProject, previous: DesignProject | null) => {
     const changes = versionChanges(snapshot, previous, pageId);
     setHistoryPreview(snapshot); setSelection(null); setCommentTarget(null);
@@ -342,10 +369,11 @@ export default function App() {
   useEffect(() => { if (project && page && !historyOpen) viewCache.current.set(`${project.id}/${page.id}`, view); }, [view, project?.id, page?.id, historyOpen]);
   useEffect(() => { const ids = new Set(page?.nodes.map(node => node.id)); setSelectionIds(previous => { const next = previous.filter(id => ids.has(id)); return next.length === previous.length ? previous : next; }); }, [page?.nodes]);
   useEffect(() => {
+    if (hydrated && !loading && !liveProject) { updateModelContext({ projectId: null, boardId: null, pageId: null, selectedNode: null, selectedNodes: [] }); return; }
     if (!hydrated || loading || historyOpen || marquee || !liveProject || !board || !page || paneSelection?.projectId !== liveProject.id) return;
     const selectedContext = selectedNodes.map(node => ({ id: node.id, name: node.name, type: node.type, ...(node.notes?.trim() ? { notes: node.notes.slice(0, 500), notesTruncated: node.notes.length > 500 } : {}) }));
-    updateModelContext({ projectId: liveProject.id, projectName: liveProject.name, boardId: board.id, boardName: board.name, revision: liveProject.revision, pageId: page.id, libraryMode: library, selectedNode: selectedContext.length === 1 ? selectedContext[0] : null, selectedNodes: selectedContext, openThreadId: commentTarget?.threadId || null });
-  }, [hydrated, loading, liveProject?.id, liveProject?.revision, historyOpen, !!marquee, paneSelection?.projectId, board?.id, board?.name, page?.id, selectionKey, commentTarget?.threadId, library]);
+    updateModelContext({ projectId: liveProject.id, projectName: liveProject.name, boardId: board.id, boardName: board.name, revision: liveProject.revision, pageId: page.id, libraryMode: library, selectedComponent: library === 'components' ? liveProject.designSystem.components.find(item => item.id === libraryComponentId) ?? null : null, selectedNode: selectedContext.length === 1 ? selectedContext[0] : null, selectedNodes: selectedContext, openThreadId: commentTarget?.threadId || null });
+  }, [hydrated, loading, liveProject?.id, liveProject?.revision, historyOpen, !!marquee, paneSelection?.projectId, board?.id, board?.name, page?.id, selectionKey, commentTarget?.threadId, library, libraryComponentId]);
   useEffect(() => {
     if (!changeFlash || changeFlash.pageId !== page?.id) return;
     const box = stageRef.current;
@@ -358,9 +386,9 @@ export default function App() {
     const timer = setTimeout(() => setChangeFlash(null), 850);
     return () => clearTimeout(timer);
   }, [changeFlash?.key, page?.id]);
-  useEffect(() => { if (!menu) return; const capture = menu === 'comments'; const close = (e: globalThis.PointerEvent) => { if (!(e.target as Element).closest(capture ? '.comment-control' : '.dropdown,.floating-toolbar,.project-switch')) setMenu(null); }; window.addEventListener('pointerdown', close, capture); return () => window.removeEventListener('pointerdown', close, capture); }, [menu]);
+  useEffect(() => { if (!menu || menu === 'project') return; const capture = menu === 'comments'; const close = (e: globalThis.PointerEvent) => { if (!(e.target as Element).closest(capture ? '.comment-control' : '.dropdown,.floating-toolbar,.project-switch')) setMenu(null); }; window.addEventListener('pointerdown', close, capture); return () => window.removeEventListener('pointerdown', close, capture); }, [menu]);
   useEffect(() => { const stage = stageRef.current; if (!stage) return; const wheel = (event: WheelEvent) => {
-    if ((event.target as Element).closest('.comment-popover,.dropdown,.selection-toolbar')) return;
+    if ((event.target as Element).closest('.comment-popover,.dropdown,.selection-toolbar,.feature-panel')) return;
     event.preventDefault();
     if (gesture.current?.kind === 'marquee') return;
     if (event.ctrlKey || event.metaKey) {
@@ -374,6 +402,9 @@ export default function App() {
   const editingProjectId = project?.id;
   const change = useCallback((operations: Operation[], record = true) => {
     if (historyOpen || !editingProjectId || projectRef.current?.id !== editingProjectId) return Promise.resolve(null);
+    if (applicationPreview && operations.some(op => op.type !== 'update_node' || Object.keys(op.patch).some(key => !['applicationState','stateBinding','stateRules','journey'].includes(key)))) {
+      setError('You are viewing an application state. Choose Edit base before changing the design.'); return Promise.resolve(null);
+    }
     const targetPage = page?.id;
     return commit(operations, record && targetPage ? (before, after) => {
       const bp = before.pages.find(p => p.id === targetPage), ap = after.pages.find(p => p.id === targetPage);
@@ -382,7 +413,7 @@ export default function App() {
       undoStack.current.push({ projectId: before.id, pageId: targetPage, before: bp, after: ap, beforeThreads: before.threads.filter(t => t.pageId === targetPage), afterThreads: after.threads.filter(t => t.pageId === targetPage) });
       if (undoStack.current.length > 60) undoStack.current.shift(); redoStack.current = []; setHistoryVersion(v => v + 1);
     } : undefined);
-  }, [commit, editingProjectId, page?.id, historyOpen, projectRef]);
+  }, [commit, editingProjectId, page?.id, historyOpen, projectRef, applicationPreview, setError]);
   const undo = useCallback(async (redo = false) => {
     const from = redo ? redoStack.current : undoStack.current, to = redo ? undoStack.current : redoStack.current;
     const entry = from.at(-1); if (!entry || !projectRef.current || saving || historyOpen) return;
@@ -417,6 +448,20 @@ export default function App() {
   const zoomTo = (zoom: number) => { const width = stageRef.current?.clientWidth || 1000, height = stageRef.current?.clientHeight || 800; setView(old => { const z = clampZoom(zoom); return { zoom: z, x: width / 2 - (width / 2 - old.x) * z / old.zoom, y: height / 2 - (height / 2 - old.y) * z / old.zoom }; }); };
   const fit = () => { if (page && stageRef.current) setView(fitViewport({...page,nodes}, stageRef.current.clientWidth, stageRef.current.clientHeight)); setMenu(null); };
   const focus = useCallback((id: string) => { const n = nodeById.get(id); if (!n || !stageRef.current) return; const box = visualBounds(n,nodes), width = stageRef.current.clientWidth, height = stageRef.current.clientHeight, zoom = clampZoom(Math.min((width - 180) / Math.max(1,box.width), (height - 180) / Math.max(1,box.height), 1.5)); setView({ zoom, x: (width - box.width * zoom) / 2 - box.x * zoom, y: (height - box.height * zoom) / 2 - box.y * zoom + 20 }); setSelection(id); }, [nodeById, nodes, setView]);
+  const navigateApplication = (nextPage:string, nodeId:string, preview:StatePreview|null=null) => {
+    const destination = project?.pages.find(item => item.id === nextPage);
+    if (!project || !destination || historyOpen) return;
+    const destinationBoard = destination.boardId ?? project.boards[0].id;
+    bindSelection({projectId:project.id,boardId:destinationBoard,pageId:destination.id});
+    setBoardId(destinationBoard); setPageId(destination.id);
+    setApplicationSession(preview ? {scope:JSON.stringify([project.id,destinationBoard,destination.id]),value:preview} : null);
+    setApplicationNavigation({projectId:project.id,pageId:destination.id,nodeId});
+  };
+  // Focus after the destination page's reset, using that page's resolved nodes.
+  useEffect(() => {
+    if (!applicationNavigation || applicationNavigation.projectId !== project?.id || applicationNavigation.pageId !== page?.id || historyOpen) return;
+    focus(applicationNavigation.nodeId); setApplicationNavigation(null);
+  }, [applicationNavigation, project?.id, page?.id, historyOpen, focus]);
   const fitSelection = () => {
     const box = selectionBounds(visibleSelection,nodes), stage = stageRef.current;
     if (!box || !stage) return;
@@ -425,6 +470,8 @@ export default function App() {
   };
   const changeLayer = useCallback((operations: Operation[]) => change(operations), [change]);
   const changeLibrary = useCallback((operations: Operation[]) => change(operations, false), [change]);
+  const diagramWorkspace = useDiagramWorkspace({project,page,nodes,selection,view,stage:stageRef,readOnly:historyOpen||!!library||!!applicationPreview||loading,open:diagramsOpen,setOpen:setDiagramsOpen,select:id=>{setSelection(id);setTool('select');},change,preview:setPreviewPatch,focus,notify});
+
   const applyLibraryVersion = useCallback(async (revision: number, scope: LibraryScope, componentId?: string) => {
     const next = await restoreVersion(revision, scope, componentId);
     if (next) { undoStack.current = []; redoStack.current = []; setHistoryVersion(value => value + 1); }
@@ -523,24 +570,21 @@ export default function App() {
     const isCurrent = captureNavigation(), next = await change([{ type: 'create_node', pageId: page.id, node }]);
     if (next && isCurrent() && !activeCanvas.current?.readOnly) { setSelection(node.id); setTool('select'); setMenu(null); const box = stageRef.current; const zoom = clampZoom(Math.min((box.clientWidth - 200) / node.width, (box.clientHeight - 200) / node.height, .8)); setView({ zoom, x: (box.clientWidth - node.width * zoom) / 2 - node.x * zoom, y: (box.clientHeight - node.height * zoom) / 2 - node.y * zoom + 25 }); }
   };
-  const createProject = async (name: string, template: 'blank' | 'demo') => {
-    if (historyOpen) return false;
-    const isCurrent = captureNavigation();
-    try {
-      const next = await client.create(name.trim() || (template === 'demo' ? 'GaugeReel Mobile' : 'Untitled project'), template);
-      void refreshProjects().catch(() => {});
-      if (isCurrent() && !activeCanvas.current?.readOnly && await setSnapshot(next)) { setMenu(null); notify('Project created.'); }
-      else notify(`${next.name} created. Find it in Projects.`);
-      return true;
-    }
-    catch (e) { setError((e as Error).message); return false; }
+  const createProject = async (name: string) => {
+    if (historyOpen) return null;
+    const next = await client.create(name.trim() || 'Untitled project');
+    void refreshProjects().catch(() => {});
+    notify(`${next.name} created.`);
+    return { projectId: next.id, boardId: next.boards[0].id };
   };
-  const createBoard = async (name: string) => {
-    if (!project) return false;
-    const isCurrent = captureNavigation(), id = uid(), next = await change([{ type: 'create_board', board: { id, name: name.trim() || 'Untitled board' } }], false);
-    if (!next) return false;
-    if (isCurrent() && !activeCanvas.current?.readOnly) { selectBoard(id); notify('Board created.'); }
-    return true;
+  const createBoard = async (name: string, target: DesignProject) => {
+    if (historyOpen) return null;
+    const id = uid(), operation: Operation = { type: 'create_board', board: { id, name: name.trim() || 'Untitled board' } };
+    const next = target.id === liveProject?.id ? await change([operation], false) : await client.mutate(await client.get(target.id), [operation]);
+    if (!next) return null;
+    void refreshProjects().catch(() => {});
+    notify(`Board created in ${next.name}.`);
+    return { projectId: next.id, boardId: id };
   };
   const createPage = async () => { if (!project || !board) return; const isCurrent = captureNavigation(), p: DesignPage = { id: uid(), boardId: board.id, name: newPageName.trim() || `Page ${boardPages.length + 1}`, nodes: [], viewport: { x: 120, y: 100, zoom: .65 } }; if (await change([{ type: 'create_page', page: p }], false) && isCurrent() && !activeCanvas.current?.readOnly) { selectPage(p.id); setNewPageName(''); setMenu(null); } };
 
@@ -581,7 +625,8 @@ export default function App() {
     if (e.button === 2) return; setMenu(null);
     if (e.button === 0) window.getSelection()?.removeAllRanges();
     if (e.button === 1 || space.current || tool === 'hand') { e.preventDefault(); gesture.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, view: viewRef.current }; capture(e.pointerId); return; }
-    if (historyOpen) return;
+    if (historyOpen || applicationPreview || diagramWorkspace.layoutActive) return;
+    if (tool === 'select' && diagramWorkspace.onCanvasDown(e)) return;
     if (tool === 'comment') { e.preventDefault(); const pos = point(e); setCommentTarget({ nodeId: null, ...pos }); return; }
     if (tool !== 'select') { beginDraw(e); return; }
     beginMarquee(e);
@@ -592,7 +637,8 @@ export default function App() {
     if (e.button === 2) return;
     if (e.button === 0) window.getSelection()?.removeAllRanges();
     if (tool === 'hand' || space.current || e.button === 1) { canvasDown(e); return; }
-    if (historyOpen) { setSelection(id); return; }
+    if (historyOpen || applicationPreview || diagramWorkspace.layoutActive) { setSelection(id); return; }
+    if (tool === 'select' && diagramWorkspace.onNodeDown(id,e)) return;
     const node = nodeById.get(id);
     if (!node) return;
     if (tool === 'comment') { e.preventDefault(); const pos = point(e); setSelection(id); setCommentTarget({ nodeId: id, ...pos }); return; }
@@ -601,7 +647,7 @@ export default function App() {
     const ids = selectionIds.includes(id) ? selectionIds : [id], targets = selectionRoots(ids,baseNodes), box = selectionBounds(targets,baseNodes);
     if (!selectionIds.includes(id)) setSelection(id);
     setCommentTarget(null);
-    if (!saving && !loading && box && targets.every(target => objectEditable(target,nodeById) && !['vertical','horizontal'].includes(nodeById.get(target.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(target,baseNodes,{x:0,y:0}) !== null)) gesture.current = { kind: 'drag', targets, selectionKey:JSON.stringify(ids), box, nodes: baseNodes, scene: lazy(() => createSnapScene(baseNodes,targets[0],targets)), startX: e.clientX, startY: e.clientY, moved: false, pointer: {clientX:e.clientX,clientY:e.clientY} };
+    if (!saving && !loading && box && targets.every(target => !target.diagramEdge && objectEditable(target,nodeById) && !['vertical','horizontal'].includes(nodeById.get(target.parentId ?? '')?.styles.layout ?? '') && parentLocalDelta(target,baseNodes,{x:0,y:0}) !== null)) gesture.current = { kind: 'drag', targets, selectionKey:JSON.stringify(ids), box, nodes: baseNodes, scene: lazy(() => createSnapScene(baseNodes,targets[0],targets)), startX: e.clientX, startY: e.clientY, moved: false, pointer: {clientX:e.clientX,clientY:e.clientY} };
   };
   const nodeDownRef = useRef(nodeDown);
   useLayoutEffect(() => { nodeDownRef.current = nodeDown; });
@@ -645,6 +691,7 @@ export default function App() {
     return result;
   };
   const canvasMove = (e: ReactPointerEvent) => {
+    if (diagramWorkspace.move(e)) return;
     const g = gesture.current;
     if (!g) { if (tool === 'comment') { const el = (e.target as Element).closest('[data-node-id]'); setHovered(el?.getAttribute('data-node-id') || null); } return; }
     if (g.kind === 'pan') { queueView({ ...g.view, x: g.view.x + e.clientX - g.startX, y: g.view.y + e.clientY - g.startY }); return; }
@@ -661,14 +708,19 @@ export default function App() {
     setDrawing({ x: Math.min(g.startX,pos.x), y: Math.min(g.startY,pos.y), width: Math.abs(pos.x-g.startX), height: Math.abs(pos.y-g.startY) });
   };
   const canvasUp = async (e: ReactPointerEvent) => {
+    if (diagramWorkspace.up(e)) return;
     flushView();
     const g = gesture.current; gesture.current = null; setSnapGuides([]);
     if (!g || !page) return;
     if (stageRef.current?.hasPointerCapture(e.pointerId)) stageRef.current.releasePointerCapture(e.pointerId);
     if (g.kind === 'marquee') { setSelectionIds(marqueePreview(g,e).ids); setMarquee(null); return; }
     if (g.kind === 'drag' || g.kind === 'resize') {
+      if (g.kind === 'drag' && !g.moved && Math.hypot(e.clientX-g.startX,e.clientY-g.startY)<4 && g.targets.length===1 && g.targets[0].react && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+        const local = parentLocalPoint(g.targets[0].id, nodes, point(e));
+        if (local) window.dispatchEvent(new CustomEvent('codex-react-pick', { detail: { nodeId:g.targets[0].id, ...local } }));
+      }
       const result = objectPreview(g,{clientX:e.clientX,clientY:e.clientY},e.altKey);
-      const operations: Operation[] = result ? g.targets.flatMap(node => { const patch = result.patches[node.id]; return Object.entries(patch).some(([key,value])=>node[key as keyof DesignNode]!==value) ? [{type:'update_node' as const,pageId:page.id,nodeId:node.id,patch}] : []; }) : [];
+      const operations: Operation[] = result ? g.targets.flatMap(node => { const patch = result.patches[node.id]; if (node.diagramElement) patch.diagramElement = {...node.diagramElement,pinned:true}; return Object.entries(patch).some(([key,value])=>node[key as keyof DesignNode]!==value) ? [{type:'update_node' as const,pageId:page.id,nodeId:node.id,patch}] : []; }) : [];
       if (operations.length) await change(operations);
       setPreviewPatch(null); return;
     }
@@ -720,6 +772,7 @@ export default function App() {
         else if (e.key === '0') zoomTo(1);
         return;
       }
+      if (applicationPreview && ((command && ['z','y','d','i'].includes(e.key.toLowerCase())) || ['Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))) { e.preventDefault(); notify('Choose Edit base to change the design.'); return; }
       if (command && e.shiftKey && e.key.toLowerCase() === 'e') { e.preventDefault(); if (project) setModal('export'); return; }
       if (command && !e.shiftKey && e.key.toLowerCase() === 'i') { e.preventDefault(); if (page && !importingMedia.current) mediaRef.current?.click(); return; }
       if (command && e.key.toLowerCase() === 'a') { e.preventDefault(); cancelGesture(); setSelectionIds(e.shiftKey?[]:baseNodes.filter(node=>!node.parentId&&objectEditable(node,nodeById)).map(node=>node.id)); setCommentTarget(null); return; }
@@ -735,7 +788,7 @@ export default function App() {
         e.preventDefault(); cancelGesture();
         if (saving || loading || pasting.current || !movableSelection) return;
         const amount=e.shiftKey?10:1, movement={x:e.key==='ArrowLeft'?-amount:e.key==='ArrowRight'?amount:0,y:e.key==='ArrowUp'?-amount:e.key==='ArrowDown'?amount:0};
-        void change(selectedRoots.map(node => { const delta=parentLocalDelta(node,baseNodes,movement)!; return {type:'update_node',pageId:page.id,nodeId:node.id,patch:{x:node.x+delta.x,y:node.y+delta.y}}; })); return;
+        void change(selectedRoots.map(node => { const delta=parentLocalDelta(node,baseNodes,movement)!; return {type:'update_node',pageId:page.id,nodeId:node.id,patch:{x:node.x+delta.x,y:node.y+delta.y,...(node.diagramElement?{diagramElement:{...node.diagramElement,pinned:true}}:{})}}; })); return;
       }
       const shortcuts:Record<string,Tool> = {v:'select',h:'hand',t:'text',f:'frame',r:'rectangle',o:'ellipse',l:e.shiftKey?'arrow':'line',p:'pen',c:'comment',n:'note'};
       const next = shortcuts[e.key.toLowerCase()]; if (next) { setTool(next); setMenu(null); }
@@ -771,11 +824,11 @@ export default function App() {
     setCommentTarget({ nodeId: anchor?.id || null, x: anchor ? bounds.x + Math.min(anchor.width, 80) : thread.x, y: bounds.y, threadId: thread.id });
   }, [commentNavigation, project, page?.id, loading, historyOpen, library, nodeById, nodes, focus, setView]);
 
-  const sendComment = async (content:string, intent?:CommentMessage['intent']) => {
-    if (!project || !page || !commentTarget) return false;
+  const sendComment = async (content:string, attachments:CommentAttachment[] = []) => {
+    if (!project || !page || !commentTarget || (!content.trim() && !attachments.length)) return false;
     const target = commentTarget, isCurrent = captureNavigation();
     if (target.threadId && !project.threads.some(thread => thread.id === target.threadId)) { notify('This conversation is no longer available.'); return false; }
-    const now=new Date().toISOString(), message={id:uid(),role:'user' as const,content,createdAt:now,...(intent?{intent}:{})};
+    const now=new Date().toISOString(), message={id:uid(),role:'user' as const,content:content.trim()||(attachments.length===1?'Attached image.':'Attached images.'),createdAt:now,...(attachments.length?{attachments}:{})};
     const thread:CommentThread = commentTarget.threadId ? project.threads.find(t=>t.id===commentTarget.threadId)! : {id:uid(),pageId:page.id,nodeId:commentTarget.nodeId,x:commentTarget.x,y:commentTarget.y,status:'open',queued:true,messages:[],createdAt:now};
     const next=await change(commentTarget.threadId?[{type:'add_message',threadId:thread.id,message,queued:true},{type:'update_thread',threadId:thread.id,patch:{status:'open'}}]:[{type:'create_thread',thread:{...thread,messages:[message]}}],false);
     if(!next)return false;
@@ -791,17 +844,17 @@ export default function App() {
     const top = frameLabels.reduce((value, label) => ids.has(label.node.id) ? Math.min(value, label.top) : value, selectedBox.y * view.zoom);
     return { left: view.x + selectedBox.x * view.zoom, top: view.y + top, width: selectedBox.width * view.zoom, height: (selectedBox.y + selectedBox.height) * view.zoom - top + 26 };
   }, [selectedBox, selectedRoots, frameLabels, view]);
-  const resizableSelection = useMemo(() => selectedRoots.length > 0 && selectedRoots.every(node=>objectEditable(node,nodeById)&&!hasTransformedAncestor(node,baseNodes)) && (!multiple || movableSelection), [selectedRoots, nodeById, baseNodes, multiple, movableSelection]);
+  const resizableSelection = useMemo(() => !applicationPreview && selectedRoots.length > 0 && selectedRoots.every(node=>!node.diagramEdge&&objectEditable(node,nodeById)&&!hasTransformedAncestor(node,baseNodes)) && (!multiple || movableSelection), [selectedRoots, nodeById, baseNodes, multiple, movableSelection, applicationPreview]);
   const hoveredNode = tool==='comment' && !commentTarget && hovered ? nodeById.get(hovered) : null;
   const hoveredBox = hoveredNode ? visualBounds(hoveredNode,nodes) : null;
   const commentPosition = commentTarget && stageRef.current ? {left:Math.max(16,Math.min(stageRef.current.clientWidth-400,view.x+commentTarget.x*view.zoom+22)),top:Math.max(90,Math.min(stageRef.current.clientHeight-330,view.y+commentTarget.y*view.zoom+12))} : {left:20,top:100};
 
   return <div className={`app ${historyOpen ? 'history-mode' : ''}`}>
-    <header className="titlebar"><ProjectMenu project={project} projects={projects} readOnly={historyOpen} boardId={board?.id} open={menu==='project'} onToggle={()=>{setMenu(menu==='project'?null:'project');void refreshProjects().catch(()=>{});}} onSelectProject={id=>{if(historyOpen)return;setBoardId('');setPageId('');void load(id);setMenu(null);}} onSelectBoard={selectBoard} onCreateProject={createProject} onCreateBoard={createBoard} onImport={()=>importRef.current?.click()}/>
-    <span className="save-status">{mediaProgress?<><LoaderCircle size={12} className="spin"/><span className="media-progress-text">{mediaProgress}</span></>:historyOpen?<><History size={12}/>Preview · v{project?.revision}</>:saving||fieldSaveState==='saving'?<><LoaderCircle size={12} className="spin"/>Saving…</>:fieldSaveState==='error'?<>Check unsaved fields</>:fieldSaveState==='pending'?<>Unsaved changes</>:project?<><Check size={12}/>All changes saved</>:null}</span><div className="titlebar-actions"><IconButton label="Project design system" active={!!library} disabled={!project||historyOpen||loading} onClick={()=>openLibrary('system')}><Palette size={17}/></IconButton><IconButton label="Version history" active={historyOpen} disabled={!liveProject||!!saving} onClick={openHistory}><History size={17}/></IconButton><div className="comment-control"><IconButton label="Tag a component · C" disabled={!project||loading||historyOpen||!!library} active={tool==='comment'} onClick={()=>{setTool(tool==='comment'?'select':'comment');setCommentTarget(null);setMenu(null);}}><MessageCircle size={17}/>{project?.threads.some(t=>t.queued)&&<span className="notification-dot"/>}</IconButton><button ref={commentMore} className="comment-more" disabled={!project||loading||historyOpen||!!library} aria-label="All comments" aria-haspopup="dialog" aria-expanded={menu==='comments'} aria-controls={menu==='comments'?'all-comments':undefined} title="More comment options · All comments" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();setMenu(null);}}} onClick={()=>{finishCanvasTextEdit();cancelGesture();setCommentTarget(null);setMenu(menu==='comments'?null:'comments');}}><ChevronDown size={12}/></button>{menu==='comments'&&project&&!loading&&!historyOpen&&!library&&<CommentList key={project.id} project={project} showPins={showComments} onTogglePins={()=>setShowComments(value=>!value)} onOpen={openComment} onClose={()=>{setMenu(null);commentMore.current?.focus({preventScroll:true});}}/>}</div><button className="share-button" title={`Export · ${shortcut('Ctrl+Shift+E')}`} disabled={!project||historyOpen||!!library} onClick={()=>setModal('export')}><Download size={13}/>Export</button></div></header>
+    <header className="titlebar"><ProjectMenu project={project} projects={projects} readOnly={historyOpen||fieldSaveState!=='saved'||!!saving} onManageProject={manageProject} boardId={board?.id} open={menu==='project'} importError={projectImportError} captureNavigation={captureNavigation} onToggle={()=>{setProjectImportError('');finishCanvasTextEdit();flushView();cancelGesture();setCommentTarget(null);setMenu(menu==='project'?null:'project');void refreshProjects().catch(()=>{});}} onOpenBoard={(projectId,id)=>{if(historyOpen)return;if(liveProject?.id===projectId)selectBoard(id);else{setBoardId('');setPageId('');void load(projectId,{projectId,boardId:id});setMenu(null);}}} onCreateProject={createProject} onCreateBoard={createBoard} onImport={()=>{setProjectImportError('');importRef.current?.click();}}/>
+    <span className="save-status">{mediaProgress?<><LoaderCircle size={12} className="spin"/><span className="media-progress-text">{mediaProgress}</span></>:historyOpen?<><History size={12}/>Preview · v{project?.revision}</>:saving||fieldSaveState==='saving'?<><LoaderCircle size={12} className="spin"/>Saving…</>:fieldSaveState==='error'?<>Check unsaved fields</>:fieldSaveState==='pending'?<>Unsaved changes</>:project?<><Check size={12}/>All changes saved</>:null}</span><div className="titlebar-actions"><IconButton label="Project design system" active={!!library} disabled={!project||historyOpen||loading||componentDraftPending} onClick={()=>openLibrary('system')}><Palette size={17}/></IconButton><IconButton label="Version history" active={historyOpen} disabled={!liveProject||!!saving||componentDraftPending} onClick={openHistory}><History size={17}/></IconButton><div className="comment-control"><IconButton label="Tag a component · C" disabled={!project||loading||historyOpen||!!library} active={tool==='comment'} onClick={()=>{setTool(tool==='comment'?'select':'comment');setCommentTarget(null);setMenu(null);}}><MessageCircle size={17}/>{project?.threads.some(t=>t.queued)&&<span className="notification-dot"/>}</IconButton><button ref={commentMore} className="comment-more" disabled={!project||loading||historyOpen||!!library} aria-label="All comments" aria-haspopup="dialog" aria-expanded={menu==='comments'} aria-controls={menu==='comments'?'all-comments':undefined} title="More comment options · All comments" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();setMenu(null);}}} onClick={()=>{finishCanvasTextEdit();cancelGesture();setCommentTarget(null);setMenu(menu==='comments'?null:'comments');}}><ChevronDown size={12}/></button>{menu==='comments'&&project&&!loading&&!historyOpen&&!library&&<CommentList key={project.id} project={project} showPins={showComments} onTogglePins={()=>setShowComments(value=>!value)} onOpen={openComment} onClose={()=>{setMenu(null);commentMore.current?.focus({preventScroll:true});}}/>}</div><button className="share-button" title={`Export · ${shortcut('Ctrl+Shift+E')}`} disabled={!project||historyOpen||!!library} onClick={()=>setModal('export')}><Download size={13}/>Export</button></div></header>
     <div className="workspace">
-      <main ref={stageRef} tabIndex={-1} className={`canvas-stage tool-${tool} ${grid?'show-grid':''} ${dropActive?'is-file-drop':''}`} aria-label="Infinite design canvas" aria-hidden={!!library} onPointerDown={canvasDown} onPointerMove={canvasMove} onPointerLeave={()=>setHovered(null)} onPointerUp={e=>{void canvasUp(e);}} onPointerCancel={()=>{flushView();cancelGesture();}} onLostPointerCapture={()=>{if(gesture.current)cancelGesture();}} onContextMenu={e=>e.preventDefault()} onDragOver={e=>{if(e.dataTransfer.types.includes('Files')){e.preventDefault();e.dataTransfer.dropEffect=historyOpen?'none':'copy';if(!historyOpen&&!importingMedia.current)setDropActive(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDropActive(false);}} onDrop={e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();setDropActive(false);if(historyOpen){notify('Close History to add media.');return;}const target=(e.target as Element).closest('[data-node-id]')?.getAttribute('data-node-id')||null;void importMedia(Array.from(e.dataTransfer.files),point(e),nearestFrame(target));}} style={{...(grid?{backgroundPosition:`${view.x}px ${view.y}px`,backgroundSize:`${Math.max(8,40*view.zoom)}px ${Math.max(8,40*view.zoom)}px`}:{}),...(library?{display:'none'}:{})}}>
-        <div className="canvas-world" style={{transform:`translate(${view.x}px,${view.y}px) scale(${view.zoom})`}}><CanvasNodes nodes={canvasNodes} liveTarget={liveTarget} designSystem={project?.designSystem} visibleRootIds={visibleRootIds} interactive={!historyOpen&&!library} onSelect={selectNode} onTextEdit={historyOpen||library||tool!=='select'?undefined:editText}/></div>
+      <main ref={stageRef} tabIndex={-1} className={`canvas-stage tool-${tool} ${grid?'show-grid':''} ${dropActive?'is-file-drop':''}`} aria-label="Infinite design canvas" aria-hidden={!!library} onPointerDown={canvasDown} onPointerMove={canvasMove} onPointerLeave={()=>setHovered(null)} onPointerUp={e=>{void canvasUp(e);}} onPointerCancel={()=>{flushView();cancelGesture();diagramWorkspace.cancel();}} onLostPointerCapture={()=>{if(gesture.current)cancelGesture();}} onContextMenu={e=>e.preventDefault()} onDragOver={e=>{if(e.dataTransfer.types.includes('application/x-codex-stencil')){e.preventDefault();e.dataTransfer.dropEffect='copy';return;}if(e.dataTransfer.types.includes('Files')){e.preventDefault();e.dataTransfer.dropEffect=historyOpen?'none':'copy';if(!historyOpen&&!importingMedia.current)setDropActive(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDropActive(false);}} onDropCapture={()=>setDropActive(false)} onDragEnterCapture={e=>{if((e.target as Element).closest('.comment-popover'))setDropActive(false);}} onDrop={e=>{const stencil=e.dataTransfer.getData('application/x-codex-stencil');if(stencil){e.preventDefault();diagramWorkspace.drop(stencil,e);return;}if(!e.dataTransfer.files.length)return;e.preventDefault();setDropActive(false);if(historyOpen){notify('Close History to add media.');return;}const target=(e.target as Element).closest('[data-node-id]')?.getAttribute('data-node-id')||null;void importMedia(Array.from(e.dataTransfer.files),point(e),nearestFrame(target));}} style={{...(grid?{backgroundPosition:`${view.x}px ${view.y}px`,backgroundSize:`${Math.max(8,40*view.zoom)}px ${Math.max(8,40*view.zoom)}px`}:{}),...(library?{display:'none'}:{})}}>
+        <div className="canvas-world" style={{transform:`translate(${view.x}px,${view.y}px) scale(${view.zoom})`}}><CanvasNodes nodes={canvasNodes} liveTarget={liveTarget} designSystem={project?.designSystem} visibleRootIds={visibleRootIds} interactive={!historyOpen&&!library} onSelect={selectNode} onOpenComponent={historyOpen||library||applicationPreview||tool!=='select'?undefined:openReactComponent} onTextEdit={historyOpen||library||applicationPreview||tool!=='select'?undefined:editText}/></div>
         {frameLabels.filter(label=>!stageSize.width||(view.x+label.left+label.width>=0&&view.x+label.left<=stageSize.width&&view.y+label.top+label.height>=0&&view.y+label.top<=stageSize.height)).map(({node,left,top,width,height})=><div key={node.id} className="canvas-frame-label" style={{left:view.x+left,top:view.y+top,width,height,lineHeight:`${height}px`}} onPointerDown={e=>{e.stopPropagation();nodeDown(node.id,e);}}><button className="frame-name" title={node.name} onDoubleClick={e=>{if(!e.shiftKey){setSelection(node.id);setInspector(true);}}}>{!historyOpen && !library && node.generation?.status === 'building' ? `Building · ${node.name}` : node.name}</button></div>)}
         {multiple&&tool==='select'&&visibleSelection.map(node=>{const box=visualBounds(node,nodes);return <div key={node.id} className="selection-overlay selection-member" aria-hidden="true" style={{left:view.x+box.x*view.zoom,top:view.y+box.y*view.zoom,width:box.width*view.zoom,height:box.height*view.zoom}}/>;})}
         {selectedBox&&(tool!=='comment'||commentTarget?.nodeId===selected?.id)&&<div className={`selection-overlay${multiple?' selection-group':''}`} style={{left:view.x+selectedBox.x*view.zoom,top:view.y+selectedBox.y*view.zoom,width:selectedBox.width*view.zoom,height:selectedBox.height*view.zoom}}>
@@ -827,9 +880,14 @@ export default function App() {
         {changeFlash?.pageId===page?.id&&changeFlash?.boxes.map(box=><div key={`${changeFlash.key}/${box.id}`} className={`version-change-flash ${box.removed?'removed':''}`} style={{left:view.x+box.x*view.zoom,top:view.y+box.y*view.zoom,width:Math.max(3,box.width*view.zoom),height:Math.max(3,box.height*view.zoom)}}/>)}
         {historyOpen&&<div className="history-preview-banner"><History size={13}/><span>Version {project?.revision} · Preview only</span></div>}
         {!loading&&historyOpen&&!nodes.length&&<div className="canvas-empty history-empty"><Frame size={28}/><p>This page was empty in this version.</p></div>}
-        {showComments&&project?.threads.filter(thread=>thread.pageId===page?.id&&(thread.status==='open'||thread.id===commentTarget?.threadId)).map(thread=>{const anchor=thread.nodeId?nodeById.get(thread.nodeId):undefined,pos=anchor?visualBounds(anchor,nodes):thread;return <button key={thread.id} disabled={historyOpen} className={`comment-pin ${thread.status==='resolved'?'resolved':''} ${thread.id===commentTarget?.threadId?'selected':''}`} style={{left:view.x+(anchor?pos.x+Math.min(anchor.width,80):thread.x)*view.zoom,top:view.y+(anchor?pos.y:thread.y)*view.zoom}} aria-label={`Open conversation on ${anchor?.name||'canvas'}`} title={thread.messages.at(-1)?.content} onPointerDown={e=>e.stopPropagation()} onClick={()=>{setMenu(null);setSelection(thread.nodeId);setCommentTarget({nodeId:thread.nodeId,x:anchor?pos.x+Math.min(anchor.width,80):thread.x,y:anchor?pos.y:thread.y,threadId:thread.id});}}>{thread.messages.at(-1)?.role==='assistant'?<Code2 size={15}/>:'Y'}{thread.queued&&<span/>}</button>;})}
-        {commentTarget&&project&&page&&<CommentPopover key={`${project.id}/${commentTarget.threadId||`${commentTarget.nodeId}-${commentTarget.x}`}`} project={project} pageId={page.id} target={commentTarget} position={commentPosition} onClose={()=>setCommentTarget(null)} onSend={sendComment} onResolve={async thread=>!!await change([{type:'update_thread',threadId:thread.id,patch:{status:thread.status==='resolved'?'open':'resolved',queued:false}}],false)} onCopy={copy}/>}
-        <div className="floating-toolbar toolbar-left" onPointerDown={e=>e.stopPropagation()}><button className="page-trigger" aria-expanded={menu==='page'} onClick={()=>setMenu(menu==='page'?null:'page')}><span>{page?.name||'Page 1'}</span><ChevronDown size={12}/></button><span className="tool-divider"/>{([{id:'select',label:'Select · V',Icon:MousePointer2},{id:'hand',label:'Hand · H',Icon:Hand},{id:'text',label:'Text · T',Icon:Type},{id:'frame',label:`Frame · F · ${preset.name}`,Icon:Frame},{id:'note',label:'Note · N',Icon:StickyNote},{id:'pen',label:'Pencil · P',Icon:Pencil}] as const).map(({id,label,Icon})=><button key={id} disabled={historyOpen} className={`tool-button ${tool===id?'active':''} ${id==='note'||id==='pen'?'secondary-tool':''}`} aria-label={label} title={label} aria-pressed={tool===id} onClick={()=>{setTool(id);setMenu(id==='frame'?(menu==='frames'?null:'frames'):null);}}><Icon size={19}/></button>)}<button disabled={historyOpen} className={`tool-button shape-trigger ${['rectangle','ellipse','line','arrow','code'].includes(tool)?'active':''}`} title="Shapes and code" aria-label="Shapes and code" aria-expanded={menu==='shapes'} onClick={()=>setMenu(menu==='shapes'?null:'shapes')}><Copy size={19}/><ChevronDown size={11}/></button><button className="tool-button" aria-label={mediaProgress ? 'Cancel media import' : 'Insert media and shaders'} title={mediaProgress ? `${mediaProgress} · Cancel import` : `Insert media and shaders · ${shortcut('Ctrl+I')} to import`} aria-expanded={mediaProgress ? undefined : menu==='insert'} disabled={historyOpen||!page||mediaController.current?.signal.aborted} onClick={()=>mediaProgress ? cancelMediaImport() : setMenu(menu==='insert'?null:'insert')}>{mediaProgress ? <X size={19}/> : <ImagePlus size={19}/>}</button>
+        {showComments&&project?.threads.filter(thread=>thread.pageId===page?.id).map(thread=>{
+          const anchor=thread.nodeId?nodeById.get(thread.nodeId):undefined,pos=anchor?visualBounds(anchor,nodes):thread,resolved=thread.status==='resolved';
+          return <button key={thread.id} disabled={historyOpen} className={`comment-pin ${resolved?'resolved tw:bg-[#27864b]! tw:border-[#a1e0b5]! tw:hover:bg-[#329c5b]! tw:hover:border-white! tw:[&.selected]:bg-[#329c5b]! tw:[&.selected]:border-white!':''} ${thread.id===commentTarget?.threadId?'selected':''}`} style={{left:view.x+(anchor?pos.x+Math.min(anchor.width,80):thread.x)*view.zoom,top:view.y+(anchor?pos.y:thread.y)*view.zoom}} aria-label={`Open ${resolved?'resolved ':''}conversation on ${anchor?.name||'canvas'}`} title={thread.messages.at(-1)?.content} onPointerDown={e=>e.stopPropagation()} onClick={()=>{setMenu(null);setSelection(thread.nodeId);setCommentTarget({nodeId:thread.nodeId,x:anchor?pos.x+Math.min(anchor.width,80):thread.x,y:anchor?pos.y:thread.y,threadId:thread.id});}}>{resolved?<Check size={15} strokeWidth={2.5} aria-hidden="true"/>:thread.messages.at(-1)?.role==='assistant'?<ChatGptLogo size={17}/>:'Y'}{thread.queued&&!resolved&&<span/>}</button>;
+        })}
+        {commentTarget&&project&&page&&<CommentPopover key={`${project.id}/${page.id}/${commentTarget.threadId||`${commentTarget.nodeId}-${commentTarget.x}`}`} project={project} pageId={page.id} target={commentTarget} position={commentPosition} onClose={()=>setCommentTarget(null)} onSend={sendComment} onResolve={async thread=>!!await change([{type:'update_thread',threadId:thread.id,patch:{status:thread.status==='resolved'?'open':'resolved',queued:false}}],false)} onCopy={copy}/>}
+        {diagramWorkspace.ui}
+        {applicationPreview&&<StateCanvasOverlay preview={applicationPreview} differences={application.differences} error={application.error} view={view} onExit={()=>setApplicationPreview(null)} onSelect={id=>{setSelection(id);setInspector(true);}}/>}
+        <div className="floating-toolbar toolbar-left" onPointerDown={e=>e.stopPropagation()}><button className="page-trigger" aria-expanded={menu==='page'} onClick={()=>setMenu(menu==='page'?null:'page')}><span>{page?.name||'Page 1'}</span><ChevronDown size={12}/></button><button className={'tool-button'+(diagramsOpen?' active':'')} aria-label="Diagram library" title="Diagram library · UML, architecture, journeys and planning" aria-pressed={diagramsOpen} disabled={historyOpen} onClick={()=>{setDiagramsOpen(!diagramsOpen);setTool('select');setMenu(null);}}><Workflow size={19}/></button><span className="tool-divider"/>{([{id:'select',label:'Select · V',Icon:MousePointer2},{id:'hand',label:'Hand · H',Icon:Hand},{id:'text',label:'Text · T',Icon:Type},{id:'frame',label:`Frame · F · ${preset.name}`,Icon:Frame},{id:'note',label:'Note · N',Icon:StickyNote},{id:'pen',label:'Pencil · P',Icon:Pencil}] as const).map(({id,label,Icon})=><button key={id} disabled={historyOpen} className={`tool-button ${tool===id?'active':''} ${id==='note'||id==='pen'?'secondary-tool':''}`} aria-label={label} title={label} aria-pressed={tool===id} onClick={()=>{setTool(id);setMenu(id==='frame'?(menu==='frames'?null:'frames'):null);}}><Icon size={19}/></button>)}<button disabled={historyOpen} className={`tool-button shape-trigger ${['rectangle','ellipse','line','arrow','code'].includes(tool)?'active':''}`} title="Shapes and code" aria-label="Shapes and code" aria-expanded={menu==='shapes'} onClick={()=>setMenu(menu==='shapes'?null:'shapes')}><Copy size={19}/><ChevronDown size={11}/></button><button className="tool-button" aria-label={mediaProgress ? 'Cancel media import' : 'Insert media and shaders'} title={mediaProgress ? `${mediaProgress} · Cancel import` : `Insert media and shaders · ${shortcut('Ctrl+I')} to import`} aria-expanded={mediaProgress ? undefined : menu==='insert'} disabled={historyOpen||!page||mediaController.current?.signal.aborted} onClick={()=>mediaProgress ? cancelMediaImport() : setMenu(menu==='insert'?null:'insert')}>{mediaProgress ? <X size={19}/> : <ImagePlus size={19}/>}</button>
           {menu==='page'&&<div className="dropdown page-menu">{boardPages.map(p=><div key={p.id} className="page-menu-row"><button className="dropdown-item" onClick={()=>{selectPage(p.id);setMenu(null);}}><span>{p.name}</span>{p.id===page?.id&&<Check size={16}/>}</button><button className="icon-button" aria-label={`Rename ${p.name}`} disabled={historyOpen} onClick={()=>{selectPage(p.id);setRenamingPage(!renamingPage);}}><MoreHorizontal size={17}/></button></div>)}{renamingPage&&page&&<div className="menu-form"><AutosaveInput key={`${project?.id}/${page.id}`} autoFocus aria-label="Page name" value={page.name} required normalize={value=>value.trim()} onSave={name=>change([{type:'update_page',pageId:page.id,patch:{name}}],false)} maxLength={160}/><button className="icon-button danger" type="button" disabled={boardPages.length<2} aria-label="Delete current page" title="Delete current page" onClick={()=>{void change([{type:'delete_page',pageId:page.id}],false);setRenamingPage(false);setMenu(null);}}><Trash2 size={14}/></button></div>}<div className="menu-divider"/><form className="menu-form new-page" onBlurCapture={newPageDraft.onBlur} onCompositionStartCapture={newPageDraft.onCompositionStart} onCompositionEndCapture={newPageDraft.onCompositionEnd} onSubmit={e=>{e.preventDefault();void createPage();}}><Plus size={17}/><input disabled={historyOpen} aria-label="New page name" placeholder="New page" value={newPageName} onChange={e=>setNewPageName(e.target.value)} maxLength={160}/><button disabled={historyOpen} aria-label="Create page" className="icon-button" type="submit"><ArrowRight size={16}/></button></form></div>}
           {menu==='shapes'&&<div className="dropdown shape-menu">{([{id:'rectangle',name:'Rectangle',key:'R',Icon:RectangleHorizontal},{id:'ellipse',name:'Oval',key:'O',Icon:Circle},{id:'arrow',name:'Arrow',key:shortcut('Shift+L'),Icon:ArrowUpRight},{id:'line',name:'Line',key:'L',Icon:ArrowRight},{id:'code',name:'Code component',key:'',Icon:Code2}] as const).map(item=><button key={item.id} className="dropdown-item" onClick={()=>{setTool(item.id);setMenu(null);}}><item.Icon size={18}/><span>{item.name}</span><kbd>{item.key}</kbd></button>)}</div>}
           {menu==='insert'&&<InsertMenu disabled={historyOpen||!!mediaProgress||!page} onPickMedia={()=>{setMenu(null);mediaRef.current?.click();}} onAddShader={shader=>{void addShader(shader);}}/>}
@@ -846,22 +904,23 @@ export default function App() {
       {library&&toast&&<div className="toast" role="status"><Check size={15}/><span>{toast}</span><button aria-label="Dismiss notification" onClick={()=>setToast('')}><X size={13}/></button></div>}
       {library&&error&&<div className="error-banner" role="alert"><span>{error}</span><button className="text-button" onClick={()=>{if(project)void load(project.id);}}>Retry</button><button aria-label="Dismiss error" onClick={()=>setError('')}><X size={15}/></button></div>}
       {historyOpen&&liveProject&&<HistoryPanel key={liveProject.id} project={liveProject} saving={!!saving} onClose={closeHistory} onPreview={previewVersion} onApply={applyVersion}/> }
-      {library&&project&&board&&<ProjectLibrary key={project.id} project={project} boardId={board.id} mode={library} pageId={page?.id} selectedNodeId={selectionIds.length===1?selectionIds[0]:undefined} insertionPosition={{x:((stageRef.current?.clientWidth||800)/2-view.x)/view.zoom,y:((stageRef.current?.clientHeight||600)/2-view.y)/view.zoom}} onModeChange={setLibrary} onApply={applyLibraryVersion} onInserted={nodeId=>{setLibrary(null);setSelection(nodeId);}} readOnly={historyOpen||loading} onChange={changeLibrary} onClose={()=>setLibrary(null)} onNotify={notify}/>}
-      {!historyOpen&&!library&&inspector&&project&&page&&<Inspector project={project} page={page} selectedIds={selectionIds} navigationPending={loading} onSelect={selectLayer} onChange={changeLayer} onClose={closeInspector} onDelete={remove} onDuplicate={duplicate} onFocus={focus} onOpenDesignSystem={()=>openLibrary('system')} onStateView={setStateView}/>}
+      {library&&project&&board&&<ProjectLibrary key={project.id} componentId={libraryComponentId ?? undefined} onComponentChange={setLibraryComponentId} project={project} boardId={board.id} mode={library} pageId={page?.id} selectedNodeId={selectionIds.length===1?selectionIds[0]:undefined} insertionPosition={{x:((stageRef.current?.clientWidth||800)/2-view.x)/view.zoom,y:((stageRef.current?.clientHeight||600)/2-view.y)/view.zoom}} onModeChange={setLibrary} onApply={applyLibraryVersion} onInserted={nodeId=>{setLibrary(null);setSelection(nodeId);}} readOnly={historyOpen||loading} onChange={changeLibrary} onClose={()=>setLibrary(null)} onNotify={notify}/>}
+      {!historyOpen&&!library&&inspector&&project&&page&&<Inspector project={project} page={page} selectedIds={selectionIds} navigationPending={loading} onSelect={selectLayer} onChange={changeLayer} onClose={closeInspector} onDelete={remove} onDuplicate={duplicate} onFocus={focus} onOpenDesignSystem={()=>openLibrary('system')} onStateView={setStateView} applicationState={{preview:applicationPreview,onPreview:setApplicationPreview,differences:application.differences,previewError:application.error,onNavigate:navigateApplication}}/>}
     </div>
     <input type="file" hidden ref={importRef} accept="application/json,.json,application/zip,.zip" onChange={async e => {
       const file = e.target.files?.[0]; e.target.value = '';
       if (!file) return;
+      setProjectImportError('');
       const isCurrent = captureNavigation();
       try {
         const next = await importProjectFile(file);
         void refreshProjects().catch(() => {});
         if (isCurrent() && !activeCanvas.current?.readOnly && await setSnapshot(next)) { setMenu(null); notify('Project imported as a new copy.'); }
         else notify(`${next.name} imported. Find it in Projects.`);
-      } catch (error) { setError((error as Error).message); }
+      } catch (error) { const message = error instanceof Error ? error.message : 'Could not import this project. Try another file.'; setProjectImportError(message); setError(message); }
     }}/>
     <input type="file" hidden ref={mediaRef} aria-label="Import images or videos" accept={mediaAccept} multiple onChange={e=>{const files=Array.from(e.currentTarget.files||[]);e.currentTarget.value='';void importMedia(files);}}/>
-    {modal==='export'&&project&&board&&page&&<ExportPanel key={`${project.id}/${board.id}/${page.id}`} project={project} boardId={board.id} pageId={page.id} selectedIds={selectionIds} onClose={()=>setModal(null)} onNotify={notify}/>}
+    {modal==='export'&&project&&board&&page&&<ExportPanel key={`${project.id}/${board.id}/${page.id}`} project={project} statePreviewProject={applicationPreview&&!application.error?application.project??undefined:undefined} statePreviewName={applicationPreview?.scenarioId} boardId={board.id} pageId={page.id} selectedIds={selectionIds} onClose={()=>setModal(null)} onNotify={notify}/>}
     {(modal==='help'||modal==='auth')&&<div className="modal-backdrop" onPointerDown={()=>{if(modal!=='auth')setModal(null);}}>
       <section className="modal" role="dialog" aria-modal="true" aria-label={modal==='help'?'Keyboard shortcuts':'Connect to workspace'} onPointerDown={e=>e.stopPropagation()}>
         <div className="modal-header"><h2>{modal==='help'?'Keyboard shortcuts':'Connect to your workspace'}</h2>{modal!=='auth'&&<IconButton label="Close dialog" onClick={()=>setModal(null)}><X size={19}/></IconButton>}</div>

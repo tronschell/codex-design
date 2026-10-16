@@ -1,4 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import './build-diagrams.mjs';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, sep } from 'node:path';
 import { build } from 'esbuild';
@@ -32,6 +33,17 @@ await buildStarters(root);
 await build({
   entryPoints: [resolve(root, 'server/jsx-renderer.ts')], outfile: resolve(dist, 'jsx-renderer.mjs'),
   bundle: true, platform: 'node', target: 'node22', format: 'esm',
+  banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
+});
+
+await mkdir(resolve(dist, 'react-styles'), { recursive: true });
+for (const file of ['theme.css', 'preflight.css']) await cp(resolve(root, 'node_modules/tailwindcss', file), resolve(dist, 'react-styles', file));
+await cp(resolve(root, 'node_modules/esbuild'), resolve(dist, 'node_modules/esbuild'), { recursive: true });
+await cp(resolve(root, 'node_modules/@esbuild'), resolve(dist, 'node_modules/@esbuild'), { recursive: true });
+await cp(resolve(root, 'node_modules/esbuild-wasm'), resolve(dist, 'node_modules/esbuild-wasm'), { recursive: true });
+await build({
+  entryPoints: [resolve(root, 'server/react-compiler.ts')], outfile: resolve(dist, 'react-compiler.mjs'),
+  bundle: true, platform: 'node', target: 'node22', format: 'esm', external: ['esbuild', 'esbuild-wasm'],
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
 });
 

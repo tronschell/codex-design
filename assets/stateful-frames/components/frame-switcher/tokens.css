@@ -1,0 +1,14 @@
+:root {
+  --ds-system-accent: #4497ff;
+  --ds-system-background: #171717;
+  --ds-system-foreground: #e8eaed;
+  --ds-system-font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --ds-system-radius: 6px;
+  --ds-editor-surface: #202020;
+  --ds-editor-border: #3a3a3a;
+  --ds-editor-muted: #a3a3a3;
+  --ds-diagram-source: #76b8ec;
+  --ds-diagram-transform: #bda7ed;
+  --ds-diagram-serving: #87c9b5;
+  --ds-diagram-attention: #dfba79;
+}

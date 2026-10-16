@@ -1,3 +1,5 @@
+import { stateContextSchema } from '../shared/feature-schema';
+import { remapFeatureReferences } from '../shared/diagrams';
 import { z } from 'zod';
 import type { BindableStyleProperty, DesignNode, DesignProject, Operation } from '../shared/types';
 import { compatibleTokenKinds } from '../shared/design-system';
@@ -11,6 +13,7 @@ const format = 'codex-design-selection';
 const pointSchema = z.object({ x: nodeSchema.shape.x, y: nodeSchema.shape.y }).strict();
 const clipboardSchema = z.object({
   format: z.literal(format), version: z.literal(1), projectId: idSchema, pageId: idSchema,
+  stateContexts: z.record(idSchema,stateContextSchema).optional(),
   nodes: z.array(nodeSchema).min(1).max(2000), threads: z.array(threadSchema).max(2000),
   roots: z.array(z.object({ id: idSchema, canvasPosition: pointSchema.nullable(), parentContext: z.string().max(MAX_INPUT_BYTES) }).strict()).min(1).max(2000),
 }).strict();
@@ -89,6 +92,7 @@ export function serializeSelection(project: DesignProject, pageId: string, nodeI
   });
   const data = parseSelection({
     format, version: 1, projectId: project.id, pageId, roots,
+    stateContexts: Object.fromEntries(project.pages.flatMap(page=>page.nodes).filter(node=>node.applicationState && nodes.some(n=>included.has(n.id)&&n.stateBinding?.contextNodeId===node.id)).map(node=>[node.id,node.applicationState])),
     nodes: nodes.filter(node => included.has(node.id)),
     threads: project.threads.filter(thread => thread.pageId === pageId && thread.nodeId !== null && included.has(thread.nodeId)).map(thread => ({ ...thread, queued: false })),
   });
@@ -121,6 +125,13 @@ export function preparePaste(text: string, project: DesignProject, pageId: strin
     node.id = ids.get(original.id)!;
     node.effects = node.effects?.map(effect => ({ ...effect, id: uid() }));
     if (node.href?.startsWith('#') && ids.has(node.href.slice(1))) node.href = `#${ids.get(node.href.slice(1))!}`;
+    if (node.diagramEdge && (!ids.has(node.diagramEdge.from.nodeId) || !ids.has(node.diagramEdge.to.nodeId))) delete node.diagramEdge;
+    if (!sameProject && node.stateBinding && !ids.has(node.stateBinding.contextNodeId)) {
+      const context = data.stateContexts?.[node.stateBinding.contextNodeId];
+      if (!context) throw new Error('Copy the frame with its state context to paste it into another project.');
+      node.applicationState = structuredClone(context); node.stateBinding = {...node.stateBinding,contextNodeId:node.id};
+    }
+    remapFeatureReferences(node, ids);
     if (sameProject) remapComponentInstance(node, ids);
     else delete node.componentInstance;
     if (node.tokenBindings) {

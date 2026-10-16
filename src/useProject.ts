@@ -78,6 +78,7 @@ export function useProject() {
   const watchLoop = useRef<Promise<void>>(Promise.resolve()), watchFallbackUntil = useRef(0);
   const clearPane = useCallback(() => {
     ref.current = null; binding.current = null;
+    if (!embedded) try { const url = new URL(location.href); for (const key of ['project', 'board', 'page']) url.searchParams.delete(key); history.replaceState(null, '', url); } catch { /* Optional browser URL state. */ }
     if (mounted.current) { setProject(null); setPaneSelection(null); setBoardNavigation(null); }
   }, []);
   const applySnapshot = useCallback((value: DesignProject) => {
@@ -86,7 +87,7 @@ export function useProject() {
     setProjects(list => includeProject(list, value));
     if (binding.current?.projectId === value.id) {
       try {
-        const next = resolveSelection(value, binding.current);
+        const next = resolveSelection(value, value.boards.some(board => board.id === binding.current?.boardId) ? binding.current : { projectId: value.id });
         if (selectionKey(next) !== selectionKey(binding.current)) { binding.current = next; setPaneSelection(next); }
       } catch (error) { clearPane(); setError(errorMessage(error)); return value; }
     }
@@ -109,11 +110,14 @@ export function useProject() {
     return next;
   }, []);
   const refreshProjects = useCallback(async () => {
-    const request = ++listRequest.current;
+    const request = ++listRequest.current, active = ref.current;
     const list = await client.list();
-    if (mounted.current && request === listRequest.current) setProjects(ref.current ? includeProject(list, ref.current) : list);
+    if (mounted.current && request === listRequest.current) {
+      if (active && ref.current === active && !pending.current && !list.some(item => item.id === active.id)) { selection.current++; clearPane(); }
+      setProjects(ref.current ? includeProject(list, ref.current) : list);
+    }
     return list;
-  }, []);
+  }, [clearPane]);
   const load = useCallback(async (id: string, target: CanvasTarget = { projectId: id }, launch?: CanvasLaunch) => {
     const intent = ++navigation.current;
     loadingProject.current = id;
@@ -230,6 +234,25 @@ export function useProject() {
     return task;
   }, [applySnapshot]);
 
+  const manageProject = useCallback((target: DesignProject, operations: Operation[] | 'delete'): Promise<DesignProject | null> => {
+    pending.current++; setSaving(pending.current);
+    const task = queue.current.then(async () => {
+      const next = operations === 'delete' ? (await client.deleteProject(target), null) : await client.mutate(target, operations);
+      if (mounted.current) {
+        if (ref.current?.id === target.id) {
+          if (next) applySnapshot(next);
+          else { selection.current++; clearPane(); }
+        }
+        if (next) setProjects(list => includeProject(list, next));
+        else setProjects(list => list.filter(item => item.id !== target.id));
+        void refreshProjects().catch(() => {});
+      }
+      return next;
+    }).finally(() => { pending.current--; if (mounted.current) setSaving(pending.current); });
+    queue.current = task.catch(() => {});
+    return task;
+  }, [applySnapshot, clearPane, refreshProjects]);
+
   const restoreVersion = useCallback((revision: number, scope?: LibraryScope, componentId?: string): Promise<DesignProject | null> => {
     const project = ref.current, request = selection.current;
     if (!project || pending.current || loadingProject.current) return Promise.resolve(null);
@@ -302,6 +325,7 @@ export function useProject() {
           if (fallback && active()) await delay(embedded ? 2500 : 5000);
         } catch (error) {
           if (!active() || controller.signal.aborted) break;
+          if (error instanceof ApiError && error.status === 404) { selection.current++; clearPane(); void refreshProjects().catch(() => {}); break; }
           if (error instanceof ApiError && error.code === 'watch_unsupported') { watchFallbackUntil.current = Date.now() + 60000; continue; }
           failures++;
           await delay(Math.min(30000, (embedded ? 2500 : 5000) * 2 ** Math.min(failures - 1, 4)));
@@ -310,7 +334,7 @@ export function useProject() {
     });
     watchLoop.current = task.catch(() => {});
     return () => { stopped = true; controller.abort(); if (timer) clearTimeout(timer); finishDelay?.(); };
-  }, [applySnapshot, hydrated, loading, project?.id, refreshProjects, visible]);
+  }, [applySnapshot, clearPane, hydrated, loading, project?.id, refreshProjects, visible]);
 
-  return { project, projects, ref, loading, hydrated, paneSelection, bindSelection, saving, error, setError, load, refreshProjects, setSnapshot, captureNavigation, commit, restoreVersion, boardNavigation };
+  return { project, projects, ref, loading, hydrated, paneSelection, bindSelection, saving, error, setError, load, refreshProjects, setSnapshot, captureNavigation, commit, manageProject, restoreVersion, boardNavigation };
 }

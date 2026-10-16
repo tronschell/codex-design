@@ -1,3 +1,7 @@
+import type { DiagramConfig, DiagramElement, DiagramEdge } from './diagram-types';
+import type { ApplicationStateContext, StateBinding, StateRule, JourneyTransition } from './application-state-types';
+import type { CommentAttachment } from './media';
+
 export type NodeType = 'frame' | 'text' | 'rectangle' | 'ellipse' | 'line' | 'arrow' | 'code' | 'image' | 'video' | 'shader';
 
 export interface MediaConfig {
@@ -132,10 +136,19 @@ export interface DesignSystemSource { path: string; kind: 'design-md' | 'compone
 export interface DesignSystemRequest { id: string; mode: 'generate' | 'find' | 'components'; brief: string; repository: string; createdAt: string; queued: boolean }
 export interface NativeComponentDefinition { id: string; name: string; description: string; rootNodeId: string; nodes: DesignNode[]; version: number; releaseLabel?: string }
 export interface ComponentInstance { componentId: string; version: number; nodeMap: Record<string, string>; overrides: Record<string, string[]> }
-export interface DesignSystem { name: string; description: string; documentation: string; tokens: DesignSystemToken[]; sources: DesignSystemSource[]; components: NativeComponentDefinition[]; request?: DesignSystemRequest }
+export interface ReactProject { files: Record<string, string>; dependencies: Record<string, string>; entryPoints: string[]; exports: string[]; javascript: string; css: string }
+export interface ReactBinding { entry: string; exportName: string; props?: Record<string, unknown> }
+export interface DesignSystem { react?: ReactProject; name: string; description: string; documentation: string; tokens: DesignSystemToken[]; sources: DesignSystemSource[]; components: NativeComponentDefinition[]; request?: DesignSystemRequest }
 export interface InspirationItem { id: string; name: string; assetRef: string; width: number; height: number; notes: string; usage: string; sourceUrl?: string }
 
 export interface DesignNode {
+  diagram?: DiagramConfig;
+  diagramElement?: DiagramElement;
+  diagramEdge?: DiagramEdge;
+  applicationState?: ApplicationStateContext;
+  stateBinding?: StateBinding;
+  stateRules?: StateRule[];
+  journey?: JourneyTransition;
   id: string;
   type: NodeType;
   name: string;
@@ -149,8 +162,9 @@ export interface DesignNode {
   href?: string;
   source?: string;
   live?: boolean;
+  react?: ReactBinding | null;
   jsx?: { source: string; starters: string[]; deviceChrome?: 'safe-area' | 'device' };
-  generation?: { status: 'building' | 'ready'; updatedAt?: string };
+  generation?: { status: 'building' | 'ready'; updatedAt?: string; region?: { x: number; y: number; width: number; height: number } };
   media?: MediaConfig;
   shader?: ShaderConfig;
   effects?: NodeEffect[];
@@ -165,7 +179,7 @@ export interface Viewport { x: number; y: number; zoom: number }
 export interface DesignBoard { id: string; name: string; createdAt: string; updatedAt: string; inspiration?: InspirationItem[] }
 export interface CanvasSelection { projectId: string; boardId: string; pageId?: string }
 export interface DesignPage { id: string; boardId?: string; name: string; nodes: DesignNode[]; viewport: Viewport }
-export interface CommentMessage { id: string; role: 'user' | 'assistant'; content: string; createdAt: string; intent?: 'generate_image' }
+export interface CommentMessage { id: string; role: 'user' | 'assistant'; content: string; createdAt: string; intent?: 'generate_image'; attachments?: CommentAttachment[] }
 export interface CommentThread {
   id: string;
   pageId: string;
@@ -198,10 +212,10 @@ export type LibraryScope = 'system' | 'component';
 export interface LibraryVersion { designSystem: DesignSystem; version: ProjectVersionSummary; component?: NativeComponentDefinition }
 
 export type Operation =
-  | { type: 'rename_project'; name: string; description?: string }
+  | { type: 'rename_project'; userConfirmed: true; name: string; description?: string }
   | { type: 'create_board'; board: Pick<DesignBoard, 'id' | 'name'> }
-  | { type: 'update_board'; boardId: string; patch: Partial<Pick<DesignBoard, 'name'>> }
-  | { type: 'delete_board'; boardId: string }
+  | { type: 'update_board'; userConfirmed: true; boardId: string; patch: Partial<Pick<DesignBoard, 'name'>> }
+  | { type: 'delete_board'; userConfirmed: true; boardId: string }
   | { type: 'create_page'; page: DesignPage }
   | { type: 'update_page'; pageId: string; patch: Partial<Pick<DesignPage, 'name' | 'viewport' | 'boardId'>> }
   | { type: 'replace_page'; pageId: string; page: DesignPage }
@@ -213,6 +227,7 @@ export type Operation =
   | { type: 'create_thread'; thread: CommentThread }
   | { type: 'add_message'; threadId: string; message: CommentMessage; queued?: boolean }
   | { type: 'update_thread'; threadId: string; patch: Partial<Pick<CommentThread, 'status' | 'queued'>> }
+  | { type: 'update_react_files'; files: Record<string, string | null>; dependencies?: Record<string, string | null> }
   | { type: 'update_design_system'; patch: Partial<Pick<DesignSystem, 'name' | 'description' | 'documentation' | 'sources'>> }
   | { type: 'apply_design_system_document'; markdown: string }
   | { type: 'upsert_design_token'; token: DesignSystemToken }

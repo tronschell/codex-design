@@ -1,0 +1,29 @@
+import { reactExportKey } from './react-project';
+import type { DesignNode, DesignSystem, ReactBinding } from './types';
+import { tokenCssVariables } from './design-system';
+
+const scriptText = (value: string) => value.replace(/<\/script/gi, '<\\/script');
+const styleText = (value: string) => value.replace(/<\/style/gi, '<\\/style');
+const argument = (value: unknown) => JSON.stringify(value).replaceAll('<', '\\u003c');
+
+// The compiler never executes authored modules. They execute only in this opaque-origin browser sandbox.
+export function reactPreviewDocument(node: DesignNode, system?: DesignSystem): string {
+  const app = system?.react, binding = node.react;
+  if (!app || !binding || !app.exports.includes(reactExportKey(binding))) return '<p role="alert">React source is unavailable. Save the application source again.</p>';
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; base-uri 'none'; form-action 'none'"><style>html,body,#root{margin:0;min-height:100%;width:100%;background:transparent}html,body{height:100%}*{box-sizing:border-box}${styleText(app.css)}${styleText(tokenCssVariables(system!))}</style></head><body><div id="root"></div><script>addEventListener('keydown',function(e){if(e.key==='Escape')parent.postMessage('codex-live-exit','*')});['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel'].forEach(function(k){try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false})}catch(e){}});function showError(error){var root=document.getElementById('root');root.textContent=String(error);root.setAttribute('role','alert');root.style.cssText='padding:16px;white-space:pre-wrap;color:#ef4444;font:13px monospace'}addEventListener('error',function(event){showError(event.message)});addEventListener('unhandledrejection',function(event){showError(event.reason)});</script><script>addEventListener('message',function(event){if(event.source!==parent||!event.data||event.data.type!=='codex-react-pick')return;var p=event.data;if(!Number.isFinite(p.x)||!Number.isFinite(p.y)||typeof p.requestId!=='string')return;var element=document.elementFromPoint(p.x,p.y),keys=${argument(system!.components.flatMap(component=>component.nodes.flatMap(node=>node.id===component.rootNodeId&&node.react?[reactExportKey(node.react)]:[])))};while(element){var key=element.getAttribute('data-codex-component');if(key&&keys.includes(key)){parent.postMessage({type:'codex-react-component',key:key,requestId:p.requestId},'*');return}element=element.parentElement}});</script><script>${scriptText(app.javascript)}</script><script>try{CodexReact.mount(${argument(binding.entry)},${argument(binding.exportName)},${argument(binding.props ?? {})})}catch(error){showError(error)}</script></body></html>`;
+}
+
+export function reactApplicationFiles(system: DesignSystem, bindings: ReactBinding[] = []): Record<string, string> {
+  if (!system.react) return {};
+  const app = system.react;
+  const scenes = bindings.length ? bindings : app.entryPoints.map(entry => ({ entry, exportName: 'default' }));
+  return {
+    ...Object.fromEntries(Object.entries(app.files).map(([file, source]) => ['application/' + file, source])),
+    'application/package.json': JSON.stringify({ name: 'canvas-application', version: '1.0.0', private: true, type: 'module', scripts: { dev: 'vite', build: 'vite build' }, dependencies: app.dependencies, devDependencies: { vite: '^6.1.0', '@vitejs/plugin-react': '^4.3.4' } }, null, 2),
+    'application/vite.config.js': `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nimport { fileURLToPath } from 'node:url';\nexport default defineConfig({ plugins: [react()], resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } } });\n`,
+    'application/index.html': '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Application preview</title></head><body><div id="root"></div><script type="module" src="/canvas-main.jsx"></script></body></html>',
+    'application/canvas-main.jsx': `import React from 'react';\nimport { createRoot } from 'react-dom/client';\n${app.entryPoints.map((entry, index) => `import * as Screen${index} from ${JSON.stringify('./' + entry)};`).join('\n')}\nimport './preview.css';\nconst screens = {${app.entryPoints.map((entry, index) => `${JSON.stringify(entry)}: Screen${index}`).join(',')}};\nconst params = new URLSearchParams(location.search);\nconst scenes = ${JSON.stringify(scenes)};\nconst selected = params.has('screen') ? scenes.find(scene => scene.entry === params.get('screen') && (!params.has('export') || scene.exportName === params.get('export'))) : scenes[Number(params.get('scene') || 0)] || scenes[0];\nconst entry = params.get('screen') || selected?.entry;\nconst name = params.get('export') || selected?.exportName || 'default';\nconst props = selected?.props || {};\nconst Component = screens[entry]?.[name];\ncreateRoot(document.getElementById('root')).render(Component ? <Component {...props} /> : <pre>Choose a valid screen and export with ?screen=src/screens/Home.tsx&amp;export=default</pre>);\n`,
+    'application/preview.css': app.css + '\n' + tokenCssVariables(system),
+    'application/README.md': 'Run npm install, then npm run dev in this directory. Select a screen with ?screen=src/screens/Home.tsx; named exports use &export=ComponentName. This is the authored React application. Source modules, shared components and pinned npm dependencies are preserved. The preview stylesheet includes compiled Tailwind utilities; regenerate it when changing utility classes, or configure Tailwind in the consuming application. Browser previews run without network/storage access. The exported application runs in your normal application environment.\n',
+  };
+}

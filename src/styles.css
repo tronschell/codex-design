@@ -94,16 +94,6 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 .page-trigger svg, .zoom-trigger svg { width: 12px; height: 12px; color: #949494; }
 
 .dropdown { position: absolute; top: calc(100% + 4px); left: 0; z-index: 90; min-width: 190px; padding: 2px; color: #dadada; background: #272727; border: 1px solid #444444; border-radius: 9px; box-shadow: 0 14px 32px #0000004d; }
-.project-menu { top: calc(100% + 4px); left: 6px; width: 284px; }
-.board-menu-context { display: flex; align-items: center; gap: 6px; min-height: 25px; padding: 0 6px; color: #c5c5c5; font-size: 11px; }
-.board-menu-context > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.board-menu-context > button { display: inline-flex; align-items: center; gap: 3px; height: 23px; padding: 0 3px; color: #aaa99d; font-size: 10px; background: none; border: 0; border-radius: 4px; }
-.board-menu-context > button:hover { color: #efefef; background: #383838; }
-.board-list-heading { display: flex; justify-content: space-between; padding: 3px 6px; color: #a3a3a3; font-size: 10px; }
-.board-list-heading small { font-size: inherit; }
-.board-edited { margin-left: auto; color: #989898; font-size: 10px; white-space: nowrap; }
-.menu-empty { margin: 0; padding: 6px; color: #aaa99d; font-size: 12px; }
-.load-more-boards { color: #acd0ff; }
 .page-menu { width: 225px; }
 .shape-menu { left: 132px; width: 205px; }
 .zoom-menu { right: 0; left: auto; width: 190px; }
@@ -129,25 +119,12 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 .menu-heading button { width: 27px; height: 27px; }
 .menu-divider { height: 1px; margin: 2px; background: #404040; }
 .menu-form { display: flex; flex-direction: column; gap: 4px; padding: 4px; }
-.menu-form input, .new-project-form input, .auth-form input { width: 100%; min-width: 0; height: 24px; padding: 0 6px; color: #dfdfdf; font-size: 12px; background: #202020; border: 1px solid #444444; border-radius: 5px; }
-.menu-form input::placeholder, .new-project-form input::placeholder, .auth-form input::placeholder { color: #808080; }
+.menu-form input, .auth-form input { width: 100%; min-width: 0; height: 24px; padding: 0 6px; color: #dfdfdf; font-size: 12px; background: #202020; border: 1px solid #444444; border-radius: 5px; }
+.menu-form input::placeholder, .auth-form input::placeholder { color: #808080; }
 .menu-form button { min-height: 24px; padding: 2px 6px; font-size: 12px; }
 .menu-form label { color: #afafaf; font-size: 11px; }
-.project-menu .dropdown-item { min-height: 24px; }
 .project-item-description { display: block; color: #8d8d8d; font-size: 10px; }
 .project-trigger.open { background: #2c2c2c; }
-.menu-search { display: flex; align-items: center; gap: 4px; height: 26px; margin: 2px 4px 4px; padding: 0 6px; color: #8d8d8d; background: #202020; border: 1px solid #404040; border-radius: 5px; }
-.menu-search input { flex: 1; width: 100%; min-width: 0; height: 100%; color: #cfcfcf; font-size: 12px; background: transparent; border: 0; outline: 0; }
-.menu-search input::placeholder { color: #888888; }
-.menu-search:focus-within { border-color: #789bc4; }
-.project-list { max-height: 230px; overflow: auto; }
-.project-list .dropdown-item { min-height: 36px; padding: 3px 6px; }
-.project-list .dropdown-item > div { flex: 1; min-width: 0; }
-.project-list .dropdown-item strong { display: block; overflow: hidden; color: #d3d3d3; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.project-list .dropdown-item small { display: block; margin-top: 1px; color: #8d8d8d; font-size: 10px; }
-.project-list .dropdown-item.current { background: #353535; }
-.project-list .dropdown-item.current > svg { color: #bcbcbc; }
-.project-menu .new-project-form { gap: 4px; padding: 4px; }
 .dropdown-item.subdued { min-height: 24px; color: #929292; font-size: 11px; }
 .page-menu-row { display: flex; align-items: center; }
 .page-menu-row > .dropdown-item { flex: 1; min-width: 0; }
@@ -328,7 +305,6 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 
 .comment-pin { position: absolute; z-index: 20; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; transform: translate(-50%, -50%); padding: 0; color: #ffffff; font-size: 11px; font-weight: 600; background: #417fc5; border: 2px solid #a9ccf7; border-radius: 50% 50% 50% 5px; box-shadow: 0 3px 10px #00000040; }
 .comment-pin:hover, .comment-pin.active, .comment-pin.selected { background: #599df0; border-color: #ffffff; }
-.comment-pin.resolved { background: #575757; border-color: #b1b1b1; }
 .comment-pin > span { position: absolute; top: -4px; right: -4px; width: 7px; height: 7px; background: #edd9a7; border: 1px solid #474332; border-radius: 50%; }
 .comment-popover { position: absolute; z-index: 80; width: 350px; max-width: calc(100% - 28px); overflow: hidden; color: #dddddd; background: #272727; border: 1px solid #474747; border-radius: 11px; box-shadow: 0 16px 40px #00000066; }
 .comment-popover > header { display: flex; align-items: center; gap: 1px; min-height: 30px; padding: 2px 4px 2px 8px; border-bottom: 1px solid #3c3c3c; }
@@ -345,16 +321,11 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 .comment-compose { padding: 6px 8px 0; }
 .comment-compose-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .comment-compose-tools .mention { margin-bottom: 0; }
-.comment-image-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; padding: 0 5px; color: #bdbdbd; font-size: 10px; background: #303030; border: 1px solid #505050; border-radius: 4px; }
-.comment-image-toggle:hover:not(:disabled), .comment-image-toggle.active { color: #eeeeee; background: #454545; border-color: #777777; }
-.comment-image-hint { margin: 4px 0 0; color: #aaaaaa; font-size: 10px; line-height: 1.4; }
-.comment-image-label { display: inline-flex; align-items: center; gap: 3px; color: #aaaaaa; font-size: 9px; }
 .mention { display: inline-flex; align-items: center; min-height: 18px; margin-bottom: 4px; padding: 0 4px; color: #b1d2fa; font-size: 11px; background: #344254; border-radius: 4px; }
 .comment-compose textarea { display: block; width: 100%; min-height: 44px; max-height: 220px; padding: 0; resize: vertical; color: #e1e1e1; font-size: 12px; line-height: 1.5; background: none; border: 0; outline: none; }
 .comment-compose textarea::placeholder { color: #919191; }
 .comment-compose textarea:focus-visible { outline: none; }
 .comment-popover > footer { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 4px 8px; }
-.comment-send-hint { color: #a3a3a3; font-size: 10px; }
 .comment-send { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; color: #252525; background: #e6e6e6; border: 0; border-radius: 50%; }
 .comment-send:hover:not(:disabled) { background: #ffffff; }
 .comment-send:disabled { color: #7b7b7b; background: #444444; opacity: 1; }
@@ -406,9 +377,6 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
 .auth-form label { color: #acacac; font-size: 11px; }
 .modal-body .auth-form { width: 100%; padding: 0; background: transparent; border: 0; border-radius: 0; }
 .auth-form > label { display: flex; flex-direction: column; gap: 4px; }
-.new-project-form { display: flex; flex-direction: column; gap: 6px; }
-.new-project-form label { display: flex; flex-direction: column; gap: 4px; color: #a6a6a6; font-size: 11px; }
-.new-project-form textarea { min-height: 60px; padding: 4px 6px; color: #cfcfcf; font-size: 12px; line-height: 1.6; background: #202020; border: 1px solid #444444; border-radius: 5px; }
 .canvas-stage > .loading-state { position: absolute; inset: 0; z-index: 32; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -459,7 +427,6 @@ a { color: #b4d4ff; text-underline-offset: 3px; }
   .canvas-hint { display: none; bottom: 8px; left: 8px; }
   .mode-hint { bottom: 12px; max-width: calc(100% - 32px); padding: 4px 6px; font-size: 10px; white-space: normal; text-align: center; gap: 4px; }
   .dropdown { max-width: calc(100vw - 24px); padding: 2px; top: calc(100% + 4px); }
-  .project-menu { left: 6px; width: 270px; top: calc(100% + 4px); }
   .shape-menu { left: 94px; }
   .frame-preset-menu { left: 32px; width: 280px; }
   .comment-popover { width: 330px; }

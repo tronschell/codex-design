@@ -4,7 +4,11 @@ export const MAX_ASSET_BYTES = 32 * 1024 * 1024;
 export const MAX_ASSET_CHUNK_BYTES = 1024 * 1024;
 export const ASSET_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml', 'video/mp4', 'video/webm', 'video/quicktime'] as const;
 export type AssetMimeType = typeof ASSET_MIME_TYPES[number];
+export const COMMENT_IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
+export const MAX_COMMENT_IMAGES = 5;
+export const MAX_COMMENT_IMAGE_BYTES = 10 * 1024 * 1024;
 export interface AssetMetadata { ref: string; mimeType: AssetMimeType; byteLength: number; name: string }
+export interface CommentAttachment extends AssetMetadata { mimeType: typeof COMMENT_IMAGE_MIME_TYPES[number] }
 export interface AssetUpload { uploadId: string; offset: number; byteLength: number; asset?: AssetMetadata }
 export interface AssetUploadCancellation { uploadId: string; cancelled: boolean }
 export interface AssetChunk { ref: string; offset: number; byteLength: number; totalBytes: number; data: string }
@@ -16,6 +20,7 @@ export function projectAssetRefs(project: DesignProject): string[] {
   return [...new Set([
     ...project.pages.flatMap(page => page.nodes.flatMap(node => [node.media?.src, node.media?.poster].filter(isAssetRef))),
     ...project.designSystem.components.flatMap(component => component.nodes.flatMap(node => [node.media?.src, node.media?.poster].filter(isAssetRef))),
+    ...project.threads.flatMap(thread => thread.messages.flatMap(message => (message.attachments ?? []).map(attachment => attachment.ref))),
     ...project.boards.flatMap(board => (board.inspiration ?? []).map(item => item.assetRef).filter(isAssetRef)),
   ])];
 }

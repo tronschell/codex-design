@@ -261,6 +261,10 @@ export class AssetStore {
       if ((node.type === 'image' && !source.mimeType.startsWith('image/')) || (node.type === 'video' && !source.mimeType.startsWith('video/'))) throw new StoreError(400, 'invalid_asset_type', `Media for “${node.name}” must be a ${node.type} file.`);
       if (node.media.poster && !(await asset(node.media.poster)).mimeType.startsWith('image/')) throw new StoreError(400, 'invalid_asset_type', 'A video poster must reference an uploaded image.');
     }
+    for (const thread of project.threads) for (const message of thread.messages) for (const attachment of message.attachments ?? []) {
+      const saved = await asset(attachment.ref);
+      if (saved.mimeType !== attachment.mimeType || saved.byteLength !== attachment.byteLength) throw new StoreError(400, 'invalid_asset_type', `Comment attachment “${attachment.name}” does not match its uploaded image.`);
+    }
     for (const board of project.boards) for (const item of board.inspiration ?? []) if (!(await asset(item.assetRef)).mimeType.startsWith('image/')) throw new StoreError(400, 'invalid_asset_type', `Inspiration “${item.name}” must reference an uploaded image.`);
   }
 

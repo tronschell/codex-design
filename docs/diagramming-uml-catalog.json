@@ -1,0 +1,760 @@
+{
+  "schemaVersion": 1,
+  "name": "Codex Design UML diagram catalog",
+  "status": "design-handoff",
+  "notation": {
+    "name": "UML",
+    "version": "2.5.1",
+    "reference": "https://www.omg.org/spec/UML/2.5.1/About-UML"
+  },
+  "scope": {
+    "requestedDiagramTypes": 14,
+    "structural": 7,
+    "behavioral": 7,
+    "interactionSubsetOfBehavioral": 4,
+    "productionImplementation": "not-implemented-by-this-design-task"
+  },
+  "design": {
+    "projectId": "3e260fd8-2492-4468-9bc1-13b9cf5c308c",
+    "boardId": "2bac4a90-ae5f-4a4e-8962-e6d5ac1ebb04",
+    "catalogPageId": "v2-page-uml-catalog"
+  },
+  "commonContract": {
+    "connectionAnchors": "View routing handles; never implicitly UML Port elements.",
+    "semanticIdentity": "Stable semantic element IDs referenced by one or more native views; geometry remains on views.",
+    "history": "One atomic operation per committed gesture with revision checks and undo.",
+    "layoutPriorities": [
+      "semantic-and-pin-constraints",
+      "no-node-or-label-obstacles",
+      "reduce-crossings",
+      "reduce-bends-length-and-unnecessary-movement"
+    ],
+    "validationModes": {
+      "integrity": "block invalid references and ownership corruption",
+      "notation": "explain warnings and allow intentional incomplete sketches"
+    },
+    "interchange": "Declare construct-level coverage per adapter; preserve original input and report unsupported or lossy mappings."
+  },
+  "diagrams": [
+    {
+      "id": "uml.class",
+      "title": "Class diagram",
+      "family": "structural",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-class",
+      "designFrameId": "v2-screen-uml-class",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "class",
+        "interface",
+        "data-type",
+        "enumeration",
+        "association-class",
+        "attribute",
+        "operation"
+      ],
+      "relationshipKinds": [
+        "association",
+        "aggregation",
+        "composition",
+        "generalization",
+        "interface-realization",
+        "dependency"
+      ],
+      "inspectorGroups": [
+        "Classifier and stereotype",
+        "Attributes and operations",
+        "Visibility, type and default",
+        "Association roles, multiplicity and navigability"
+      ],
+      "layout": {
+        "strategy": "layered-classifiers",
+        "hardConstraints": [
+          "Keep compartments and member rows with their classifier.",
+          "Preserve containment, explicit relation ends and pinned views."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Association ends reference valid classifiers and stable member IDs.",
+        "Generalization must not create an inheritance cycle.",
+        "Composition ownership and multiplicities are checked; marker choice follows relationship kind."
+      ],
+      "interaction": "Add a member from the compartment; connect to a classifier or a specific eligible member."
+    },
+    {
+      "id": "uml.component",
+      "title": "Component diagram",
+      "family": "structural",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-component",
+      "designFrameId": "uml-screen-component",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "component",
+        "interface",
+        "port",
+        "provided-interface",
+        "required-interface"
+      ],
+      "relationshipKinds": [
+        "dependency",
+        "usage",
+        "interface-realization",
+        "assembly-connector",
+        "delegation-connector"
+      ],
+      "inspectorGroups": [
+        "Component identity",
+        "Provided and required interfaces",
+        "Port type and multiplicity",
+        "Connector kind"
+      ],
+      "layout": {
+        "strategy": "component-interfaces",
+        "hardConstraints": [
+          "Keep named interface glyphs and ports attached to their owning component.",
+          "Preserve assembly/delegation endpoints and component containment."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "A connector must reference actual compatible roles/ports.",
+        "Provided and required interface contracts are distinct.",
+        "Display markers are derived from dependency, realization or connector semantics."
+      ],
+      "interaction": "Offer explicit Add UML port and Provide/Require interface actions; routing handles do not create either."
+    },
+    {
+      "id": "uml.deployment",
+      "title": "Deployment diagram",
+      "family": "structural",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-deployment",
+      "designFrameId": "uml-screen-deployment",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "device",
+        "execution-environment",
+        "artifact",
+        "deployment-specification"
+      ],
+      "relationshipKinds": [
+        "deployment",
+        "manifestation",
+        "communication-path",
+        "dependency"
+      ],
+      "inspectorGroups": [
+        "Node and runtime type",
+        "Artifact identity and version",
+        "Deployment target",
+        "Protocol and deployment specification"
+      ],
+      "layout": {
+        "strategy": "nested-runtime",
+        "hardConstraints": [
+          "Preserve device/environment/artifact nesting.",
+          "Route communication paths between nodes; deployment relations retain their actual targets."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Deployment targets resolve to valid deployment targets in the model.",
+        "Manifestation and deployment remain different relationship kinds.",
+        "Nested environments cannot create ownership cycles."
+      ],
+      "interaction": "Dropping an artifact into a runtime proposes its deployment relation as one undoable action."
+    },
+    {
+      "id": "uml.object",
+      "title": "Object diagram",
+      "family": "structural",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-object",
+      "designFrameId": "uml-screen-object",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "instance-specification",
+        "slot",
+        "literal-value",
+        "instance-value",
+        "link"
+      ],
+      "relationshipKinds": [
+        "link",
+        "dependency"
+      ],
+      "inspectorGroups": [
+        "Instance name and classifiers",
+        "Slots and defining features",
+        "Values and referenced instances",
+        "Link ends"
+      ],
+      "layout": {
+        "strategy": "instance-links",
+        "hardConstraints": [
+          "Keep slot rows with their instance and preserve explicit link endpoints.",
+          "Never replace an instance view with its classifier during layout."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Slots refer to features of the instance's classifier(s).",
+        "Referenced instance values and link ends must resolve.",
+        "Instance labels are underlined; incomplete classifier data is an explainable warning."
+      ],
+      "interaction": "Choose a classifier before adding typed slots; autocomplete its features and permitted values."
+    },
+    {
+      "id": "uml.package",
+      "title": "Package diagram",
+      "family": "structural",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-package",
+      "designFrameId": "uml-screen-package",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "package",
+        "nested-package",
+        "model",
+        "packageable-element"
+      ],
+      "relationshipKinds": [
+        "package-import",
+        "element-import",
+        "package-merge",
+        "dependency"
+      ],
+      "inspectorGroups": [
+        "Namespace and ownership",
+        "Import visibility and aliases",
+        "Imported elements",
+        "Merge source and target"
+      ],
+      "layout": {
+        "strategy": "package-containment",
+        "hardConstraints": [
+          "Preserve namespace nesting and pinned package boundaries.",
+          "External dependency routes must avoid unrelated package bodies."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Ownership is acyclic.",
+        "Import, merge and ordinary dependency are stored separately.",
+        "Aliases and imported element references retain their targets after rename."
+      ],
+      "interaction": "Expand or collapse a package without dropping its cross-boundary references."
+    },
+    {
+      "id": "uml.profile",
+      "title": "Profile diagram",
+      "family": "structural",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-profile",
+      "designFrameId": "uml-screen-profile",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "profile",
+        "stereotype",
+        "metaclass-reference",
+        "stereotype-property",
+        "constraint",
+        "profile-application"
+      ],
+      "relationshipKinds": [
+        "extension",
+        "stereotype-generalization",
+        "profile-application"
+      ],
+      "inspectorGroups": [
+        "Referenced metamodel",
+        "Extended metaclass",
+        "Stereotype properties and defaults",
+        "Required extension and tagged values"
+      ],
+      "layout": {
+        "strategy": "profile-extensions",
+        "hardConstraints": [
+          "Keep stereotypes in their profile and metaclass references visibly distinct.",
+          "Extension arrows remain attached to the relevant stereotype and metaclass."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "An extension identifies the stereotype and metaclass it extends.",
+        "Applied tagged values conform to declared property types.",
+        "Required extension and profile application are explicit; no automatic metamodel mutation."
+      ],
+      "interaction": "Select a metaclass when extending; inspect applied stereotype values on the modeled element."
+    },
+    {
+      "id": "uml.composite-structure",
+      "title": "Composite structure diagram",
+      "family": "structural",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-composite",
+      "designFrameId": "uml-screen-composite",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "structured-classifier",
+        "part-property",
+        "port",
+        "collaboration",
+        "collaboration-use",
+        "provided-interface",
+        "required-interface"
+      ],
+      "relationshipKinds": [
+        "assembly-connector",
+        "delegation-connector",
+        "role-binding"
+      ],
+      "inspectorGroups": [
+        "Part name, type and multiplicity",
+        "Port type, direction and conjugation",
+        "Connector endpoints",
+        "Role bindings"
+      ],
+      "layout": {
+        "strategy": "parts-and-ports",
+        "hardConstraints": [
+          "Keep part and port ownership; boundary ports stay on their owning perimeter.",
+          "Arrange internal parts without moving them outside the structured classifier."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Each connector end refers to an eligible role or port.",
+        "Delegation and assembly are separate kinds with compatible endpoints.",
+        "Parts render as properties, not underlined instance specifications."
+      ],
+      "interaction": "Create semantic square ports explicitly; moving one updates attached internal and external connectors."
+    },
+    {
+      "id": "uml.use-case",
+      "title": "Use case diagram",
+      "family": "behavioral",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-use-case",
+      "designFrameId": "uml-screen-use-case",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "actor",
+        "use-case",
+        "subject-boundary",
+        "extension-point"
+      ],
+      "relationshipKinds": [
+        "association",
+        "include",
+        "extend",
+        "generalization"
+      ],
+      "inspectorGroups": [
+        "Actor and subject",
+        "Goal and description",
+        "Extension points",
+        "Extension condition"
+      ],
+      "layout": {
+        "strategy": "actors-and-goals",
+        "hardConstraints": [
+          "Keep actors outside the subject boundary and use cases inside the selected subject.",
+          "Preserve include/extend direction and existing pins."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Include points from the including use case to the included use case.",
+        "Extend points from the extending use case to the extended use case.",
+        "Generalization and extension-point references retain valid targets."
+      ],
+      "interaction": "Add include/extend from the relationship menu, with source/target roles shown in plain language."
+    },
+    {
+      "id": "uml.activity",
+      "title": "Activity diagram",
+      "family": "behavioral",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-activity",
+      "designFrameId": "uml-screen-activity",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "action",
+        "object-node",
+        "input-pin",
+        "output-pin",
+        "activity-parameter",
+        "initial",
+        "activity-final",
+        "flow-final",
+        "decision",
+        "merge",
+        "fork",
+        "join",
+        "partition",
+        "structured-activity-node",
+        "interruptible-region",
+        "expansion-region"
+      ],
+      "relationshipKinds": [
+        "control-flow",
+        "object-flow",
+        "exception-handler"
+      ],
+      "inspectorGroups": [
+        "Action behavior",
+        "Inputs and outputs",
+        "Guard and object type",
+        "Partition and region",
+        "Join specification"
+      ],
+      "layout": {
+        "strategy": "partitioned-flow",
+        "hardConstraints": [
+          "Preserve partitions, structured scopes and explicit branch guards.",
+          "Keep fork/join synchronization and distinguish flow-final from activity-final."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Control and object flows have appropriate endpoint kinds.",
+        "Pins and object-flow types are checked where types are known.",
+        "Decision guards, join specifications and interrupting edges remain attached to their semantic elements."
+      ],
+      "interaction": "Quick insert offers a decision, fork, merge or action with appropriate endpoints; it does not invent branch conditions."
+    },
+    {
+      "id": "uml.state-machine",
+      "title": "State machine diagram",
+      "family": "behavioral",
+      "subgroup": null,
+      "designPageId": "v2-page-uml-state",
+      "designFrameId": "uml-screen-state",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "state",
+        "composite-state",
+        "submachine-state",
+        "region",
+        "initial",
+        "choice",
+        "junction",
+        "fork",
+        "join",
+        "shallow-history",
+        "deep-history",
+        "entry-point",
+        "exit-point",
+        "terminate",
+        "final-state"
+      ],
+      "relationshipKinds": [
+        "transition",
+        "internal-transition"
+      ],
+      "inspectorGroups": [
+        "Trigger, guard and effect",
+        "Entry/do/exit behaviors",
+        "Regions and submachine reference",
+        "History and connection points"
+      ],
+      "layout": {
+        "strategy": "region-state-machine",
+        "hardConstraints": [
+          "Preserve region ownership, initial/history nodes and transition direction.",
+          "Keep internal transitions internal; route self-transitions without moving them to another state."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Transitions resolve source/target states or valid pseudostates.",
+        "Pseudostate constraints and region ownership are checked by kind.",
+        "Trigger, guard and effect remain independent fields."
+      ],
+      "interaction": "Edit event [guard] / effect in separate fields; render the compact notation on the transition."
+    },
+    {
+      "id": "uml.sequence",
+      "title": "Sequence diagram",
+      "family": "behavioral",
+      "subgroup": "interaction",
+      "designPageId": "v2-page-uml-sequence",
+      "designFrameId": "v2-screen-uml-sequence",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "interaction",
+        "lifeline",
+        "execution-specification",
+        "message-occurrence",
+        "combined-fragment",
+        "interaction-use",
+        "state-invariant",
+        "gate",
+        "creation-occurrence",
+        "destruction-occurrence"
+      ],
+      "relationshipKinds": [
+        "synchronous-message",
+        "asynchronous-message",
+        "reply-message",
+        "create-message",
+        "delete-message",
+        "general-ordering"
+      ],
+      "inspectorGroups": [
+        "Lifeline role and classifier",
+        "Message kind and arguments",
+        "Occurrence order",
+        "Fragment operator and operand guards",
+        "Execution and gate"
+      ],
+      "layout": {
+        "strategy": "ordered-lifelines",
+        "hardConstraints": [
+          "Preserve occurrence order, send/receive dependencies and fragment scope.",
+          "Move lifelines horizontally without reordering messages; explicit Reorder changes the model.",
+          "Creation/destruction bound the visible lifeline."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Message occurrences resolve to valid lifelines/gates and remain ordered.",
+        "Combined-fragment operands and guards are explicit.",
+        "Supported operators are declared per stencil: alt, opt, loop, par, break, critical, neg, assert, strict, seq, ignore and consider."
+      ],
+      "interaction": "Insert a message between occurrences to create vertical room; message order is not inferred from arbitrary pixel positions."
+    },
+    {
+      "id": "uml.communication",
+      "title": "Communication diagram",
+      "family": "behavioral",
+      "subgroup": "interaction",
+      "designPageId": "v2-page-uml-communication",
+      "designFrameId": "uml-screen-communication",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "interaction",
+        "lifeline-role",
+        "connector",
+        "message"
+      ],
+      "relationshipKinds": [
+        "connector",
+        "synchronous-message",
+        "asynchronous-message",
+        "reply-message"
+      ],
+      "inspectorGroups": [
+        "Participant role and type",
+        "Connector ends",
+        "Message sequence expression",
+        "Guard, iteration and arguments"
+      ],
+      "layout": {
+        "strategy": "numbered-communication",
+        "hardConstraints": [
+          "Preserve explicit message sequence expressions and nesting while moving participants.",
+          "Keep message arrows and labels on the appropriate connector."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Each message has valid sender/receiver roles and a connector.",
+        "Sequence expressions such as 1, 1.1 and 1.2 remain explicit model data.",
+        "Changing layout never silently renumbers messages."
+      ],
+      "interaction": "Select a link to add a message; an ordered message panel offers deliberate reorder/renumber with preview."
+    },
+    {
+      "id": "uml.interaction-overview",
+      "title": "Interaction overview diagram",
+      "family": "behavioral",
+      "subgroup": "interaction",
+      "designPageId": "v2-page-uml-interaction-overview",
+      "designFrameId": "uml-screen-interaction-overview",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "interaction",
+        "interaction-use",
+        "initial",
+        "final",
+        "decision",
+        "merge",
+        "fork",
+        "join"
+      ],
+      "relationshipKinds": [
+        "control-flow",
+        "interaction-reference"
+      ],
+      "inspectorGroups": [
+        "Referenced interaction and arguments",
+        "Guard",
+        "Branch and merge structure",
+        "Fork/join scope"
+      ],
+      "layout": {
+        "strategy": "interaction-control-flow",
+        "hardConstraints": [
+          "Preserve interaction-use targets and control-flow direction.",
+          "Keep decision/merge and fork/join structures properly nested."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "Every ref resolves to an interaction or an explicitly unresolved reference.",
+        "Control-flow endpoints and paired branching/synchronization structures are checked.",
+        "Overview nodes remain interaction references or inline interactions, not ordinary action substitutes."
+      ],
+      "interaction": "Open a referenced sequence or other interaction in context; navigation preserves the overview selection."
+    },
+    {
+      "id": "uml.timing",
+      "title": "Timing diagram",
+      "family": "behavioral",
+      "subgroup": "interaction",
+      "designPageId": "v2-page-uml-timing",
+      "designFrameId": "uml-screen-timing",
+      "support": {
+        "concept": "dedicated-native-example",
+        "structuredEditing": "planned",
+        "notationValidation": "planned",
+        "layoutAdapter": "planned",
+        "nativeSemanticRoundTrip": "planned",
+        "textImportExport": "coverage-not-yet-declared"
+      },
+      "elementKinds": [
+        "lifeline-track",
+        "state-condition",
+        "value-lifeline",
+        "state-change",
+        "time-observation",
+        "duration-observation",
+        "time-constraint",
+        "duration-constraint",
+        "message"
+      ],
+      "relationshipKinds": [
+        "message",
+        "time-constraint",
+        "duration-constraint"
+      ],
+      "inspectorGroups": [
+        "Time unit and axis",
+        "States and values",
+        "Occurrence time or symbolic expression",
+        "Duration bounds",
+        "Sender and receiver"
+      ],
+      "layout": {
+        "strategy": "fixed-time-tracks",
+        "hardConstraints": [
+          "Preserve timestamps, symbolic ordering, shared time scale and duration constraints.",
+          "Only track spacing, label positions and routing change in Auto place.",
+          "Dragging a timed event requires an explicit time-edit gesture."
+        ],
+        "crossingReduction": "subject-to-semantic-and-pin-constraints"
+      },
+      "validationRequirements": [
+        "All numeric times carry units and convert consistently.",
+        "Duration endpoints and observations resolve to valid occurrences.",
+        "Unknown times remain symbolic; arranging cannot invent measured values."
+      ],
+      "interaction": "Use a shared ruler and time Inspector; changing zoom never changes stored time or duration."
+    }
+  ]
+}

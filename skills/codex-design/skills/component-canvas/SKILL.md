@@ -6,13 +6,18 @@ license: MIT
 
 # Component canvas for Codex Design
 
+## Default React source workflow
+
+For application components, import their actual React module graph through `update_react_files` and declare exact browser-compatible npm dependencies. Save component specimens with `upsert_component` using a root code/frame node bound to `{react:{entry,exportName,props}}`. Shared source modules remain project-wide; native component releases pin specimen bindings, props and geometry. Preserve application styling, providers and behavior, using explicit preview adapters for backend/server-only requirements. Shadcn is optional; reuse any suitable React ecosystem components. The native reconstruction instructions below apply only when the user explicitly asks for native layers, diagrams or wireframes. Do not replace application controls with approximate shapes to satisfy those instructions. Register reusable inner components while authoring screens, using components on canvas_write_react or upsert_component. Bind each to its defining JSX module, with realistic props and provider adapters. Registered components can be selected inside screens or from Components to open a dedicated preview/source editor. DOM interiors remain source-edited. Read import-app for the full current workflow.
+
+
 Adapted and extended from [component-canvas](https://github.com/ibelick/ui-skills/blob/main/skills/component-canvas/SKILL.md) by [Julien Thibeaut (ibelick)](https://github.com/ibelick), in [ui-skills](https://github.com/ibelick/ui-skills). The upstream [MIT license](LICENSE) is retained. Its component-preservation, variant-comparison, safe-preview and coverage principles guide this workflow. The extension uses the existing Codex Design library instead of adding a canvas route to the target application.
 
 ## Establish the app and scope
 
 Use the project and application repository named in the conversation or saved request. Read the current project, design system, existing component definitions and matching pending request. Ask for an application location only when it cannot be established; the editor plugin repository is not automatically the target app. An explicit “all components” request covers all public UI families in that authorized scope.
 
-Use `canvas_get_pending_design_system_requests` to read a queued `mode:"components"` request. Use the matching project ID with `canvas_open_canvas` and existing context/edit tools. Natural-language requests use this same workflow without requiring a queued request or another permission step.
+Use `canvas_get_pending_design_system_requests` to read a queued `mode:"components"` request. Use the matching project ID with `canvas_prepare_canvas` and existing context/edit tools. Reuse its existing pane; call `canvas_open_canvas` only for `action:open`. Natural-language requests use this same workflow without requiring a queued request or another permission step.
 
 ## Discover actual components
 
@@ -41,9 +46,9 @@ upsert_component {
 
 The server stamps the saved revision. Updating a definition retains older release history and does not update placed instances. Each definition needs one root at local `(0, 0)` with `parentId:null`, unique node IDs and a connected descendant tree. Nested linked instances are unsupported. No staging pages or placed screen objects are needed; the library immediately displays `designSystem.components`.
 
-Prefer editable native nodes where they faithfully represent the component. For source-backed components retain original HTML/JSX as passive source and include a faithful rendered specimen. Compile Tailwind utilities into the preview CSS when needed; the sandbox cannot run a Tailwind browser script or arbitrary application imports. Persist real media as uploaded asset references.
+Reconstruct shared controls and compositions as native container/text/shape/media subtrees, preserving labels and meaningful inner elements as separately selectable nodes. Use passive source only for isolated visuals that cannot be faithfully represented natively, or an explicitly requested source preview; retain its HTML/JSX and document that its inner elements are not canvas layers. A single code node containing an entire card, navigation region or screen must not substitute for editable component anatomy. Compile Tailwind utilities into preview CSS when needed; the sandbox cannot run a Tailwind browser script or arbitrary application imports. Persist real media as uploaded asset references.
 
-Record the source path, export, variant/state, public prop notes and limitations in the definition's description. Merge source evidence and a Component inventory section into the existing design-system documentation without discarding curated content. The project supports 200 definitions and 5000 nodes per definition; report omissions caused by limits.
+Record the source path, export, variant/state, public prop notes and limitations in the definition's description. Merge source evidence and a Component inventory section into the existing design-system documentation without discarding curated content. If DESIGN.md is absent, derive missing component rules and semantic tokens from the inspected app and save them in the dedicated Design system tab with update_design_system/upsert_design_token; its generated DESIGN.md does not need a documentation frame or repository-file change. The project supports 200 definitions and 5000 nodes per definition; report omissions caused by limits. If the user also requested screens or full-project population, continue with [Import an existing application](../import-app/SKILL.md); component-only discovery does not create screen frames.
 
 Preserve saved node `notes`. Record implementation intent the passive specimen cannot express—such as native materials, behavior and preferred libraries—in `notes` on the relevant root or child (up to 5,000 characters). Root notes describe the reusable component; child notes remain scoped to that child. These notes follow releases and instance overrides, are readable in focused context and ship in implementation handoffs. Distinguish observed application requirements from proposals.
 

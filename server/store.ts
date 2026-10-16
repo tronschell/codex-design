@@ -1,12 +1,15 @@
+import { portableStateNodes } from '../shared/application-state.ts';
+import { remapFeatureReferences } from '../shared/diagrams.ts';
+import { autoArrange } from './diagram-layout.ts';
+import { reactNodes, reactExportKey, updateReactFiles } from '../shared/react-project.ts';
 import { randomUUID } from 'node:crypto';
 import { watch, type BigIntStats, type FSWatcher } from 'node:fs';
 import { lstat, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
-import { createDemoProject } from '../shared/seed.ts';
 import { defaultTokens, type BindableStyleProperty, type CanvasSelection, type DesignNode, type DesignProject, type LibraryScope, type LibraryVersion, type NativeComponentDefinition, type Operation, type ProjectSummary, type ProjectVersion, type ProjectVersionSummary } from '../shared/types.ts';
-import { canvasSelectionSchema, createProjectSchema, idSchema, libraryVersionRequestSchema, MAX_DOCUMENT_BYTES, MAX_INPUT_BYTES, documentLimitLabel, operationsSchema, projectSchema, projectImportSchema, revisionSchema, validateProjectUpdate } from '../shared/validation.ts';
+import { canvasSelectionSchema, createProjectSchema, deleteProjectSchema, idSchema, libraryVersionRequestSchema, MAX_DOCUMENT_BYTES, MAX_INPUT_BYTES, documentLimitLabel, operationsSchema, projectSchema, projectImportSchema, revisionSchema, validateProjectUpdate } from '../shared/validation.ts';
 import { ProjectHistory, StoreError } from './history.ts';
 import type { ProjectDelta } from '../shared/project-delta.ts';
 import { AssetStore } from './assets.ts';
@@ -49,17 +52,21 @@ function workingCopy(previous: DesignProject, operations: Operation[]): DesignPr
 }
 
 function touchGeneration(project: DesignProject, operation: Operation, now: string) {
+  if (operation.type === 'update_react_files') {
+    for (const node of reactNodes(project)) if (node.generation?.status === 'building') node.generation.updatedAt = now;
+    return;
+  }
   if (operation.type !== 'create_node' && operation.type !== 'update_node' && operation.type !== 'delete_node' && operation.type !== 'snap_node' && operation.type !== 'replace_page') return;
   const page = project.pages.find(item => item.id === operation.pageId);
-  if (!page?.nodes.some(node => node.type === 'frame' && node.generation?.status === 'building')) return;
+  if (!page?.nodes.some(node => node.generation?.status === 'building')) return;
   const byId = new Map(page.nodes.map(node => [node.id, node]));
-  const ids = operation.type === 'create_node' ? [operation.node.id] : operation.type === 'replace_page' ? page.nodes.filter(node => node.type === 'frame').map(node => node.id) : [operation.nodeId];
+  const ids = operation.type === 'create_node' ? [operation.node.id] : operation.type === 'replace_page' ? page.nodes.filter(node => node.generation?.status === 'building').map(node => node.id) : [operation.nodeId];
   for (const id of ids) {
     let node = byId.get(id);
     const seen = new Set<string>();
     while (node && !seen.has(node.id)) {
       seen.add(node.id);
-      if (node.type === 'frame' && node.generation?.status === 'building') node.generation.updatedAt = now;
+      if (node.generation?.status === 'building') node.generation.updatedAt = now;
       node = node.parentId ? byId.get(node.parentId) : undefined;
     }
   }
@@ -90,6 +97,7 @@ function changeLabel(project: DesignProject, operation: Operation): string {
     case 'add_message': return `Replied on “${anchor}”`;
     case 'update_thread': return `${operation.patch.status === 'resolved' ? 'Resolved conversation' : operation.patch.queued ? 'Queued conversation' : 'Updated conversation'} on “${anchor}”`;
     case 'set_tokens': return 'Updated project styles';
+    case 'update_react_files': return 'Updated React application source';
     case 'update_design_system': return 'Updated project design system';
     case 'apply_design_system_document': return 'Applied project DESIGN.md';
     case 'update_design_token': return `Updated design token “${project.designSystem.tokens.find(token => token.id === operation.tokenId)?.name ?? operation.tokenId}”`;
@@ -139,9 +147,10 @@ function captureDefinition(nodes: DesignNode[], nodeId: string, definition: Pick
     delete node.componentInstance; delete node.generation;
     if (original.id === nodeId) { node.x = 0; node.y = 0; }
     if (node.href?.startsWith('#') && ids.has(node.href.slice(1))) node.href = `#${ids.get(node.href.slice(1))}`;
+    remapFeatureReferences(node, ids);
     return node;
   });
-  return { ...definition, rootNodeId: ids.get(nodeId)!, nodes: snapshots };
+  return { ...definition, rootNodeId: ids.get(nodeId)!, nodes: portableStateNodes(snapshots,nodes) };
 }
 
 function boardContents(project: DesignProject, boardId: string): string {
@@ -165,15 +174,6 @@ export class ProjectStore {
   async init(): Promise<void> {
     this.initializing ??= (async () => {
       await mkdir(this.dataDir, { recursive: true });
-      await this.withWriteLock(async () => {
-        const marker = path.join(this.dataDir, '.initialized');
-        try { await stat(marker); return; } catch (error) { if (!isMissing(error)) throw error; }
-        if ((await this.projectIds()).length === 0) {
-          const project = parse(projectSchema, createDemoProject(randomUUID()), 'invalid_project');
-          await this.history.save(project, `Created “${project.name}”`);
-        }
-        await writeFile(marker, '1\n', { flag: 'wx', mode: 0o600 });
-      });
     })();
     return this.initializing;
   }
@@ -183,8 +183,11 @@ export class ProjectStore {
     const ids = await this.projectIds(), present = new Set(ids);
     for (const id of this.summaries.keys()) if (!present.has(id)) this.summaries.delete(id);
     if (this.cachedProject && !present.has(this.cachedProject.id)) this.cachedProject = undefined;
-    const projects = await Promise.all(ids.map((id) => this.read(id, true)));
-    return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    const projects = await Promise.all(ids.map(async id => {
+      try { return await this.read(id, true); }
+      catch (error) { if (error instanceof StoreError && error.status === 404) return null; throw error; }
+    }));
+    return projects.filter((project): project is ProjectSummary => project !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   }
 
   async get(id: string): Promise<DesignProject> {
@@ -330,14 +333,14 @@ export class ProjectStore {
     });
   }
 
-  async create(name: string, template: 'blank' | 'demo' = 'blank'): Promise<DesignProject> {
-    const input = parse(createProjectSchema, { name, template });
+  async create(name: string): Promise<DesignProject> {
+    const input = parse(createProjectSchema, { name });
     await this.init();
     return this.withWriteLock(async () => {
       const id = randomUUID();
       const boardId = `board_${randomUUID()}`;
       const now = new Date().toISOString();
-      const project = parse(projectSchema, input.template === 'demo' ? createDemoProject(id, input.name) : {
+      const project = parse(projectSchema, {
         id, name: input.name, description: '', revision: 0,
         boards: [{ id: boardId, name: 'Main board', createdAt: now, updatedAt: now }],
         pages: [{ id: `page_${randomUUID()}`, boardId, name: 'Page 1', nodes: [], viewport: { x: 0, y: 0, zoom: 1 } }],
@@ -346,6 +349,24 @@ export class ProjectStore {
       await this.history.save(project, `Created “${project.name}”`);
       this.emit(project.id);
       return project;
+    });
+  }
+
+  async deleteProject(input: unknown): Promise<{ projectId: string; deleted: true }> {
+    const { projectId, expectedRevision, expectedName } = parse(deleteProjectSchema, input);
+    await this.init();
+    return this.withWriteLock(async () => {
+      const project = await this.read(projectId);
+      this.checkRevision(project, expectedRevision);
+      if (project.name !== expectedName) throw new StoreError(409, 'revision_conflict', 'The project name changed. Review it and confirm deletion again.');
+      const directory = path.join(this.dataDir, '.deleted-projects');
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      if (!(await lstat(directory)).isDirectory()) throw new StoreError(500, 'invalid_recovery_store', 'Project recovery requires a regular directory.');
+      await rename(path.join(this.dataDir, `${projectId}.json`), path.join(directory, `${projectId}.json`));
+      this.summaries.delete(projectId);
+      if (this.cachedProject?.id === projectId) this.cachedProject = undefined;
+      this.emit(projectId);
+      return { projectId, deleted: true };
     });
   }
 
@@ -368,6 +389,13 @@ export class ProjectStore {
         touchGeneration(project, operation, now);
         this.apply(project, operation, now, touchedBoards);
         touchGeneration(project, operation, now);
+      }
+      await autoArrange(project, previous, changes);
+      const app = project.designSystem.react;
+      if (app && (changes.some(operation => operation.type === 'update_react_files') || reactNodes(project).some(node => !app.exports.includes(reactExportKey(node.react!))))) {
+        const { compileReactProject } = await import(new URL('../dist/react-compiler.mjs', import.meta.url).href) as typeof import('./react-compiler.ts');
+        try { project.designSystem.react = await compileReactProject(app, reactNodes(project).map(node => node.react!), path.join(this.dataDir, '.react-packages')); }
+        catch (error) { throw new StoreError(400, 'invalid_react_source', error instanceof Error ? error.message : 'React compilation failed.'); }
       }
       for (const board of project.boards) if (touchedBoards.has(board.id)) board.updatedAt = now;
       project.revision += 1;
@@ -718,6 +746,7 @@ export class ProjectStore {
         }
         const styles = { ...node.styles, ...operation.patch.styles };
         if ((operation.patch.source !== undefined && operation.patch.jsx === undefined) || (operation.patch.type !== undefined && operation.patch.type !== 'code')) delete node.jsx;
+        if ((operation.patch.source !== undefined && operation.patch.react === undefined) || (operation.patch.type !== undefined && !['frame', 'code'].includes(operation.patch.type))) delete node.react;
         Object.assign(node, operation.patch, { styles });
         normalizeNodeData(node);
         recordComponentOverrides(target.nodes, before, node);
@@ -758,6 +787,7 @@ export class ProjectStore {
           deleted.add(id);
           pending.push(...(children.get(id) ?? []));
         }
+        for (const node of target.nodes) if (node.diagramEdge && (deleted.has(node.diagramEdge.from.nodeId) || deleted.has(node.diagramEdge.to.nodeId))) deleted.add(node.id);
         target.nodes = target.nodes.filter((item) => !deleted.has(item.id));
         project.threads = project.threads.filter((item) => item.pageId !== operation.pageId || item.nodeId === null || !deleted.has(item.nodeId));
         break;
@@ -786,6 +816,7 @@ export class ProjectStore {
         }
         break;
       }
+      case 'update_react_files': project.designSystem.react = updateReactFiles(project.designSystem.react, operation.files, operation.dependencies); break;
       case 'update_design_system': Object.assign(project.designSystem, operation.patch); break;
       case 'apply_design_system_document': {
         let next: ReturnType<typeof parseDesignSystemDocument>;

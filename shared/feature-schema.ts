@@ -1,0 +1,26 @@
+import { z } from 'zod';
+import { safeColor } from './effects';
+import { DIAGRAM_KINDS, RELATION_KINDS } from './diagram-types';
+import type { StateCondition } from './application-state-types';
+const id=z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/), name=z.string().trim().min(1).max(160);
+const coord=z.number().finite().min(-10_000_000).max(10_000_000), size=z.number().finite().min(8).max(1_000_000);
+const color=z.string().max(500).refine(safeColor,'Use a safe color');
+const value=z.union([z.string().max(2000),z.boolean(),z.number().finite().min(-1e9).max(1e9)]);
+export const stateValuesSchema=z.record(id,value).refine(v=>Object.keys(v).length<=32,'At most 32 state inputs');
+const conditionAt=(depth:number):z.ZodType<StateCondition>=>z.union([
+ z.object({key:id,eq:value}).strict(),z.object({key:id,in:z.array(value).min(1).max(32)}).strict(),
+ ...(depth<5?[z.object({all:z.array(z.lazy(()=>conditionAt(depth+1))).min(1).max(8)}).strict(),z.object({any:z.array(z.lazy(()=>conditionAt(depth+1))).min(1).max(8)}).strict()]:[])
+] as [z.ZodTypeAny,z.ZodTypeAny,...z.ZodTypeAny[]]) as z.ZodType<StateCondition>;
+export const stateConditionSchema=conditionAt(0);
+export const stateScenarioSchema=z.object({id,name,values:stateValuesSchema}).strict();
+export const stateContextSchema=z.object({name,variables:z.array(z.object({id,name,type:z.enum(['enum','boolean','number','string']),default:value,options:z.array(z.string().min(1).max(160)).min(1).max(32).optional(),min:z.number().finite().optional(),max:z.number().finite().optional()}).strict()).min(1).max(32),scenarios:z.array(stateScenarioSchema).max(100),constraints:z.array(z.object({id,message:z.string().min(1).max(500),forbidden:stateConditionSchema}).strict()).max(32).optional()}).strict();
+export const stateBindingSchema=z.object({contextNodeId:id,inputs:stateValuesSchema.optional()}).strict();
+export const statePatchSchema=z.object({content:z.string().max(100000).optional(),name:name.optional(),hidden:z.boolean().optional(),x:coord.optional(),y:coord.optional(),width:size.optional(),height:size.optional(),styles:z.object({fill:color.optional(),color:color.optional(),borderColor:color.optional(),opacity:z.number().min(0).max(1).optional(),fontSize:z.number().min(1).max(1024).optional(),fontWeight:z.number().int().min(1).max(1000).optional(),radius:z.number().min(0).max(100000).optional()}).strict().optional()}).strict().refine(v=>Object.keys(v).length>0,'Set at least one state property');
+export const stateRuleSchema=z.object({id,name,enabled:z.boolean(),priority:z.number().int().min(-1000).max(1000),when:stateConditionSchema,effects:z.array(z.object({targetNodeId:id,set:statePatchSchema}).strict()).min(1).max(200)}).strict();
+export const journeySchema=z.object({targetNodeId:id,label:z.string().max(160).optional(),when:stateConditionSchema.optional(),set:stateValuesSchema.optional()}).strict();
+export const diagramConfigSchema=z.object({kind:z.enum(DIAGRAM_KINDS),autoPlace:z.boolean(),direction:z.enum(['RIGHT','DOWN']),spacing:z.enum(['comfortable','compact'])}).strict();
+export const diagramElementSchema=z.object({kind:id,pinned:z.boolean().optional(),subtitle:z.string().max(2000).optional(),stereotype:z.string().max(160).optional(),rows:z.array(z.string().max(2000)).max(100).optional(),operations:z.array(z.string().max(2000)).max(100).optional(),start:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),end:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),lane:z.string().max(160).optional(),order:z.number().finite().min(0).max(100000).optional(),color:color.optional()}).strict();
+export const diagramPortSchema=z.enum(['auto','n25','n50','n75','e25','e50','e75','s25','s50','s75','w25','w50','w75']);
+export const diagramEndpointSchema=z.object({nodeId:id,port:diagramPortSchema}).strict();
+export const diagramEdgeSchema=z.object({from:diagramEndpointSchema,to:diagramEndpointSchema,kind:z.enum(RELATION_KINDS as [typeof RELATION_KINDS[number],...typeof RELATION_KINDS[number][]]),label:z.string().max(2000).optional(),startLabel:z.string().max(160).optional(),endLabel:z.string().max(160).optional(),route:z.enum(['orthogonal','straight','curved']),waypoints:z.array(z.object({x:coord,y:coord}).strict()).max(100).optional(),locked:z.boolean().optional(),sequence:z.number().int().min(1).max(10000).optional()}).strict();
+export const featureNodeShape={diagram:diagramConfigSchema.optional(),diagramElement:diagramElementSchema.optional(),diagramEdge:diagramEdgeSchema.optional(),applicationState:stateContextSchema.optional(),stateBinding:stateBindingSchema.optional(),stateRules:z.array(stateRuleSchema).max(200).optional(),journey:journeySchema.optional()};

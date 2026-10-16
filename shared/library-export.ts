@@ -1,3 +1,5 @@
+import { portableStateNodes } from './application-state';
+import { reactApplicationFiles } from './react-preview';
 import type { DesignProject } from './types.js';
 import { designSystemMarkdown, tokenCssVariables } from './design-system.js';
 import { exportTargetHtml, exportTargetReact } from './export-formats.js';
@@ -12,7 +14,7 @@ export function libraryProject(project: DesignProject, componentId?: string): De
   const board = project.boards[0], page = project.pages[0];
   return {
     ...project, name: system.name, description: system.description,
-    designSystem: { ...system, components },
+    designSystem: { ...system, components: components.map(component => ({...component,nodes:portableStateNodes(component.nodes,project.pages.flatMap(page=>page.nodes))})) },
     boards: [{ id: board.id, name: 'Main', createdAt: board.createdAt, updatedAt: board.updatedAt }],
     pages: [{ id: page.id, boardId: board.id, name: 'Canvas', nodes: [], viewport: { x: 90, y: 130, zoom: 1 } }], threads: [],
   };
@@ -28,6 +30,7 @@ const title = (value: string) => value.replace(/[\r\n]/g, ' ');
 export function exportLibrary(project: DesignProject, options: ExportOptions = {}, componentId?: string): { project: DesignProject; files: Record<string, string> } {
   const portable = libraryProject(project, componentId), system = portable.designSystem;
   const files: Record<string, string> = {
+    ...reactApplicationFiles(system, system.components.flatMap(component => component.nodes.flatMap(node => node.react ? [node.react] : []))),
     'design.json': JSON.stringify(portable, null, 2),
     'codex-design.library.json': JSON.stringify({ format: 'codex-design-library', version: 1, project: portable }),
     'DESIGN.md': designSystemMarkdown(system), 'tokens.css': tokenCssVariables(system), 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(portable),
@@ -47,7 +50,7 @@ export function exportLibrary(project: DesignProject, options: ExportOptions = {
     const target = { scope: 'selection' as const, pageId: page.id, nodeIds: [definition.rootNodeId] };
     const assetUrls = Object.fromEntries(Object.entries(options.assetUrls ?? {}).map(([ref, path]) => [ref, /^(?:[a-z]+:|\/)/i.test(path) ? path : `../../${path}`]));
     const generated = exportTargetReact(context, target, { ...options, assetUrls });
-    let jsx = generated.jsx.replace("import './design.css';", "import React from 'react';").replace('export default function ExportedDesign()', `export function ${name}()`).replace(/^    <main/m, '    <div').replace(/^    <\/main>/m, '    </div>').replace('className="exported-design"', `className="${cssClass}"`);
+    let jsx = generated.jsx.replaceAll('./application/', '../../application/').replace("import './design.css';", "import React from 'react';").replace('export default function ExportedDesign()', `export function ${name}()`).replace(/^    <main/m, '    <div').replace(/^    <\/main>/m, '    </div>').replace('className="exported-design"', `className="${cssClass}"`);
     for (const path of Object.values(assetUrls)) if (!/^(?:[a-z]+:|\/)/i.test(path)) for (const attr of ['src', 'poster']) jsx = jsx.replaceAll(`${attr}={${JSON.stringify(path)}}`, `${attr}={new URL(${JSON.stringify(path)}, import.meta.url).href}`);
     const css = generated.css.slice(tokenCssVariables(system).length).trimStart().replace(/^\.exported-design(?=\s*\{)/m, `.${cssClass}`).replace(/^\.cd-/gm, `.${cssClass} .cd-`);
     const usage = `import { ${name} } from './${directory}/${name}.jsx';\n\n<${name} />`;
@@ -83,6 +86,8 @@ export function exportLibrary(project: DesignProject, options: ExportOptions = {
 export function libraryReferenceFiles(project: DesignProject, options: ExportOptions = {}): Record<string, string> {
   const { files } = exportLibrary(project, options);
   delete files['design.json'];
+  // The screen/source export owns its application entry and saved screen props.
+  for (const path of Object.keys(files)) if (path.startsWith('application/')) delete files[path];
   files['COMPONENT_NOTES.md'] = files['IMPLEMENTATION_NOTES.md']; delete files['IMPLEMENTATION_NOTES.md'];
   files['LIBRARY.md'] = files['README.md']; delete files['README.md'];
   return files;

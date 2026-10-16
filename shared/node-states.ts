@@ -25,6 +25,7 @@ export function applyNodeState(node: DesignNode, state: NodeInteractionState): D
 // Drops state keys a layer type never renders, empty states and a live flag on non-code layers, so saved data matches what exports emit.
 // Mutates only the node's own fields; styles and states are replaced, never edited, because they may be shared with the previous revision.
 export function normalizeNodeData(node: DesignNode): DesignNode {
+  if (node.react === null) delete node.react;
   if (node.live !== undefined && (!node.live || node.type !== 'code')) delete node.live;
   const states = node.styles.states;
   if (!states) return node;

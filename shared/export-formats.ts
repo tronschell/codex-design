@@ -1,3 +1,5 @@
+import { portableStateNodes } from './application-state';
+import { reactApplicationFiles } from './react-preview';
 import type { DesignNode, DesignProject } from './types.js';
 import { exportMapPageMarkup, exportMediaUrl, exportNodeCode, exportPageHtml, inlineCss, nodeCss, nodeStateRules, nodeLinkStyle, projectForBoard, resolvedNodes, LIVE_CODE_SANDBOX, safeCodeDocument, textListStyle, vectorDataUrl, type ExportOptions } from './export.js';
 import { shaderRuntimeOptions, shaderRuntimeSource } from './shaders.js';
@@ -63,8 +65,16 @@ export function exportTargetProject(project: DesignProject, target: ExportTarget
     const { componentInstance: _instance, ...detached } = node;
     return detached;
   });
+  const resolved = new Map(resolvedNodes(page.nodes,project.designSystem).map(node=>[node.id,node]));
+  nodes = portableStateNodes(nodes.map(node=>{
+    if(node.diagramEdge && (!nodeIds.has(node.diagramEdge.from.nodeId)||!nodeIds.has(node.diagramEdge.to.nodeId))){
+      const frozen={...node,...resolved.get(node.id)};delete frozen.diagramEdge;return frozen;
+    }
+    return node;
+  }),project.pages.flatMap(page=>page.nodes));
   return {
-    ...project, boards: project.boards.filter(board => board.id === boardId), pages: [{ ...page, nodes }],
+    ...project, designSystem:{...project.designSystem,components:project.designSystem.components.map(c=>({...c,nodes:portableStateNodes(c.nodes,project.pages.flatMap(p=>p.nodes))}))},
+    boards: project.boards.filter(board => board.id === boardId), pages: [{ ...page, nodes }],
     threads: project.threads.filter(thread => thread.pageId === page.id && (target.scope !== 'selection' || (thread.nodeId !== null && nodeIds.has(thread.nodeId)))),
   };
 }
@@ -108,7 +118,7 @@ export function exportTargetHtml(project: DesignProject, target: ExportTarget, o
 export function svgExportReason(project: DesignProject, target: ExportTarget): string | null {
   if (target.scope !== 'selection' || target.nodeIds?.length !== 1) return 'Select one SVG source layer to export its vector source.';
   const page = targetPage(project, target), raw = page.nodes.find(node => node.id === target.nodeIds![0]);
-  if (!raw || raw.type !== 'code' || !vectorDataUrl(raw.source ?? '') || page.nodes.some(child => child.parentId === raw.id)) return 'SVG export requires one self-contained passive SVG source layer without children. Use HTML or React + CSS for source that depends on document styles or variables.';
+  if (!raw || raw.react || raw.type !== 'code' || !vectorDataUrl(raw.source ?? '') || page.nodes.some(child => child.parentId === raw.id)) return 'SVG export requires one self-contained passive SVG source layer without children. Use HTML or React + CSS for source that depends on document styles or variables.';
   const node = resolveNodeTokens(raw, project.designSystem);
   if (node.effects?.some(effect => effect.enabled !== false) || ADVANCED_STYLE_PROPERTIES.some(property => node.styles[property] !== undefined)) return 'This layer has effects or advanced styling that SVG source cannot preserve. Use HTML or React + CSS.';
   if (node.href || node.styles.paddingX !== undefined || node.styles.paddingY !== undefined) return 'This layer has links or inner padding that SVG source cannot preserve. Use HTML or React + CSS.';
@@ -128,6 +138,7 @@ export function exportTargetSvg(project: DesignProject, target: ExportTarget): s
 }
 
 export function exportFormatReason(project: DesignProject, target: ExportTarget, format: ExportFormat): string | null {
+  if (['svg', 'svg-map', 'png'].includes(format) && exportTargetProject(project, target).pages.some(page => page.nodes.some(node => node.react))) return 'React screens need a running browser. Export HTML, React or Source ZIP to preserve their appearance and behavior.';
   if (format === 'svg') return svgExportReason(project, target);
   if ((format === 'react' || format === 'html') && (target.scope === 'board' || target.scope === 'project')) return 'Choose a selection or page. Source ZIP includes HTML and React for multiple pages.';
   if (target.scope === 'selection' && !target.nodeIds?.length) return 'Select a layer or frame on the canvas first.';
@@ -172,6 +183,7 @@ export function exportCanvasMap(project: DesignProject, target: ExportTarget, se
     const ref = node.type === 'image' ? node.media?.src : node.type === 'video' && !options.nodeImages?.[node.id] ? node.media?.poster : undefined;
     if (ref && !/^data:image\//i.test(exportMediaUrl(ref, options))) throw new Error(`“${node.name}” needs embedded image bytes. Read its asset before exporting a self-contained canvas map.`);
   }
+  if (visible.some(node => node.react && !options.nodeImages?.[node.id])) throw new Error('React screens require HTML, React or Source ZIP export.');
   const missingStill = visible.find(node => !options.nodeImages?.[node.id] && (node.type === 'shader' || (node.type === 'video' && !node.media?.poster)));
   if (missingStill) throw new Error(`“${missingStill.name}” needs a ${missingStill.type} still. Download the canvas map from the editor to capture it, or use HTML / Source ZIP to retain playback.`);
   if (visible.some(node => node.type === 'code' && !options.nodeImages?.[node.id] && !vectorDataUrl(node.source ?? ''))) warnings.push('Sandboxed HTML source remains embedded. SVG image previews cannot display its iframe; download from the editor to flatten these source layers.');
@@ -191,6 +203,7 @@ export function exportCanvasMap(project: DesignProject, target: ExportTarget, se
 export function exportTargetReact(project: DesignProject, target: ExportTarget, options: ExportOptions = {}): { jsx: string; css: string; files: Record<string, string> } {
   const rendered = renderProject(project, target), nodes = resolvedNodes(rendered.project.pages[0].nodes, project.designSystem);
   const rawStyles = new Map(rendered.project.pages[0].nodes.map(node => [node.id, node.styles]));
+  const reactImports: string[] = [];
   const children = new Map<string | null, DesignNode[]>(), classes = new Map<string, string>();
   const css = [tokenCssVariables(project.designSystem), `.exported-design { position: relative; width: ${rendered.width}px; height: ${rendered.height}px; }`];
   // A link overlay takes the pointer for its whole layer, so states below it follow the outermost linked ancestor.
@@ -234,6 +247,11 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
       const vector = vectorDataUrl(node.source ?? '');
       content = vector ? `<img className="cd-media" style={{ objectFit: ${JSON.stringify(node.styles.objectFit ?? 'fill')} }} alt=${expression(node.name)} src=${expression(vector)} draggable={false} />` : `<iframe className="cd-media cd-code${node.live ? ' cd-live' : ''}" title=${expression(node.name)} sandbox="${node.live ? LIVE_CODE_SANDBOX : ''}" referrerPolicy="no-referrer" srcDoc=${expression(safeCodeDocument(node.source ?? '', project.designSystem, node.live))}${node.live ? ` data-passive=${expression(safeCodeDocument(node.source ?? '', project.designSystem))} onLoad={liveFrameLoad}` : ''} />`;
     }
+    if (node.react) {
+      const name = `ReactScreen${reactImports.length}`;
+      reactImports.push(`import { ${node.react.exportName} as ${name} } from ${JSON.stringify('./application/' + node.react.entry)};`);
+      content = `<${name} {...${expression(node.react.props ?? {}).slice(1, -1)}} />`;
+    }
     const descendants = (children.get(node.id) ?? []).map(child => render(child, depth + 1, next, linkedAncestor || !!href, pointerEvents)).join('\n');
     const link = href ? `<a className="cd-link" style={{ pointerEvents: ${JSON.stringify(pointerEvents)} }} aria-label=${expression(node.name)} href=${expression(href)}${href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"'} />` : '';
     const body = node.type === 'video' ? link + content : content + link;
@@ -245,9 +263,10 @@ export function exportTargetReact(project: DesignProject, target: ExportTarget, 
   const setup = shaders ? `  const root = useRef(null);\n  useEffect(() => {\n    const renderers = Array.from(root.current.querySelectorAll('canvas[data-shader]'), canvas => {\n      const status = canvas.nextElementSibling;\n      status.hidden = true;\n      return createShaderRenderer(canvas, JSON.parse(canvas.dataset.shader), message => { status.textContent = 'Shader unavailable: ' + message; status.hidden = false; });\n    });\n    return () => renderers.forEach(renderer => renderer.dispose());\n  }, []);\n` : '';
   // A second load means a live layer's script navigated its frame; it returns to the static paint without scripts.
   const liveRuntime = nodes.some(node => node.type === 'code' && node.live) ? "\nfunction liveFrameLoad(event) {\n  const frame = event.currentTarget;\n  if (frame.dataset.loaded && frame.getAttribute('sandbox')) { frame.setAttribute('sandbox', ''); frame.srcdoc = frame.dataset.passive; }\n  frame.dataset.loaded = '1';\n}\n" : '';
-  const jsx = `${imports}import './design.css';\n${runtime}${liveRuntime}\nexport default function ExportedDesign() {\n${setup}  return (\n    <main${shaders ? ' ref={root}' : ''} className="exported-design" aria-label=${expression(project.name)}>\n${(children.get(null) ?? []).map(node => render(node, 3)).join('\n')}\n    </main>\n  );\n}\n`;
+  const body = (children.get(null) ?? []).map(node => render(node, 3)).join('\n');
+  const jsx = `${imports}${reactImports.join('\n')}\n${reactImports.length ? "import './application/preview.css';\n" : ''}import './design.css';\n${runtime}${liveRuntime}\nexport default function ExportedDesign() {\n${setup}  return (\n    <main${shaders ? ' ref={root}' : ''} className="exported-design" aria-label=${expression(project.name)}>\n${body}\n    </main>\n  );\n}\n`;
   const stylesheet = `${css.join('\n\n')}\n`;
-  return { jsx, css: stylesheet, files: { 'Design.jsx': jsx, 'design.css': stylesheet, 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(exportTargetProject(project, target)) } };
+  return { jsx, css: stylesheet, files: { ...reactApplicationFiles(project.designSystem, nodes.flatMap(node => node.react ? [node.react] : [])), 'Design.jsx': jsx, 'design.css': stylesheet, 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(exportTargetProject(project, target)) } };
 }
 
 export function exportHandoffPrompt(project: DesignProject, target: ExportTarget): string {

@@ -1,3 +1,4 @@
+import { remapFeatureReferences } from '../shared/diagrams';
 import type { DesignNode, DesignPage, Viewport } from '../shared/types';
 import { nodeIndex, parentLocalDelta, parentLocalPoint, visualBounds } from '../shared/effects';
 
@@ -42,6 +43,7 @@ export function duplicateNodes(nodeIds: string[], nodes: DesignNode[]) {
     const root = roots.has(node.id), offset = root ? parentLocalDelta(node,nodes,{x:40,y:40}) ?? {x:40,y:40} : {x:0,y:0};
     const copy = { ...structuredClone(node), id: ids.get(node.id)!, parentId: root ? node.parentId : ids.get(node.parentId!)!, name: root ? `${node.name} copy` : node.name, x: node.x + offset.x, y: node.y + offset.y };
     remapComponentInstance(copy, ids);
+    remapFeatureReferences(copy, ids);
     return copy;
   });
 }

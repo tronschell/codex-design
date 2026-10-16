@@ -40,6 +40,55 @@ let widgetState = window.openai?.widgetState;
 let packet = 0, inputPacket = toolInput ? ++packet : 0, outputPacket = 0, handledInput = 0;
 let scopedLaunchOutput: DataRecord | undefined;
 let activeScope: CanvasScope = 'thread', activeLaunchId: string | undefined, handledLaunchId: string | undefined, launchHydrated = false;
+const canvasInstanceId = crypto.randomUUID();
+let presenceSelection: CanvasSelection | null = null, presenceSequence = 0, presenceResponse = 0;
+let presenceStopped = true, presenceUnavailable = false, acknowledgedNavigationId: string | undefined;
+let presenceLoop = Promise.resolve();
+
+async function syncPresence(waitMs: number, closed = false) {
+  if (!embedded || presenceUnavailable) return;
+  const sequence = ++presenceSequence;
+  try {
+    const output = await callTool('canvas_sync_presence', {
+      instanceId: canvasInstanceId, scope: activeScope, selection: presenceSelection,
+      active: document.visibilityState !== 'hidden' && document.hasFocus(), closed, sequence,
+      ...(acknowledgedNavigationId ? { acknowledgedNavigationId } : {}), waitMs,
+    });
+    if (sequence < presenceResponse) return;
+    presenceResponse = sequence;
+    const command = output.navigation;
+    if (presenceStopped || !isRecord(command) || !validId(command.id) || command.id === acknowledgedNavigationId) return;
+    const target = targetFrom(command.selection);
+    if (!target?.boardId) return;
+    acknowledgedNavigationId = command.id;
+    // The existing project hook drains queued edits before loading this target in the same pane.
+    for (const listener of launchListeners) listener({ selection: target });
+  } catch (error) {
+    if (/unknown tool|not found|not registered|unrecognized tool|does not exist/i.test(String(error))) presenceUnavailable = true;
+    throw error;
+  }
+}
+
+function startPresence() {
+  if (!embedded || !presenceStopped || presenceUnavailable) return;
+  presenceStopped = false;
+  presenceLoop = presenceLoop.catch(() => {}).then(async () => {
+    while (!presenceStopped && !presenceUnavailable) {
+      try { await syncPresence(10000); }
+      catch { if (!presenceStopped && !presenceUnavailable) await new Promise(resolve => setTimeout(resolve, 5000)); }
+    }
+  });
+}
+
+function stopPresence() {
+  if (presenceStopped) return Promise.resolve();
+  presenceStopped = true;
+  return syncPresence(0, true).catch(() => {});
+}
+
+window.addEventListener('pagehide', () => { void stopPresence(); });
+window.addEventListener('pageshow', () => { if (launchHydrated) startPresence(); });
+window.addEventListener('focus', () => { if (!presenceStopped) void syncPresence(0).catch(() => {}); });
 
 function targetFrom(value: unknown, depth = 0): CanvasTarget | null {
   if (!isRecord(value) || depth > 4) return null;
@@ -144,7 +193,10 @@ window.addEventListener('message', (event) => {
   if (message.method === 'ui/notifications/tool-result') captureOutput(message.params);
   if (message.method === 'ui/notifications/tool-input') captureInput(message.params?.arguments);
   if (message.method === 'ui/notifications/host-context-changed') hostContext = { ...hostContext, ...message.params };
-  if ((message.method === 'ping' || message.method === 'ui/resource-teardown') && message.id !== undefined) {
+  if (message.method === 'ui/resource-teardown') {
+    const reply = () => { if (message.id !== undefined) window.parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*'); };
+    void Promise.race([stopPresence(), new Promise(resolve => setTimeout(resolve, 1500))]).then(reply);
+  } else if (message.method === 'ping' && message.id !== undefined) {
     window.parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
   }
 });
@@ -226,6 +278,8 @@ export async function getCanvasLaunch(): Promise<CanvasLaunch> {
   handledInput = inputPacket;
   const launch = { selection: launchTarget(), output: scopedLaunchOutput };
   launchHydrated = true;
+  if (launch.selection?.boardId) presenceSelection = { ...launch.selection, boardId: launch.selection.boardId };
+  startPresence();
   return launch;
 }
 
@@ -258,20 +312,24 @@ export async function sendFollowUp(prompt: string): Promise<boolean> {
 let contextQueue = Promise.resolve(), contextEpoch = 0, selectionQueue = Promise.resolve(), lastSelectionKey = '', selectionToolUnavailable = false;
 export function updateModelContext(context: DataRecord) {
   const target = targetFrom(context);
-  if (!embedded || context.readOnlyPreview === true || !target?.boardId) return;
+  if (!embedded || context.readOnlyPreview === true || (!target?.boardId && context.projectId !== null)) return;
   const epoch = ++contextEpoch;
   contextQueue = contextQueue.catch(() => {}).then(async () => {
     await initializeBridge();
     if (epoch !== contextEpoch) return;
-    const paneContext = { ...context, canvasScope: activeScope, ...(activeLaunchId ? { canvasLaunchId: activeLaunchId } : {}) };
+    const nextSelection: CanvasSelection | null = target?.boardId ? { ...target, boardId: target.boardId } : null;
+    const selectionChanged = JSON.stringify(presenceSelection) !== JSON.stringify(nextSelection);
+    presenceSelection = nextSelection;
+    if (selectionChanged && !presenceStopped) void syncPresence(0).catch(() => {});
+    const paneContext = { ...context, canvasScope: activeScope, canvasInstanceId, ...(activeLaunchId ? { canvasLaunchId: activeLaunchId } : {}) };
     hostContext['openai/modelContext'] = { structuredContent: paneContext };
     widgetState = { ...(isRecord(widgetState) ? widgetState : {}), modelContent: paneContext };
     try { window.openai?.setWidgetState?.(widgetState); } catch { /* Model context remains available when legacy widget storage is unavailable. */ }
-    const key = JSON.stringify([target.projectId, target.boardId, target.pageId ?? '']);
+    const key = target ? JSON.stringify([target.projectId, target.boardId, target.pageId ?? '']) : '';
     if (key !== lastSelectionKey) {
       lastSelectionKey = key;
       selectionQueue = selectionQueue.catch(() => {}).then(async () => {
-        if (lastSelectionKey === key && !selectionToolUnavailable) await callTool('canvas_set_selection', { ...target });
+        if (target?.boardId && lastSelectionKey === key && !selectionToolUnavailable) await callTool('canvas_set_selection', { ...target });
       }).catch(error => { if (/unknown tool|not found|not registered|unrecognized tool|does not exist/i.test(String(error))) selectionToolUnavailable = true; });
     }
     if (standardBridge) await request('ui/update-model-context', { structuredContent: paneContext });

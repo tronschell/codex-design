@@ -47,7 +47,7 @@ function dataUrl({ asset, bytes }: LoadedAsset, signal?: AbortSignal): Promise<s
 
 async function embeddedAssetUrls(project: DesignProject, signal?: AbortSignal, maxBytes?: number) {
   const urls: Record<string, string> = {};
-  for (const item of await loadAssets(project, false, signal, maxBytes)) urls[item.asset.ref] = await dataUrl(item, signal);
+  for (const item of await loadAssets({ ...project, threads: [] }, false, signal, maxBytes)) urls[item.asset.ref] = await dataUrl(item, signal);
   return urls;
 }
 
@@ -148,6 +148,7 @@ async function prepareCanvasMap(project: DesignProject, target: ExportTarget, ma
     if ((page.included && !page.included.has(node.id)) || !visibleBounds(node, page.nodes)) continue;
     const inner = nodeInnerSize(node), padding = node.styles.paddingX !== undefined || node.styles.paddingY !== undefined ? nodePadding(node) : { x: 0, y: 0 };
     const width = Math.max(1, inner.width - padding.x * 2), height = Math.max(1, inner.height - padding.y * 2), pixelWidth = Math.ceil(width * layout.scale), pixelHeight = Math.ceil(height * layout.scale);
+    if (node.react) throw new Error('React screens require HTML, React or Source ZIP export.');
     if (node.type === 'code' && !vectorDataUrl(node.source ?? '')) {
       const reason = canvasMapPngReason({ pixelWidth, pixelHeight }); if (reason) throw new Error(`“${node.name}”: ${reason}`);
       const canvas = await rasterizeMapSvg(passiveSourceSvg(node, project, width, height), pixelWidth, pixelHeight, signal);

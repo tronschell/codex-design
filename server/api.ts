@@ -1,6 +1,7 @@
+import { layoutDiagram } from './diagram-layout.ts';
 import { json, Router, type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
-import { assetRefSchema, beginAssetUploadSchema, cancelAssetUploadSchema, createProjectSchema, libraryVersionRequestSchema, MAX_DOCUMENT_BYTES, MAX_INPUT_BYTES, documentLimitLabel, mutateProjectSchema, readAssetChunkSchema, restoreLibraryVersionSchema, restoreProjectVersionSchema, revisionSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
+import { assetRefSchema, beginAssetUploadSchema, cancelAssetUploadSchema, createProjectSchema, deleteProjectSchema, libraryVersionRequestSchema, MAX_DOCUMENT_BYTES, MAX_INPUT_BYTES, documentLimitLabel, mutateProjectSchema, readAssetChunkSchema, restoreLibraryVersionSchema, restoreProjectVersionSchema, revisionSchema, uploadAssetChunkSchema } from '../shared/validation.ts';
 import { ProjectStore, StoreError } from './store.ts';
 
 function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, any>, input: unknown): T {
@@ -45,9 +46,18 @@ export function createApiRouter(store: ProjectStore): Router {
   router.get('/projects', async (_request, response) => { response.json({ projects: await store.list() }); });
   router.post('/projects', async (request, response) => {
     const input = parse(createProjectSchema, request.body);
-    response.status(201).json(await store.create(input.name, input.template));
+    response.status(201).json(await store.create(input.name));
+  });
+  router.post('/projects/:id/delete', async (request, response) => {
+    response.json(await store.deleteProject(parse(deleteProjectSchema, { ...request.body, projectId: request.params.id })));
   });
   router.get('/projects/:id', async (request, response) => { response.json(await store.get(request.params.id)); });
+  router.post('/projects/:id/diagram-layout', async (request, response) => {
+    const { pageId, frameId } = parse(z.object({pageId:z.string().min(1).max(128),frameId:z.string().min(1).max(128)}).strict(), request.body);
+    const controller = new AbortController(); response.on('close', () => { if (!response.writableEnded) controller.abort(); });
+    try { response.json(await layoutDiagram(await store.get(request.params.id), pageId, frameId, controller.signal)); }
+    catch (error) { if (!controller.signal.aborted) throw new StoreError(400, 'invalid_diagram_layout', error instanceof Error ? error.message : 'Layout failed.'); }
+  });
   router.get('/projects/:id/changes', async (request, response) => {
     const afterRevision = parse(z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).pipe(revisionSchema), request.query.afterRevision);
     const controller = new AbortController();
@@ -113,6 +123,7 @@ export function createApiRouter(store: ProjectStore): Router {
         for (const project of projects) {
           if (seen.get(project.id) !== project.revision) response.write(`data: ${JSON.stringify({ projectId: project.id })}\n\n`);
         }
+        for (const id of seen.keys()) if (!projects.some(project => project.id === id)) response.write(`data: ${JSON.stringify({ projectId: id, deleted: true })}\n\n`);
         seen = new Map(projects.map((project) => [project.id, project.revision]));
       } catch { /* A temporary read error is retried by the next poll. */ }
       finally { scanning = false; }

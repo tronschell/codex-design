@@ -186,3 +186,5 @@ export function parentLocalPoint(parentId: string | null, nodes: DesignNode[], p
   const inset = borderInsets(parent);
   return { x: local.x - inset.x, y: local.y - inset.y };
 }
+
+export function nodeWorldPoint(node: DesignNode, nodes: DesignNode[], point: { x: number; y: number }) { const [a,b,c,d,e,f] = worldMatrix(node,nodes); return { x:a*point.x+c*point.y+e,y:b*point.x+d*point.y+f }; }

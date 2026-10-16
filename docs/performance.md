@@ -1,8 +1,10 @@
 # Performance measurements
 
+Historical workload identities and private layer identifiers have been redacted. Recorded measurements, methods and limits are unchanged; the private reference document is no longer distributed.
+
 ## Content-addressed save history — October 14, 2026
 
-Measured on macOS arm64 with Node.js 24.19.0, using `npx tsx` against `ProjectStore` in fresh scratch data directories. No user project was read or changed. There are three generated workloads made from copies of the GaugeReel demo, with the same node styling as the canvas-scaling workload:
+Measured on macOS arm64 with Node.js 24.19.0, using `npx tsx` against `ProjectStore` in fresh scratch data directories. No user project was read or changed. There are three generated workloads made from copies of the private reference document, with the same node styling as the canvas-scaling workload:
 
 - 3 copies on 1 page (0.42 MB of JSON)
 - 12 copies on 1 page (1.69 MB)
@@ -77,7 +79,7 @@ A scratchpad script checked compatibility directly. It used the unchanged `HEAD`
 
 ## Large-project canvas scaling — October 14, 2026
 
-Workload: a generated project made of 12 copies of the GaugeReel demo, giving 4,944 nodes, 192 root frames, 900 vertical-stack parents and 2,448 token-bound text nodes on one page (1.77 MB of JSON). It lived in a scratch data directory; no user project was read or changed. The before and after runs each used freshly regenerated data and a fresh local dev server with React development Strict Mode and `?profile=1`, in the same 1024 × 736 stage of the built-in browser pane. That pane was hidden, which throttles `requestAnimationFrame`, so both runs mapped rAF to a MessageChannel macrotask. A step means event dispatch, two macrotasks, then a forced layout. These numbers are main-thread work per step, not frame rate. Paint and raster were not measured. Each figure comes from a single run.
+Workload: a generated project made of 12 copies of the private reference document, giving 4,944 nodes, 192 root frames, 900 vertical-stack parents and 2,448 token-bound text nodes on one page (1.77 MB of JSON). It lived in a scratch data directory; no user project was read or changed. The before and after runs each used freshly regenerated data and a fresh local dev server with React development Strict Mode and `?profile=1`, in the same 1024 × 736 stage of the built-in browser pane. That pane was hidden, which throttles `requestAnimationFrame`, so both runs mapped rAF to a MessageChannel macrotask. A step means event dispatch, two macrotasks, then a forced layout. These numbers are main-thread work per step, not frame rate. Paint and raster were not measured. Each figure comes from a single run.
 
 Sequence: fit all (`1`), 60 wheel-pan steps, 40 ctrl+wheel zoom steps, fit all again, pointerdown on empty canvas, then drag the first root frame through 60 pointer moves and drop it, timing until the status reads "All changes saved".
 
@@ -120,7 +122,7 @@ Raw captures: `artifacts/scale-canvas-before.json` and `artifacts/scale-canvas-a
 
 ## Progressive canvas synchronization — October 14, 2026
 
-Measured on macOS arm64 with Node.js 24.19.0, using the existing GaugeReel project at revision 4: one board, one page, 16 frames and 412 nodes. The project remained unchanged throughout both measurements. No test data was created and no design document was modified.
+Measured on macOS arm64 with Node.js 24.19.0, using the existing private project project at revision 4: one board, one page, 16 frames and 412 nodes. The project remained unchanged throughout both measurements. No test data was created and no design document was modified.
 
 Method: a read-only local HTTP profile reproduced the previous embedded 2.5-second full-project refresh schedule for 20 seconds, then used the new sequential ten-second revision-watch requests for the same idle workload. Response bodies were counted as UTF-8 bytes. The before window lasted 20.002 seconds; the after window lasted 20.026 seconds. These are controlled API measurements, not browser-wide network or memory measurements. They exclude project-list requests, request/response headers, MCP envelopes and initial loading.
 
@@ -140,7 +142,7 @@ Raw local captures: `artifacts/progressive-sync-before.json` and `artifacts/prog
 
 ## Canvas rendering and startup — October 14, 2026
 
-This pass uses the same unchanged GaugeReel revision 4 (412 nodes, 19 roots, 16 frames, 74 SVG images, zero HTML iframes). The baseline is commit `7a24af6` with development-only profiling counters added before either capture. Both sides use the same local Vite server, React development Strict Mode, browser and macOS machine. No project data was created or edited.
+This pass uses the same unchanged private project revision 4 (412 nodes, 19 roots, 16 frames, 74 SVG images, zero HTML iframes). The baseline is commit `7a24af6` with development-only profiling counters added before either capture. Both sides use the same local Vite server, React development Strict Mode, browser and macOS machine. No project data was created or edited.
 
 ### Zoom interaction
 
@@ -195,11 +197,11 @@ Raw captures (ignored by Git): `artifacts/canvas-camera-{before,after}.json`, `c
 
 ## Paper-inspired media, shaders and scoped handoff — October 14, 2026
 
-This batch adds image/video assets, bounded WebGL effects, layer filtering and scoped export. Measurement uses the unchanged saved GaugeReel Mobile revision 4: one board/page, 412 nodes, 16 frames and 74 passive SVG sources. No user design was modified. No tests were added or run.
+This batch adds image/video assets, bounded WebGL effects, layer filtering and scoped export. Measurement uses the unchanged saved private project revision 4: one board/page, 412 nodes, 16 frames and 74 passive SVG sources. No user design was modified. No tests were added or run.
 
 ### Focused agent context
 
-Method: compact UTF-8 `JSON.stringify` length of the actual structured output for a full `canvas_get_project` read versus the new source-inclusive `canvas_get_node_context` read of `01 Sign in` (`gauge-2`, 28 nodes). Both use the same normalized saved project. The focused response retains the current revision, complete subtree source, tokens, bounds and applicable conversations; ancestors are returned for nested selections. This compares the appropriate read for a component task, not two equivalent whole-project reads.
+Method: compact UTF-8 `JSON.stringify` length of the actual structured output for a full `canvas_get_project` read versus the new source-inclusive `canvas_get_node_context` read of `01 Sign in` (`[private node ID redacted]`, 28 nodes). Both use the same normalized saved project. The focused response retains the current revision, complete subtree source, tokens, bounds and applicable conversations; ancestors are returned for nested selections. This compares the appropriate read for a component task, not two equivalent whole-project reads.
 
 | Measurement | Before | After | Absolute change | Percentage change |
 | --- | ---: | ---: | ---: | ---: |
@@ -247,7 +249,7 @@ This is a layout capability addition, with no claim of faster interaction or low
 
 User effect: stack parents can align and distribute fixed-size children without individually calculating coordinates, and child position fields accurately show layout-controlled coordinates. The small widget increase is the cost of the additional controls and layout calculation; it is not a loading improvement. Defaults retain previous start positioning. The canvas, component context, history comparison, HTML and React use the same resolver.
 
-Build/type compilation and a bounded source review covered main/cross-axis placement, minimum gaps, padding, hidden/empty/single-child stacks, clamped overflow, scoped ancestor exports, optional schema compatibility and read-only coordinate fields. A review found and corrected stale Escape cancellation when switching from a read-only coordinate field to an editable one. The existing 412-node GaugeReel revision 4 has no stack parents and was not modified. New stack editing was not exercised in the live browser; no new example designs, fixtures or tests were generated. No stack CPU, load-time, FPS, latency or RAM metric was measured, and no gain is claimed for those metrics.
+Build/type compilation and a bounded source review covered main/cross-axis placement, minimum gaps, padding, hidden/empty/single-child stacks, clamped overflow, scoped ancestor exports, optional schema compatibility and read-only coordinate fields. A review found and corrected stale Escape cancellation when switching from a read-only coordinate field to an editable one. The existing 412-node private project revision 4 has no stack parents and was not modified. New stack editing was not exercised in the live browser; no new example designs, fixtures or tests were generated. No stack CPU, load-time, FPS, latency or RAM metric was measured, and no gain is claimed for those metrics.
 
 Raw ignored byte measurements: `artifacts/stack-layout-before.json` and `artifacts/stack-layout-after.json`.
 
@@ -265,7 +267,7 @@ Method: exact production artifact lengths and Python gzip default compression (m
 | MCP runtime | 919,624 B | 920,057 B | +433 B | +0.05% |
 | MCP runtime, gzip | 184,313 B | 185,494 B | +1,181 B | +0.64% |
 
-Compilation and bounded source review covered shared API/MCP handling, operation order, hidden children, nested stacks, geometry-only writes, validation rollback, and page-snapshot undo/history. Positions are captured immediately before the parent patch; later operations can intentionally move the free children. Computed out-of-range coordinates fail validation instead of being clipped or partly saved. Existing designs were not edited; the local 412-node GaugeReel document remains revision 4 and has no stacks. Live detachment was not exercised, no tests or generated example/fixture projects were created, and no CPU, load-time, FPS, latency or RAM result is claimed.
+Compilation and bounded source review covered shared API/MCP handling, operation order, hidden children, nested stacks, geometry-only writes, validation rollback, and page-snapshot undo/history. Positions are captured immediately before the parent patch; later operations can intentionally move the free children. Computed out-of-range coordinates fail validation instead of being clipped or partly saved. Existing designs were not edited; the local 412-node private project document remains revision 4 and has no stacks. Live detachment was not exercised, no tests or generated example/fixture projects were created, and no CPU, load-time, FPS, latency or RAM result is claimed.
 
 Raw ignored size measurements: `artifacts/layout-detach-before.json` and `artifacts/layout-detach-after.json`.
 
@@ -285,7 +287,7 @@ Method and workload for feature cost: exact production artifact lengths and Pyth
 
 User effect: an unwanted import no longer has to finish sending all remaining chunks before the user can stop it. Successful pending cleanup releases its upload slot and temporary bytes. An in-flight embedded RPC or final design save may finish first; upload creation deliberately completes before cancellation so its ID is known. Cleanup is best effort when disconnected or connected to an older host, with the existing one-hour expiry as fallback. These are inspected behavior/resource bounds, not measured transfer-byte, disk, RAM or elapsed-time savings. The artifact increases above are feature costs, not loading improvements.
 
-Production compilation and bounded source review passed. A fresh local HTTP MCP initialization and read-only `tools/list` inspection confirmed the cancellation tool's strict input/output schemas, idempotent annotation, app/model visibility and lack of a canvas-navigation resource binding. The review found and fixed Inspector uploads continuing during navigation loading. No mutation tool was called for verification, and the saved 412-node GaugeReel document remained at revision 4.
+Production compilation and bounded source review passed. A fresh local HTTP MCP initialization and read-only `tools/list` inspection confirmed the cancellation tool's strict input/output schemas, idempotent annotation, app/model visibility and lack of a canvas-navigation resource binding. The review found and fixed Inspector uploads continuing during navigation loading. No mutation tool was called for verification, and the saved 412-node private project document remained at revision 4.
 
 Limits: no live upload/cancel or replacement roundtrip, installed-host runtime behavior, native codec, cancellation latency, transferred bytes avoided, temporary disk bytes released, browser/process memory, CPU, load-time, FPS or input latency was measured. No improvement is claimed for those metrics. Completed-asset deletion, upload resume and rollback of already-saved changes are not implemented. No tests, fixtures, example projects or dependencies were added or run.
 
@@ -296,7 +298,7 @@ Raw ignored captures: `artifacts/media-cancel-before.json`, `artifacts/media-can
 
 This is a navigation and keyboard-usability fix, with no loading or memory improvement claimed. Selecting a frame or component now reveals its row in the Layers panel without moving the canvas or changing focus. An explicit Reveal selected layer action clears an excluding filter and reopens the selected ancestor path. Ordinary scrolling/collapse is retained until the selection/context/ancestry changes or Reveal is requested. Native buttons now retain Space activation instead of passing it to the canvas hand-pan shortcut.
 
-Direct-inspection method and workload: the same unchanged GaugeReel revision 4, one page, 16 frames and 412 nodes, in the local Vite browser at 702 × 853 CSS pixels. On each side, mount a fresh Inspector with `16 Ready` selected. Read the selected row and layer-list bounding rectangles from the rendered DOM. The list spans Y=90–266 CSS pixels on both sides; the 22-pixel row is at Y=488–510 before and Y=243–265 after. List scrollTop changes from 0 to 245 CSS pixels. Visible row height is the intersection of those rectangles.
+Direct-inspection method and workload: the same unchanged private project revision 4, one page, 16 frames and 412 nodes, in the local Vite browser at 702 × 853 CSS pixels. On each side, mount a fresh Inspector with `16 Ready` selected. Read the selected row and layer-list bounding rectangles from the rendered DOM. The list spans Y=90–266 CSS pixels on both sides; the 22-pixel row is at Y=488–510 before and Y=243–265 after. List scrollTop changes from 0 to 245 CSS pixels. Visible row height is the intersection of those rectangles.
 
 | Usability measurement | Before | After | Absolute change |
 | --- | ---: | ---: | ---: |
@@ -335,9 +337,9 @@ Artifact method and workload: exact committed production artifact lengths from `
 
 User effect: a component's image request retains its prompt and conversation while the agent can choose an appropriate box/aspect ratio and save a reusable image in context. The widget/runtime increases above are feature costs; no faster load, lower RAM, transfer savings or generation-time improvement is claimed. The importer reads at most 32 MiB plus a sentinel byte and uploads through existing bounded chunks. These are inspected limits, not measured process-memory or import-latency results.
 
-Read-only contract inspection used the unchanged GaugeReel revision 4, one board/page, 16 frames and 412 nodes. A fresh production stdio process advertised the importer as model-only and not widget-accessible. A separate in-memory connection with the same default factory options as HTTP did not advertise it; no listener, file import or mutation was invoked. A real `canvas_get_node_context` read for source-backed node `gauge-67` (`Editable mountain footage`) with `includeImagePlacement:true` returned its 73 × 138 local box, absolute box at 1075/586 CSS pixels, source flag and parent constraints. Its complete structured response was 4,568 UTF-8 bytes, including a 2,497-byte imagePlacement object. This measures payload cost for that one source layer, not a representative image-generation workload.
+Read-only contract inspection used the unchanged private project revision 4, one board/page, 16 frames and 412 nodes. A fresh production stdio process advertised the importer as model-only and not widget-accessible. A separate in-memory connection with the same default factory options as HTTP did not advertise it; no listener, file import or mutation was invoked. A real `canvas_get_node_context` read for source-backed node `[private node ID redacted]` ([private layer name redacted]) with `includeImagePlacement:true` returned its 73 × 138 local box, absolute box at 1075/586 CSS pixels, source flag and parent constraints. Its complete structured response was 4,568 UTF-8 bytes, including a 2,497-byte imagePlacement object. This measures payload cost for that one source layer, not a representative image-generation workload.
 
-The ordinary first-frame `gauge-2` response, without image placement, was 7,814 bytes using compact `JSON.stringify` length, matching the previous recorded focused-read size for the same saved frame. Source inspection confirms the new field is opt-in rather than added to every read. No model token, cost, latency or RAM result is inferred from payload bytes.
+The ordinary first-frame `[private node ID redacted]` response, without image placement, was 7,814 bytes using compact `JSON.stringify` length, matching the previous recorded focused-read size for the same saved frame. Source inspection confirms the new field is opt-in rather than added to every read. No model token, cost, latency or RAM result is inferred from payload bytes.
 
 Production compilation and one bounded source review passed. Review covered intent validation/persistence, follow-up and queue consistency, transport visibility, size/path/symlink checks, bounded reads/uploads, revision-aware placement guidance and retention of source, layout and conversations. The saved document remained revision 4 with 412 nodes. Browser access to the current pane was rejected by URL policy; UI verification used source/compiled output instead of additional browser attempts.
 
@@ -360,7 +362,7 @@ Artifact method and workload: exact previous production artifacts from `4aed987`
 
 User effect: the additional UI/runtime provides the token canvas/editor, inspiration canvas/imports, compatible Inspector bindings, conflict-preserving drafts, derived DESIGN.md/CSS and agent workflows. These byte increases are feature costs, not faster-loading claims. Vite reports the main chunk over 500 kB before compression; embedded mode still bundles its UI for operation without a web server or external script resources.
 
-Read-only payload workload: the same unchanged local GaugeReel revision 4, one board/page, 16 frames and 412 nodes. A fresh compiled stdio process read `canvas_get_node_context` for `gauge-2` (`01 Sign in`) with default options. Compact UTF-8 `JSON.stringify(structuredContent)` length is 7,814 → 7,874 B (+60 B, +0.77%). The new focused response contains only the system name and actually bound tokens (zero for this existing frame), and optional effective styles/positions when they differ. Full documentation, sources and requests stay in the dedicated getter rather than repeating in each component read. No model-token, cost, latency or RAM claim follows from byte length.
+Read-only payload workload: the same unchanged local private project revision 4, one board/page, 16 frames and 412 nodes. A fresh compiled stdio process read `canvas_get_node_context` for `[private node ID redacted]` (`01 Sign in`) with default options. Compact UTF-8 `JSON.stringify(structuredContent)` length is 7,814 → 7,874 B (+60 B, +0.77%). The new focused response contains only the system name and actually bound tokens (zero for this existing frame), and optional effective styles/positions when they differ. Full documentation, sources and requests stay in the dedicated getter rather than repeating in each component read. No model-token, cost, latency or RAM claim follows from byte length.
 
 The same process advertised the three new read tools with strict input/output schemas, read-only annotations and app/model visibility. Reads confirmed five safely normalized legacy tokens, a 439-byte DESIGN.md, 196-byte CSS, empty board inspiration/request queues, root DESIGN.md/tokens.css in the source export, and a read-only historical system at revision 4. Saved JSON remained 124,856 B with identical SHA-256 before/after inspection. New mutations were not called for verification.
 
@@ -388,7 +390,7 @@ Artifact method: exact production outputs from `1ea8ca1` and the compiled fix on
 
 User effect: generated illustrations that reference named design-system values retain access to those values rather than losing them at an image-document boundary. This follows the inspected render path; no pixel, load-time, CPU, memory, FPS or input-latency improvement is claimed.
 
-Read-only compatibility workload: two fresh production stdio processes, first the previously installed runtime and then the current compiled runtime, reading the same saved GaugeReel page (revision 4, 16 frames, 412 nodes, 74 source layers). Compact export file bytes and SHA-256 were identical: page HTML 193,254 B, React JSX 98,423 B, React CSS 119,832 B, DESIGN.md 439 B and tokens.css 196 B. Saved JSON remained 124,856 B with the same SHA-256. This document has zero source layers using CSS variables, so these reads establish compatibility for the existing content, not visual verification of the corrected case.
+Read-only compatibility workload: two fresh production stdio processes, first the previously installed runtime and then the current compiled runtime, reading the same saved private project page (revision 4, 16 frames, 412 nodes, 74 source layers). Compact export file bytes and SHA-256 were identical: page HTML 193,254 B, React JSX 98,423 B, React CSS 119,832 B, DESIGN.md 439 B and tokens.css 196 B. Saved JSON remained 124,856 B with the same SHA-256. This document has zero source layers using CSS variables, so these reads establish compatibility for the existing content, not visual verification of the corrected case.
 
 Production compilation and bounded direct caller/source inspection passed. Browser URL policy still blocks the pane; variable-backed SVG visual rendering, format-disabled messaging and refreshed installed-host behavior were not exercised. No tests, fixtures, generated designs/assets or dependencies were added or run. Raw ignored captures: `artifacts/svg-token-before.json`, `artifacts/svg-token-after.json` and `artifacts/svg-token-export-inspection.json`.
 
@@ -408,7 +410,7 @@ Artifact method and workload: exact production artifacts from `4f20ebe` immediat
 
 User effect: adjustable working space, consistent color-aware controls and direct visual effect editing without losing component source or conversations. The increases above are feature costs. Vite still reports its existing main-chunk size warning; no faster loading, reduced memory, latency, CPU or frame-rate result is claimed.
 
-Read-only contract workload: the same saved GaugeReel revision 4, one board/page, 16 frames and 412 nodes, using fresh production stdio MCP clients against the previous installed runtime and current compiled runtime with the same data directory. The catalog keeps 27 tools and now includes all six effect variants and 15 Advanced style fields in generic node/edit/context schemas. Project, focused node, image-placement, history-list and export reads succeeded. The first-frame focused response remains 7,874 → 7,874 B (0 B; 0.00%). The source-backed image-placement response is 4,628 → 4,640 B (+12 B; +0.26%), reflecting border-aware derived absolute coordinates; these are document calculations, not measured browser geometry or latency.
+Read-only contract workload: the same saved private project revision 4, one board/page, 16 frames and 412 nodes, using fresh production stdio MCP clients against the previous installed runtime and current compiled runtime with the same data directory. The catalog keeps 27 tools and now includes all six effect variants and 15 Advanced style fields in generic node/edit/context schemas. Project, focused node, image-placement, history-list and export reads succeeded. The first-frame focused response remains 7,874 → 7,874 B (0 B; 0.00%). The source-backed image-placement response is 4,628 → 4,640 B (+12 B; +0.26%), reflecting border-aware derived absolute coordinates; these are document calculations, not measured browser geometry or latency.
 
 The existing page's HTML (193,254 B), React CSS (119,832 B), DESIGN.md (439 B) and tokens.css (196 B) retain identical SHA-256 values. React JSX remains 98,423 B; direct read comparison isolates its changed hash to single-to-double quoting of 74 SVG `objectFit: fill` string literals. Saved JSON remains 124,856 B with the same SHA-256, `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No mutation or generated verification design was used.
 
@@ -434,7 +436,7 @@ Artifact method/workload: exact production artifacts from `84b0a44` before this 
 
 User effect: magnetic edge/center alignment reduces manual positioning while the held Option/Alt key allows free movement. The measured bytes are feature cost, not loading/latency or RAM savings. Vite retains its existing large-main-chunk warning. Snap candidates are collected and sorted once per gesture; pointer movement performs binary nearest-anchor lookup rather than rebuilding all candidate geometry. At most two guide paths are drawn. These are inspected implementation bounds, not measured CPU/FPS results.
 
-Read-only contract workload: fresh old/current production stdio processes, identical saved GaugeReel revision 4, one page, 16 frames and 412 nodes. The catalog retains 27 tools; generic editing now advertises strict `snap_node` input with optional distance default 8, minimum 0 and maximum 100 design units. Real project/focused-context/HTML/React reads passed. The first-frame focused result remains 7,874 → 7,874 B (0 B; 0.00%). Every generated HTML/React/CSS/DESIGN.md/tokens.css file hash is identical. Saved JSON remains 124,856 B with SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`; its history metadata hash also stayed unchanged. No mutation or verification design was used.
+Read-only contract workload: fresh old/current production stdio processes, identical saved private project revision 4, one page, 16 frames and 412 nodes. The catalog retains 27 tools; generic editing now advertises strict `snap_node` input with optional distance default 8, minimum 0 and maximum 100 design units. Real project/focused-context/HTML/React reads passed. The first-frame focused result remains 7,874 → 7,874 B (0 B; 0.00%). Every generated HTML/React/CSS/DESIGN.md/tokens.css file hash is identical. Saved JSON remains 124,856 B with SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`; its history metadata hash also stayed unchanged. No mutation or verification design was used.
 
 Compilation and bounded source review passed. Review fixed click-only resize saves, stale gestures after selection/modal/preview/context changes and ancestor-lock parity. Pointer release recomputes the final geometry/modifier state rather than reading a potentially stale React preview. Cancel/Escape/lost capture/blur discard unsaved gesture geometry; agent revisions invalidate cached targets. Undo/duplicate/delete shortcuts also cancel an active gesture before acting.
 
@@ -496,7 +498,7 @@ Method/workload: the production widget/runtime from `963a7d9` before the feature
 | MCP runtime | 1,000,084 B | 1,000,084 B | +0 B | +0.00% |
 | MCP runtime, gzip | 206,480 B | 206,480 B | +0 B | +0.00% |
 
-Practical effect: resolved conversations become accessible from the editor, with full saved replies and a direct route to their component. This behavior is established by source/compiled contracts; it has not been exercised in the installed UI. The MCP runtime SHA-256 remains unchanged. The actual 124,856-byte GaugeReel document and 30-byte history metadata retain the same hashes and revision 4. It contains zero comment threads; no sample conversations or user-design changes were generated for verification.
+Practical effect: resolved conversations become accessible from the editor, with full saved replies and a direct route to their component. This behavior is established by source/compiled contracts; it has not been exercised in the installed UI. The MCP runtime SHA-256 remains unchanged. The actual 124,856-byte private project document and 30-byte history metadata retain the same hashes and revision 4. It contains zero comment threads; no sample conversations or user-design changes were generated for verification.
 
 Production compilation and a bounded source review passed. Browser URL policy still blocks inspection, so populated list rendering, scrolling, cross-board/page clicks, keyboard/focus, Send/Resolve mutations and installed-host interactions remain unexercised. CPU, RAM, load time, input latency and FPS were not measured. No tests, assertions, fixtures, verification designs/assets or dependencies were added or run.
 
@@ -516,7 +518,7 @@ Artifact method/workload: the production `4b269c0` widget/runtime before this fe
 | MCP runtime | 1,000,084 B | 1,006,694 B | +6,610 B | +0.66% |
 | MCP runtime, gzip | 206,480 B | 208,249 B | +1,769 B | +0.86% |
 
-Read-only workload/method: fresh SDK stdio clients against the prior installed runtime and the new production runtime, both pointed at the same saved GaugeReel revision 4, page-1, first frame. No design mutations or generated examples. Serialized structured response bytes were measured with Node Buffer over JSON.stringify.
+Read-only workload/method: fresh SDK stdio clients against the prior installed runtime and the new production runtime, both pointed at the same saved private project revision 4, page-1, first frame. No design mutations or generated examples. Serialized structured response bytes were measured with Node Buffer over JSON.stringify.
 
 | Actual read | Before | After | Absolute change | Percentage change |
 | --- | ---: | ---: | ---: | ---: |
@@ -601,7 +603,7 @@ This is a usability feature, not a measured runtime optimization. Comparable art
 
 User effect: Shift-click accumulates or removes objects, and group moves/nudges/duplication/deletion save as one undoable change. Selection export and agent context include all selected IDs. Group snapping excludes the moving subtrees, and inverse parent transforms preserve world-space offsets. Group resizing applies only to untransformed free-positioned roots and retains descendant content sizes. No interaction-time, throughput, load-time, CPU, heap/RSS, GPU, browser-memory or FPS measurements were collected; no speed or memory improvement is claimed.
 
-Verification uses production build/package, strict unused-symbol compilation and bounded direct source review. The review corrected fractional-zoom resize edge drift and retained focus before disabling group action buttons. Connected MCP Apps automation does not support modified clicks/native gestures, so live Shift-click, dragging/resizing, keyboard actions and installed-host focus remain unexercised. Existing user designs were not mutated to verify the feature; the GaugeReel JSON retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.
+Verification uses production build/package, strict unused-symbol compilation and bounded direct source review. The review corrected fractional-zoom resize edge drift and retained focus before disabling group action buttons. Connected MCP Apps automation does not support modified clicks/native gestures, so live Shift-click, dragging/resizing, keyboard actions and installed-host focus remain unexercised. Existing user designs were not mutated to verify the feature; the private project JSON retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.
 
 ## Box-selection footprint — October 14, 2026
 
@@ -614,7 +616,7 @@ This is a selection usability feature, not a measured runtime optimization. Meth
 
 User effect: a pointer drag from blank canvas selects enclosed visible objects together; Shift adds them to the existing selection. Geometry is captured at pointer-down, preview IDs remain local until release, and cancellation restores the accepted selection without design/history writes. Candidate bounds respect transformed rectangular overflow clips; the MCP runtime is byte-identical. No selection latency, load time, CPU, heap/RSS, GPU, browser RAM, throughput or FPS metrics were measured, and no runtime speed/memory savings are claimed.
 
-Production compilation/package and bounded source review are the verification method. Review corrected focused-input Escape handling and clipping beneath borders/rotated ancestors. Live native drag/modified-click input is unavailable in the connected MCP Apps browser, so actual gestures, zoomed interaction and installed-host focus remain unexercised. User designs were not mutated for verification; GaugeReel retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.
+Production compilation/package and bounded source review are the verification method. Review corrected focused-input Escape handling and clipping beneath borders/rotated ancestors. Live native drag/modified-click input is unavailable in the connected MCP Apps browser, so actual gestures, zoomed interaction and installed-host focus remain unexercised. User designs were not mutated for verification; private project retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run.
 
 ## Cross-platform keyboard and clipboard footprint — October 14, 2026
 
@@ -627,7 +629,7 @@ Usability/correctness feature, not a measured runtime optimization. Method: Pyth
 
 User effect: primary keyboard commands work with Command/Ctrl from the canvas and toolbar/closed-select focus, while native text editing remains separate. Selection copy/cut/paste preserves scoped content and conversations through validated atomic saves. Clipboard input/transactions stay within the existing 2 MiB and 2,000-operation limits; geometry metadata is bounded during collection. These are inspected limits, not measured latency or RAM savings. No keyboard latency, clipboard throughput, CPU, heap/RSS, GPU, browser-memory, load-time or FPS measurements were collected; no runtime savings are claimed. The MCP runtime is byte-identical.
 
-Verification uses production build/package, strict unused-symbol TypeScript compilation and bounded source review. Actual native Mac/Windows shortcut delivery, host clipboard support and cut/paste/undo interactions remain unexercised; the connected MCP Apps browser exposes no native keyboard/clipboard gestures. Existing designs were not mutated for verification; GaugeReel retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run. Cross-page transformed-parent paste requires the original unchanged parent or copying its frame; opaque authored source dependencies are retained rather than rewritten.
+Verification uses production build/package, strict unused-symbol TypeScript compilation and bounded source review. Actual native Mac/Windows shortcut delivery, host clipboard support and cut/paste/undo interactions remain unexercised; the connected MCP Apps browser exposes no native keyboard/clipboard gestures. Existing designs were not mutated for verification; private project retains SHA-256 `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`. No tests, assertions, fixtures, test scripts or dependencies were added or run. Cross-page transformed-parent paste requires the original unchanged parent or copying its frame; opaque authored source dependencies are retained rather than rewritten.
 
 ## Versioned library and canvas-map footprint — October 14, 2026
 
@@ -642,7 +644,7 @@ User effect: one title-bar library entry replaces separate system/inspiration en
 
 Read-only compiled MCP inspection of the actual Forma revision 25 (one page, no definitions) returned 35 tools, two design-system history entries and a transparent SVG map of 188,935 B at 2,420 × 1,968 design pixels. The selected 2× raster dimensions are 4,840 × 3,936 pixels; these dimensions were computed by the real export, not a measured PNG download. SVG rendering warnings disclose foreignObject/CSS and font substitution. The browser bounds PNG to 16,384 px per side / 64,000,000 pixels and map assets to 48 MiB raw / 64 MiB embedded. Those caps are inspected resource limits, not measurements of peak allocation.
 
-Production builds/package, strict unused-symbol compilation, empty static UI detector findings and bounded source review are the verification method. Direct read-only MCP inspection confirms existing-project parsing, scoped history and SVG generation. The currently open host pane caches the previous UI, even after reopening the same resource; new tab controls and actual PNG raster/download remain unexercised until a host restart. No test, fixture, assertion/self-check or test dependency was added or run. No user designs were edited for verification; the original GaugeReel hash remains `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`.
+Production builds/package, strict unused-symbol compilation, empty static UI detector findings and bounded source review are the verification method. Direct read-only MCP inspection confirms existing-project parsing, scoped history and SVG generation. The currently open host pane caches the previous UI, even after reopening the same resource; new tab controls and actual PNG raster/download remain unexercised until a host restart. No test, fixture, assertion/self-check or test dependency was added or run. No user designs were edited for verification; the original private project hash remains `012cd37bcad35cb535b4b78f4bdd6961cbcb2d7b8d70dfac52de40cd3fd81339`.
 
 ## Refined Properties footprint — October 14, 2026
 
@@ -672,7 +674,7 @@ Baseline: `ff22c4d`. GPT‑6.1 Sol at max reasoning profiled/reviewed the store 
 
 ### Workloads and method
 
-The installed library contains **six actual projects, seven pages and 1,512 native nodes**. Forma has 397 nodes; GaugeReel has 412 nodes and 16 root screens; statusline.sh is the largest JSON document at 382,223 B, 217 nodes across two pages. Its measured first page has 86 nodes, eight roots and three source-backed nodes. A separate unchanged repository GaugeReel revision 4 supplies the repeated 412-node store-read workload. These are the largest available real designs; this is **not** a measurement of thousands of projects or a 10,000-object board.
+The installed library contains **six actual projects, seven pages and 1,512 native nodes**. Forma has 397 nodes; private project has 412 nodes and 16 root screens; statusline.sh is the largest JSON document at 382,223 B, 217 nodes across two pages. Its measured first page has 86 nodes, eight roots and three source-backed nodes. A separate unchanged repository private project revision 4 supplies the repeated 412-node store-read workload. These are the largest available real designs; this is **not** a measurement of thousands of projects or a 10,000-object board.
 
 Store measurements use Node.js 24.19.0 on macOS arm64. Each phase/workload runs in three fresh processes, alternating before/after: one cold call, ten warmups and 200 sequential read-only calls. The already-initialized store skips only initialization writes/locking; ordinary read/stat/validation/copy behavior runs unchanged. Reported values are medians of the three run results; CPU is process user+system CPU during the 200 calls, peak RSS is `process.resourceUsage().maxRSS` for that isolated profiling process, and retained heap is sampled after explicit GC. These are store-worker measurements, not the desktop app's total RAM or CPU percentage. Raw output/document hashes match before/after; all saved-file hashes remain unchanged.
 
@@ -683,7 +685,7 @@ Geometry measurements use the same Node process with frozen before/current funct
 | Six-project list, warm median | 8.941167 ms | 0.061792 ms | −8.879375 ms | −99.31% |
 | Six-project list, warm p95 | 11.055 ms | 0.100 ms | −10.955 ms | −99.10% |
 | Forma read, warm median | 2.409792 ms | 0.432167 ms | −1.977625 ms | −82.07% |
-| GaugeReel 412-node read, warm median | 1.878166 ms | 0.332584 ms | −1.545582 ms | −82.29% |
+| private project 412-node read, warm median | 1.878166 ms | 0.332584 ms | −1.545582 ms | −82.29% |
 | List CPU, 200 reads | 2,198.060 ms | 26.098 ms | −2,171.962 ms | −98.81% |
 | Forma read CPU, 200 reads | 597.200 ms | 91.412 ms | −505.788 ms | −84.69% |
 | List profiling process peak RSS | 270,096 KiB | 76,912 KiB | −193,184 KiB | −71.52% |
@@ -691,9 +693,9 @@ Geometry measurements use the same Node process with frozen before/current funct
 | List process post-GC heap | 6,317,672 B | 6,848,776 B | +531,104 B | +8.41% |
 | Cold six-project list | 24.653292 ms | 25.760167 ms | +1.106875 ms | +4.49% |
 | Cold Forma read | 10.515083 ms | 11.074333 ms | +0.559250 ms | +5.32% |
-| Cold GaugeReel read | 8.061292 ms | 8.949167 ms | +0.887875 ms | +11.01% |
+| Cold private project read | 8.061292 ms | 8.949167 ms | +0.887875 ms | +11.01% |
 | Visible bounds, 1,512 installed nodes | 5.559542 ms | 3.328708 ms | −2.230834 ms | −40.13% |
-| Visible bounds, GaugeReel 412 nodes | 1.258208 ms | 0.734125 ms | −0.524083 ms | −41.65% |
+| Visible bounds, private project 412 nodes | 1.258208 ms | 0.734125 ms | −0.524083 ms | −41.65% |
 | Five nonempty projects' canvas-map layout | 6.525458 ms | 3.885334 ms | −2.640124 ms | −40.46% |
 
 User effect: repeated project-menu/SSE refreshes avoid re-reading and validating every unchanged design; returning to a recently read project avoids repeated validation. Every request still checks file identity, size and nanosecond modification/change times, so ordinary edits and atomic saves by another process invalidate the cache. Changed data still passes the complete schema and corruption checks. Summaries contain scalar metadata; only **one** full validated document is retained, and callers get independent copies. Caching reduces allocation churn under repeated reads, at the cost of a small retained heap increase and slightly slower cold reads. It does not establish a cold-start improvement. Ancestor lookup now uses a weak snapshot index, without caching geometry or ignoring current transforms. Camera-only renders reuse root bounds and selection eligibility until their actual inputs change.
@@ -707,19 +709,19 @@ Pan method: reload the unselected Forma overview, then eight native 0.5-page whe
 | Production browser metric, warm | Before | After | Absolute change | Percentage change |
 | --- | ---: | ---: | ---: | ---: |
 | Forma first-canvas median, 397 nodes | 64.0 ms | 56.1 ms | −7.9 ms | −12.34% |
-| GaugeReel first-canvas median, 412 nodes | 64.5 ms | 56.3 ms | −8.2 ms | −12.71% |
+| private project first-canvas median, 412 nodes | 64.5 ms | 56.3 ms | −8.2 ms | −12.71% |
 | Source-heavy document first-canvas median | 53.4 ms | 52.3 ms | −1.1 ms | −2.06% |
 | Forma outer-document load median | 40.6 ms | 37.2 ms | −3.4 ms | −8.37% |
-| GaugeReel outer-document load median | 36.3 ms | 37.9 ms | +1.6 ms | +4.41% |
+| private project outer-document load median | 36.3 ms | 37.9 ms | +1.6 ms | +4.41% |
 | Source-heavy outer-document load median | 37.0 ms | 40.4 ms | +3.4 ms | +9.19% |
 | Source-heavy first iframe load median | 59.1 ms | 61.1 ms | +2.0 ms | +3.38% |
 | Wheel-to-camera callback median | 8.65 ms | 8.70 ms | +0.05 ms | +0.58% |
 | Active rAF interval median | 8.3 ms | 8.3 ms | 0.0 ms | 0.00% |
 | Active rAF interval p95 | 9.2 ms | 9.3 ms | +0.1 ms | +1.09% |
 
-User effect: the measured native canvas appeared around eight milliseconds earlier. Five samples are small and ranges overlap (GaugeReel 53.9–76.2 ms before, 55.4–67.6 ms after), so the 12.71% figure is specific to this workload, not a general loading guarantee. Source readiness and outer load did not consistently improve. Panning was already responsive in this workload and remains essentially unchanged; no smoother-FPS or lower input-to-paint claim is made. Hand panning, selection and Properties/Code were inspected through the actual UI without editing designs.
+User effect: the measured native canvas appeared around eight milliseconds earlier. Five samples are small and ranges overlap (private project 53.9–76.2 ms before, 55.4–67.6 ms after), so the 12.71% figure is specific to this workload, not a general loading guarantee. Source readiness and outer load did not consistently improve. Panning was already responsive in this workload and remains essentially unchanged; no smoother-FPS or lower input-to-paint claim is made. Hand panning, selection and Properties/Code were inspected through the actual UI without editing designs.
 
-Earlier sequential warm samples also varied more: Forma first-canvas median 88.0→60.5 ms, GaugeReel 78.9→58.2 ms, source-heavy 72.1→53.5 ms. The alternating comparison above is the primary result; the larger sequential gains are not used as the headline.
+Earlier sequential warm samples also varied more: Forma first-canvas median 88.0→60.5 ms, private project 78.9→58.2 ms, source-heavy 72.1→53.5 ms. The alternating comparison above is the primary result; the larger sequential gains are not used as the headline.
 
 ### Asset allocations and artifact cost
 
@@ -792,7 +794,7 @@ Exact production artifact comparison on the same machine against `adb7aeb`: widg
 
 The canvas had no fixed 60 Hz timer. Its animation-frame callback queued an asynchronous React update, leaving the camera transform and overlays unchanged until after that callback phase. The camera now commits synchronously inside its existing single queued animation-frame callback. Library panning and zooming use the same frame batching; their latest camera remains available immediately to input handlers and the per-section cache. Pointer release, cancellation, section changes and unmount flush or cancel pending work. No display settings, saved document format, rendering quality or dependencies change.
 
-Method: freeze the existing production build and its two camera source files before editing, then compare it with the completed production build in the same in-app browser. Both use the same isolated saved GaugeReel document ("Component discovery preview", revision 7, 412 native nodes, 16 root screens, five library tokens), warm resources and a 1,280 × 720 viewport. The design canvas is 1,280 × 688; the library canvas is 944 × 656 with its 336 px panel open. Culling remains enabled; 335 nodes are mounted at the design overview's resting position. This is not a large component-library or shader-heavy workload.
+Method: freeze the existing production build and its two camera source files before editing, then compare it with the completed production build in the same in-app browser. Both use the same isolated saved private project document ("Component discovery preview", revision 7, 412 native nodes, 16 root screens, five library tokens), warm resources and a 1,280 × 720 viewport. The design canvas is 1,280 × 688; the library canvas is 944 × 656 with its 336 px panel open. Culling remains enabled; 335 nodes are mounted at the design overview's resting position. This is not a large component-library or shader-heavy workload.
 
 Three rounds per build/surface alternate phase order: before/after, after/before, before/after. Each round reloads the same document, selects Hand and performs eight native drags, alternating directions. Design drags run (480, 520)↔(1,040, 520), a 560 CSS px displacement; library drags run (150, 480)↔(790, 480), a 640 CSS px displacement. Each round receives 64 pointer-move events and 64 camera transform updates. A separate wheel comparison performs eight native 0.5-page scrolls, alternating down/up at (1,000, 500), with eight events and eight updates per build.
 
@@ -1048,7 +1050,7 @@ User effect: a 120-page, 49,000-node project, which the old 2 MiB cap rejected o
 
 ## Windowed layers panel, drag preview and history diff — October 15, 2026
 
-Phase 5. Workload: one page holding 48 GaugeReel copies (19,776 nodes, 768 root frames, 912 root layer rows, 7.1 MB) in scratch data; Vite dev server with React development Strict Mode and `?profile=1`; built-in browser at an emulated 1280 × 800; `requestAnimationFrame` mapped to a MessageChannel macrotask. A step is dispatch, two macrotasks, then a forced layout, so these are main-thread work per step, not frame rates. Before means the HEAD versions of `src/App.tsx`, `src/Inspector.tsx` and `src/editor-utils.ts` swapped into the same tree on freshly regenerated data. With the inspector open, before shows two runs and after shows one.
+Phase 5. Workload: one page holding 48 private project copies (19,776 nodes, 768 root frames, 912 root layer rows, 7.1 MB) in scratch data; Vite dev server with React development Strict Mode and `?profile=1`; built-in browser at an emulated 1280 × 800; `requestAnimationFrame` mapped to a MessageChannel macrotask. A step is dispatch, two macrotasks, then a forced layout, so these are main-thread work per step, not frame rates. Before means the HEAD versions of `src/App.tsx`, `src/Inspector.tsx` and `src/editor-utils.ts` swapped into the same tree on freshly regenerated data. With the inspector open, before shows two runs and after shows one.
 
 | Inspector open | Before | After | Absolute change | Percentage change |
 | --- | ---: | ---: | ---: | ---: |
@@ -1128,3 +1130,26 @@ Method: bundle the current f4843c1 context module and the candidate with identic
 Ordinary wall-time run medians are 0.737719–0.782875 ms current versus 0.805333–0.857594 ms candidate, consistently slower across pairs. Image-placement wall ranges overlap (1.633885–1.772146 versus 1.733979–1.809250 ms), so the small image-mode wall change is inconclusive. All six final runs retain identical complete response lengths and SHA-256 hashes for each mode: 172,896 B ordinary and 257,944 B with image placement. Identical output does not make the slower candidate useful.
 
 Decision and practical effect: retain the current context implementation, avoiding the measured ordinary-read regression. This is a rejected optimization, not a shipped speedup. No cache-size, memory, GC, whole-MCP request, browser interaction, canvas FPS or end-to-end image-generation improvement was measured or inferred. No tests, fixtures, dependencies, saved-design writes or app imports were introduced or run. Raw source candidates, real workload provenance, six final run reports, output hashes and summary are in /private/tmp/codex-context-index-profile/.
+
+
+## React application compilation — 2026-10-15
+
+Compared the initial React compiler dependency resolver with the corrected resolver. Measured the complete `compileReactProject` call using `performance.now()` in a fresh Node 24.19.0 process for each run on the same machine, with a warm package cache. Workload: two TSX screen entries, shared Button and Shell, React/React DOM 19.3.0, Lucide 0.468.0, and generated Tailwind CSS. One measured compilation per version; these are local observations rather than a throughput guarantee.
+
+| Metric | Initial resolver | Corrected resolver | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Application compilation | 59681.506 ms | 332.697 ms | -59348.808 ms | -99.44% |
+
+Removed nested resolver re-entry for each dependency edge. Normal esbuild resolution remains bounded by a real-path check before every module load, with prohibited import schemes rejected separately. Practical effect: a shared component edit in this example rebuilds its screens in about 0.33 seconds instead of 59.68 seconds. First-time package downloads are excluded. Compilation and direct inspection only; no tests were added or run.
+
+## Diagram arrangement — October 15, 2026
+
+Direct `canvas_layout_diagram` observation against an isolated saved review project: ten 220×130 service elements in two columns, five reverse-order e50→w50 connectors, no pins, RIGHT direction, comfortable spacing. Before/after counts use the same bounded orthogonal router and proper segment-intersection counter (pairs sharing an endpoint are excluded).
+
+| Metric | Before | After | Absolute change | Percentage change |
+| --- | ---: | ---: | ---: | ---: |
+| Connector crossings | 4 | 0 | −4 crossings | −100% |
+
+All ten elements moved; the arranged example has five unobstructed horizontal connections. Worker computation was 45 ms for this observation, excluding startup and IPC. There is no comparable prior worker timing, so no speed improvement is claimed. This single small workload does not establish general optimality, large-graph throughput, or frame-rate improvement. UI inspection also confirmed Cancel preserved the saved diagram and Apply/Undo restored coordinates.
+
+No tests were added or run. See [diagramming.md](diagramming.md) for behavior and bounds.

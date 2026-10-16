@@ -20,7 +20,7 @@
       "interface": {
         "displayName": "Codex Design",
         "shortDescription": "Design interfaces with Codex",
-        "longDescription": "Ask for interface designs, slide layouts or a project design system to start a shared canvas beside your conversation. Create desktop, laptop, tablet and mobile interfaces with arbitrary-size frames, generate or discover reusable design tokens and rules, collect annotated board inspiration, discuss components in anchored threads, and give your agent the complete design and source for implementation.",
+        "longDescription": "Create and edit interface designs, diagrams, application states, slide layouts and shared React components beside your conversation. Select an inner component to edit its source in isolation, manage project boards, discuss designs in anchored comments, and export source for implementation. Runs locally on desktop with Node.js 22 or later. An independent community project; not made or endorsed by OpenAI.",
         "category": "Productivity",
         "capabilities": [
           "Read",
@@ -29,16 +29,18 @@
         "defaultPrompt": [
           "Open my Codex Design canvas.",
           "Design an interface or slide deck on the canvas.",
-          "Review design comments and update the current board.",
-          "Find the design system in my app and reuse it across boards."
+          "Review design comments and update the current board."
         ],
         "brandColor": "#171717",
         "brandColorDark": "#f5f5f5",
         "composerIcon": "./assets/icon.svg",
         "composerIconDark": "./assets/icon-dark.svg",
         "logo": "./assets/icon.svg",
-        "logoDark": "./assets/icon-dark.svg"
-      }
+        "logoDark": "./assets/icon-dark.svg",
+        "websiteURL": "https://github.com/tronschell/codex-design",
+        "supportURL": "https://github.com/tronschell/codex-design/issues"
+      },
+      "requires_local_executor": true
     }
   }
 }

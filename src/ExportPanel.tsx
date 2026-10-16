@@ -10,6 +10,8 @@ import './export.css';
 
 export interface ExportPanelProps {
   project: DesignProject;
+  statePreviewProject?: DesignProject;
+  statePreviewName?: string;
   boardId: string;
   pageId: string;
   selectedIds: string[];
@@ -20,16 +22,18 @@ export interface ExportPanelProps {
 const formats: { id: ExportFormat; name: string; detail: string; description: string; Icon: typeof Code2 }[] = [
   { id: 'png', name: 'PNG canvas map', detail: 'Spatial overview · 1×–4×', description: 'One image of the whole canvas, with frames at their original positions. Independent pages are arranged in labeled groups for sharing.', Icon: Image },
   { id: 'svg-map', name: 'SVG canvas map', detail: 'Scalable browser document', description: 'The complete spatial canvas in a self-contained SVG. Native text and CSS stay scalable; HTML source, shaders and videos use embedded stills.', Icon: Layers },
-  { id: 'react', name: 'React + CSS', detail: 'JSX and stylesheet', description: 'Editable React markup and plain CSS at the original design dimensions. Source layers stay sandboxed; media and controlled shader code are included.', Icon: Code2 },
+  { id: 'react', name: 'React + CSS', detail: 'Application source and styles', description: 'React screens retain real modules, shared imports and npm dependencies. Native layers keep their canvas geometry; legacy HTML stays sandboxed.', Icon: Code2 },
   { id: 'html', name: 'HTML', detail: 'Standalone page', description: 'A browser preview with embedded media, original dimensions and isolated source layers. No build step is required.', Icon: FileCode2 },
   { id: 'svg', name: 'SVG source', detail: 'Original vector layer', description: 'The original passive SVG source, sized to the selected layer. Select a single SVG source layer without container styling.', Icon: Image },
   { id: 'source', name: 'Source ZIP', detail: 'Code, media and context', description: 'HTML previews, React and CSS, original media, editable design.json, shared tokens and component conversations for this scope.', Icon: FileArchive },
   { id: 'project', name: 'Editable backup', detail: 'Project ZIP with media', description: 'The editable document, source, media, tokens and conversations. Import this ZIP through the project menu to create a new saved copy.', Icon: FileJson2 },
 ];
 
-export default function ExportPanel({ project, boardId, pageId, selectedIds, onClose, onNotify }: ExportPanelProps) {
-  const [scope, setScope] = useState<ExportScope>(selectedIds.length ? 'selection' : 'board');
+export default function ExportPanel({ project: baseProject, statePreviewProject, statePreviewName, boardId, pageId, selectedIds, onClose, onNotify }: ExportPanelProps) {
+  const [includeState, setIncludeState] = useState(false);
   const [format, setFormat] = useState<ExportFormat>(selectedIds.length ? 'react' : 'png');
+  const project = includeState && statePreviewProject && !['source','project'].includes(format) ? statePreviewProject : baseProject;
+  const [scope, setScope] = useState<ExportScope>(selectedIds.length ? 'selection' : 'board');
   const preferences = useLocalDraft(`${project.id}/export-settings`, {background: 'dark', customColor: '#171717', scale: '2', labels: 'true', margin: '80'});
   const {background, customColor} = preferences.value, scale = ([1,2,3,4].includes(Number(preferences.value.scale)) ? Number(preferences.value.scale) : 2) as 1 | 2 | 3 | 4, labels = preferences.value.labels === 'true', margin = Number(preferences.value.margin);
   const setBackground = (background: string) => preferences.setValue({background}), setCustomColor = (customColor: string) => preferences.setValue({customColor}), setScale = (scale: number) => preferences.setValue({scale: String(scale)}), setLabels = (labels: boolean) => preferences.setValue({labels: String(labels)}), setMargin = (margin: string) => preferences.setValue({margin});
@@ -61,7 +65,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
     activeRequest.current?.abort();
     setSources([]); setSourceIndex(0); setCopied('');
     setError(interrupted ? 'The design or export scope changed. Export again for the current revision.' : '');
-  }, [project.revision, target, format, map]);
+  }, [project.revision, target, format, map, includeState]);
 
   const close = () => { activeRequest.current?.abort(); onClose(); };
   const run = async (label: string, action: (signal: AbortSignal) => Promise<void>) => {
@@ -109,6 +113,7 @@ export default function ExportPanel({ project, boardId, pageId, selectedIds, onC
       }
     }}>
       <header className="export-panel-header"><h2 id="export-heading">Export</h2><span>v{project.revision}</span><button type="button" className="icon-button" aria-label="Close export" title={busy ? 'Close and cancel export' : 'Close export'} onClick={close}><X size={16}/></button></header>
+      {statePreviewProject&&<label className="tw:mx-5 tw:my-3 tw:flex tw:items-center tw:gap-2 tw:text-xs tw:text-[#ccc]"><input type="checkbox" checked={includeState} disabled={!!busy||['source','project'].includes(format)} onChange={event=>setIncludeState(event.target.checked)}/><span>{['source','project'].includes(format)?'Editable exports preserve the base and all state definitions.':'Export current state: '+(statePreviewName||'Custom inputs')+' · without inspection highlights'}</span></label>}
       <div className="export-scope-row"><span className="export-scope-label">Scope</span><Select label="Export scope" value={availableScope} disabled={!!busy} onChange={value=>changeScope(value as ExportScope)} options={[
         {value:'selection',label:`Selection · ${selected.length > 1 ? `${selected.length} objects` : selected[0]?.name ?? 'Select a layer first'}`,disabled:!selected.length},
         {value:'page',label:`Page · ${page?.name}`},

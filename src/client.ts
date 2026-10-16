@@ -1,3 +1,4 @@
+import type { DiagramLayoutResult } from '../shared/diagram-layout-types';
 import type { DesignProject, LibraryScope, LibraryVersion, Operation, ProjectSummary, ProjectVersion, ProjectVersionSummary } from '../shared/types';
 import { assetChunkSchema, assetMetadataSchema, assetRefSchema, assetUploadSchema, assetUploadCancellationSchema, cancelAssetUploadSchema, beginAssetUploadSchema, libraryVersionRequestSchema, libraryVersionSchema, projectSchema, projectVersionSchema, projectVersionSummarySchema, readAssetChunkSchema, validateProjectUpdate } from '../shared/validation';
 import { MAX_ASSET_CHUNK_BYTES, type AssetChunk, type AssetMetadata, type AssetUpload } from '../shared/media';
@@ -107,6 +108,10 @@ function base64ToBytes(data: string): Uint8Array {
 }
 
 export const client = {
+  async layoutDiagram(projectId: string, pageId: string, frameId: string, signal?: AbortSignal): Promise<DiagramLayoutResult> {
+    const result = embedded ? await tool('canvas_layout_diagram', {projectId,pageId,frameId}) : await http<DiagramLayoutResult>('/projects/'+encodeURIComponent(projectId)+'/diagram-layout',{pageId,frameId},signal);
+    checkAborted(signal); return result as unknown as DiagramLayoutResult;
+  },
   async cancelAssetUpload(uploadId: string) {
     const parsed = cancelAssetUploadSchema.safeParse({ uploadId });
     if (!parsed.success) throw new ApiError('Use a valid pending media upload ID.', 400, 'invalid_asset');
@@ -259,8 +264,13 @@ export const client = {
     const input = { expectedRevision, revision, ...libraryVersionRequestSchema.parse({ scope, componentId }) };
     return requireProject(embedded ? await tool('canvas_restore_library_version', { projectId: id, ...input }) : { project: await http(`/projects/${encodeURIComponent(id)}/library/history/restore`, input) });
   },
-  async create(name: string, template: 'blank' | 'demo'): Promise<DesignProject> {
-    return requireProject(embedded ? await tool('canvas_create_project', { name, template }) : { project: await http('/projects', { name, template }) });
+  async create(name: string): Promise<DesignProject> {
+    return requireProject(embedded ? await tool('canvas_create_project', { name }) : { project: await http('/projects', { name }) });
+  },
+  async deleteProject(project: DesignProject): Promise<void> {
+    const input = { projectId: project.id, expectedRevision: project.revision, expectedName: project.name, userConfirmed: true };
+    const result = embedded ? await tool('canvas_delete_project', input) : await http<Record<string, unknown>>(`/projects/${encodeURIComponent(project.id)}/delete`, input);
+    if (result.projectId !== project.id || result.deleted !== true) throw new ApiError('The server did not confirm project deletion. Refresh the project list before retrying.', 502, 'invalid_response');
   },
   async mutate(base: DesignProject, operations: Operation[]): Promise<DesignProject> {
     const id = base.id, expectedRevision = base.revision;

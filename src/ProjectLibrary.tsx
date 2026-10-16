@@ -1,3 +1,4 @@
+import ReactComponentEditor from './ReactComponentEditor';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowLeft, ArrowUpRight, Clock3, Copy, Download, Hand, ImagePlus, LoaderCircle, Maximize2, PanelRight, Plus, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
@@ -30,6 +31,8 @@ export interface ProjectLibraryProps {
   mode: 'system' | 'components' | 'inspiration';
   pageId?: string;
   selectedNodeId?: string;
+  componentId?: string;
+  onComponentChange: (id: string | null) => void;
   insertionPosition: { x: number; y: number };
   onModeChange: (mode: 'system' | 'components' | 'inspiration') => void;
   onApply: (revision: number, scope: LibraryScope, componentId?: string) => Promise<DesignProject | null>;
@@ -131,12 +134,13 @@ function InspirationPreview({ item, container }: { item: InspirationItem; contai
   return <span ref={shell} className="library-reference-preview">{visible && <MediaNode node={node}/>}</span>;
 }
 
-export default function ProjectLibrary({ project, boardId, mode, pageId, selectedNodeId, insertionPosition, onModeChange, onApply, onInserted, readOnly, onChange, onClose, onNotify }: ProjectLibraryProps) {
+export default function ProjectLibrary({ project, boardId, mode, pageId, selectedNodeId, componentId, onComponentChange, insertionPosition, onModeChange, onApply, onInserted, readOnly, onChange, onClose, onNotify }: ProjectLibraryProps) {
   const panel = usePanelResize('codex-design:library-panel-width', 336, 'Library panel width');
   const system = project.designSystem, board = project.boards.find(item => item.id === boardId), inspiration = board?.inspiration ?? [];
   const scopeKey = `${project.id}/${mode}/${mode === 'inspiration' ? boardId : ''}`;
   const [view, setView] = useState<Viewport>(() => views.get(scopeKey) ?? initialView);
   const [panelOpen, setPanelOpen] = useState(true), [tab, setTab] = useState<'tokens' | 'docs' | 'requests' | 'versions'>('tokens');
+  const editingComponentId = componentId ?? '', setEditingComponentId = onComponentChange;
   const [selectedComponentId, setSelectedComponentId] = useState(() => project.pages.flatMap(page => page.nodes).find(node => node.componentInstance && Object.values(node.componentInstance.nodeMap).includes(selectedNodeId ?? ''))?.componentInstance?.componentId ?? '');
   const [selectedTokenId, setSelectedTokenId] = useState(''), [selectedReferenceId, setSelectedReferenceId] = useState('');
   const selectedToken = system.tokens.find(token => token.id === selectedTokenId), selectedReference = inspiration.find(item => item.id === selectedReferenceId);
@@ -482,6 +486,9 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
   </>;
 
 
+  const editingComponent = mode === 'components' ? system.components.find(item => item.id === editingComponentId && item.nodes.some(node => node.id === item.rootNodeId && node.react)) : undefined;
+  if (editingComponent) return <ReactComponentEditor project={project} definition={editingComponent} readOnly={readOnly} onChange={onChange} onBack={() => { setSelectedComponentId(editingComponent.id); setEditingComponentId(''); }} onClose={close}/>;
+
   return <section ref={root} className="project-library" aria-label="Project design library" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !(event.target as Element).closest('input, textarea, select, [contenteditable="true"]')) { event.preventDefault(); close(); } }} onKeyUp={event => { if (event.code === 'Space') setSpacePan(false); event.stopPropagation(); }} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setSpacePan(false); }}>
     <nav className="library-workspace-tabs" aria-label="Project design library sections">
       <button type="button" className="library-icon" aria-label="Return to design canvas" title="Return to design canvas · Esc" onClick={close}><ArrowLeft size={16}/></button>
@@ -511,7 +518,7 @@ export default function ProjectLibrary({ project, boardId, mode, pageId, selecte
       <div className="project-library-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
         {mode === 'system' ? tokenLayout.map(group => <section key={group.name} className="library-token-group" aria-label={`${group.name} tokens`} style={{ left: group.x, top: group.y, width: group.width }}>
           <header><h3>{group.name}</h3><span>{group.tokens.length}</span></header><div className="library-token-grid">{group.tokens.map(token => <button type="button" key={token.id} className={`library-token-card${selectedTokenId === token.id ? ' is-selected' : ''}`} aria-pressed={selectedTokenId === token.id} title={`${token.name} · ${displayValue(token)}${token.description ? `\n${token.description}` : ''}`} onClick={() => { setSelectedTokenId(token.id); setTab('tokens'); setPanelOpen(true); }}><TokenPreview token={token}/><span className="library-token-caption"><strong>{token.name}</strong><code>{displayValue(token)}</code></span></button>)}</div>
-        </section>) : mode === 'components' ? componentLayout.map(box => <button type="button" key={box.item.id} className={`library-reference-card${selectedComponentId === box.item.id ? ' is-selected' : ''}`} aria-pressed={selectedComponentId === box.item.id} style={{ left: box.x, top: box.y, width: box.width, height: box.height }} onClick={() => { setSelectedComponentId(box.item.id); setPanelOpen(true); }}><ComponentPreview definition={box.item} system={system} container={stage}/><span className="library-reference-caption"><strong>{box.item.name}</strong><span>v{box.item.version} · {box.item.nodes.length} layers</span></span></button>) : referenceLayout.map(box => <button type="button" key={box.item.id} className={`library-reference-card${selectedReferenceId === box.item.id ? ' is-selected' : ''}`} aria-pressed={selectedReferenceId === box.item.id} title={box.item.name} style={{ left: box.x, top: box.y, width: box.width, height: box.height }} onClick={() => { setSelectedReferenceId(box.item.id); setPanelOpen(true); }}><span className="library-reference-image" style={{ height: box.imageHeight }}><InspirationPreview item={box.item} container={stage}/></span><span className="library-reference-caption"><strong>{box.item.name}</strong><span>{box.item.notes || box.item.usage || `${box.item.width} × ${box.item.height}`}</span></span></button>)}
+        </section>) : mode === 'components' ? componentLayout.map(box => <button type="button" key={box.item.id} className={`library-reference-card${selectedComponentId === box.item.id ? ' is-selected' : ''}`} aria-pressed={selectedComponentId === box.item.id} style={{ left: box.x, top: box.y, width: box.width, height: box.height }} onClick={() => { setSelectedComponentId(box.item.id); setPanelOpen(true); if (box.item.nodes.some(node => node.id === box.item.rootNodeId && node.react)) setEditingComponentId(box.item.id); }}><ComponentPreview definition={box.item} system={system} container={stage}/><span className="library-reference-caption"><strong>{box.item.name}</strong><span>v{box.item.version} · {box.item.nodes.length} layers</span></span></button>) : referenceLayout.map(box => <button type="button" key={box.item.id} className={`library-reference-card${selectedReferenceId === box.item.id ? ' is-selected' : ''}`} aria-pressed={selectedReferenceId === box.item.id} title={box.item.name} style={{ left: box.x, top: box.y, width: box.width, height: box.height }} onClick={() => { setSelectedReferenceId(box.item.id); setPanelOpen(true); }}><span className="library-reference-image" style={{ height: box.imageHeight }}><InspirationPreview item={box.item} container={stage}/></span><span className="library-reference-caption"><strong>{box.item.name}</strong><span>{box.item.notes || box.item.usage || `${box.item.width} × ${box.item.height}`}</span></span></button>)}
       </div>
       <div className="project-library-toolbar" onPointerDown={event => event.stopPropagation()}>
         <span className="library-toolbar-title">{modeLabel}</span><span className="library-toolbar-count">{mode === 'system' ? system.tokens.length : mode === 'components' ? system.components.length : inspiration.length}</span><span className="library-toolbar-divider"/>

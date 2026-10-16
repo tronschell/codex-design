@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import type { DesignNode } from '../shared/types';
 
 const idleAfter = 120_000;
 
-export default function FrameGeneration({ updatedAt }: { updatedAt?: string }) {
+export default function FrameGeneration({ updatedAt, region, label = 'Building screen', compact = false }: { updatedAt?: string; region?: NonNullable<DesignNode['generation']>['region']; label?: string; compact?: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [waiting, setWaiting] = useState(false), [hidden, setHidden] = useState(() => document.hidden);
   useEffect(() => {
@@ -79,8 +80,8 @@ export default function FrameGeneration({ updatedAt }: { updatedAt?: string }) {
       motion.removeEventListener('change', sync);
     };
   }, [waiting, hidden]);
-  return <div className={`frame-generation${waiting || hidden ? ' is-idle' : ''}`} aria-live="polite" role="status">
+  return <div className={`frame-generation${waiting || hidden ? ' is-idle' : ''}`} style={region ? { inset: 'auto', left: region.x, top: region.y, width: region.width, height: region.height } : undefined} aria-live="polite" role="status">
     <canvas ref={canvas} className="frame-generation-wipe" aria-hidden="true"/>
-    <span className="frame-generation-status"><span/>{waiting ? 'Waiting for Codex' : 'Building screen'}</span>
+    <span className={compact ? 'tw:sr-only' : 'frame-generation-status'}><span/>{waiting ? `Waiting for Codex · ${label}` : label}</span>
   </div>;
 }

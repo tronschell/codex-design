@@ -1,3 +1,6 @@
+import { portableStateNodes } from './application-state';
+import { resolveDiagramNodes } from './diagrams';
+import { reactPreviewDocument, reactApplicationFiles } from './react-preview';
 import type { BindableStyleProperty, DesignNode, DesignPage, DesignProject, DesignSystem } from './types.js';
 import { shaderRuntimeOptions, shaderRuntimeSource } from './shaders.js';
 import { ADVANCED_STYLE_PROPERTIES, effectCss, nodeBoxSize, nodeInnerSize, nodePadding } from './effects.js';
@@ -38,7 +41,7 @@ export function resolvedNodes(nodes: DesignNode[], system?: DesignSystem, cache?
       cursor += (vertical ? size.height : size.width) + mainMargin * 2 + spacing;
     }
   }
-  return nodes.map(node => {
+  return resolveDiagramNodes(nodes.map(node => {
     const position = positions.get(node.id);
     if (!position || (position.x === node.x && position.y === node.y)) return node;
     const cached = cache?.get(node);
@@ -46,7 +49,7 @@ export function resolvedNodes(nodes: DesignNode[], system?: DesignSystem, cache?
     const positioned = { ...node, ...position };
     cache?.set(node, positioned);
     return positioned;
-  });
+  }));
 }
 
 export function nodeCss(node: DesignNode, system?: DesignSystem, fallbackStyles = node.styles): Record<string, string | number> {
@@ -136,8 +139,9 @@ export function safeCodeDocument(source: string, system?: DesignSystem, live = f
   // Repeat until stable so fragments such as <me<meta>ta> cannot reassemble a tag.
   let passiveSource = source, previous;
   do { previous = passiveSource; passiveSource = passiveSource.replace(/<meta\b[^>]*>/gi, '').replace(/<base\b[^>]*>/gi, ''); } while (passiveSource !== previous);
+  // Support the embedding theme so dark hosts do not force an opaque light iframe canvas.
   // Apply current project variables after copied source token blocks, without rewriting the source.
-  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none';${live ? " script-src 'unsafe-inline';" : ''} img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">${live ? LIVE_CODE_PRELUDE : ''}<style>html,body{margin:0;width:100%;height:100%;overflow:hidden}*{box-sizing:border-box}body>svg:only-child{display:block;width:100%;height:100%}</style>${passiveSource}${system ? `<style>${styleText(tokenCssVariables(system))}</style>` : ''}`;
+  return `<meta http-equiv="Content-Security-Policy" content="default-src 'none';${live ? " script-src 'unsafe-inline';" : ''} img-src data:; media-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">${live ? LIVE_CODE_PRELUDE : ''}<style>html{color-scheme:light dark}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}*{box-sizing:border-box}body>svg:only-child{display:block;width:100%;height:100%}</style>${passiveSource}${system ? `<style>${styleText(tokenCssVariables(system))}</style>` : ''}`;
 }
 
 export function vectorDataUrl(source: string): string | null {
@@ -195,6 +199,7 @@ function renderNode(node: DesignNode, children: Map<string | null, DesignNode[]>
     const tag = list === 'decimal' ? 'ol' : 'ul';
     content = `<${tag} style="${inlineCss({ ...textListStyle, listStyleType: list })}">${(node.content ?? '').split(/\r?\n/).map(line => `<li>${escapeHtml(line) || '<br/>'}</li>`).join('')}</${tag}>`;
   }
+  if (node.react && !snapshot) content = options.staticMap ? '<span>React screen — use HTML or React export</span>' : `<iframe title="${escapeHtml(node.name)}" sandbox="allow-scripts" referrerpolicy="no-referrer" onload="if(this.dataset.ready){this.onload=null;this.setAttribute('sandbox','');this.removeAttribute('src');this.srcdoc='Preview navigation stopped'}else{this.dataset.ready='1'}" style="display:block;width:100%;height:100%;border:0;color-scheme:normal" srcdoc="${escapeHtml(reactPreviewDocument(node, options.system))}"></iframe>`;
   if (shell) content = '';
   const link = href && !shell && !options.staticMap ? `<a aria-label="${escapeHtml(node.name)}" href="${escapeHtml(href)}"${href.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"'} style="${inlineCss({ ...nodeLinkStyle, pointerEvents })}"></a>` : '';
   const body = node.type === 'video' ? link + content : content + link;
@@ -227,7 +232,7 @@ const liveCodeScript = `<script>document.addEventListener('click',function(event
 
 function htmlDocument(title: string, body: string, background: string, system?: DesignSystem, stateCss = ''): string {
   const shaderScript = body.includes('data-shader=') ? `<script>const createShaderRenderer=${shaderRuntimeSource(body.includes('data-shader-provider="shaders.com"')).replace(/<\/script/gi, '<\\/script')};document.querySelectorAll('canvas[data-shader]').forEach(canvas=>{const fail=message=>{const status=canvas.nextElementSibling;if(status){status.textContent='Shader unavailable: '+message;status.hidden=false;}};try{createShaderRenderer(canvas,JSON.parse(canvas.dataset.shader),fail);}catch(error){fail(error.message);}});</script>` : '';
-  return `<!doctype html>\n<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title><style>${system ? styleText(tokenCssVariables(system)) : ''}${styleText(stateCss)}html,body{margin:0;min-width:100%;min-height:100%;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}::selection{background:#4497ff;color:#fff}</style></head><body style="background:${escapeHtml(background)}">${body}${shaderScript}${body.includes('data-live-run') ? liveCodeScript : ''}</body></html>`;
+  return `<!doctype html>\n<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title><style>${system ? styleText(tokenCssVariables(system)) : ''}${styleText(stateCss)}html{color-scheme:dark}html,body{margin:0;min-width:100%;min-height:100%;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}::selection{background:#4497ff;color:#fff}</style></head><body style="background:${escapeHtml(background)}">${body}${shaderScript}${body.includes('data-live-run') ? liveCodeScript : ''}</body></html>`;
 }
 
 function requirePage(project: DesignProject, pageId: string): DesignPage {
@@ -246,7 +251,8 @@ export function projectForBoard(project: DesignProject, boardId: string): Design
   if (!board) throw new Error(`Board not found: ${boardId}`);
   const pages = project.pages.filter(page => (page.boardId ?? project.boards[0]?.id) === boardId);
   const pageIds = new Set(pages.map(page => page.id));
-  return { ...project, boards: [board], pages, threads: project.threads.filter(thread => pageIds.has(thread.pageId)) };
+  const portable = new Map(portableStateNodes(pages.flatMap(page=>page.nodes),project.pages.flatMap(page=>page.nodes)).map(node=>[node.id,node]));
+  return { ...project, designSystem:{...project.designSystem,components:project.designSystem.components.map(c=>({...c,nodes:portableStateNodes(c.nodes,project.pages.flatMap(p=>p.nodes))}))}, boards: [board], pages:pages.map(page=>({...page,nodes:page.nodes.map(node=>portable.get(node.id)!)})), threads: project.threads.filter(thread => pageIds.has(thread.pageId)) };
 }
 
 export function exportPageHtml(project: DesignProject, pageId: string, options: ExportOptions = {}): string {
@@ -279,7 +285,7 @@ function filename(value: string): string {
 }
 
 export function exportProjectBundle(project: DesignProject, options: ExportOptions = {}): { files: Record<string, string> } {
-  const files: Record<string, string> = { 'design.json': JSON.stringify(project, null, 2), 'DESIGN.md': designSystemMarkdown(project.designSystem), 'tokens.css': tokenCssVariables(project.designSystem), 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(project) };
+  const files: Record<string, string> = { ...reactApplicationFiles(project.designSystem, project.pages.flatMap(page => page.nodes.flatMap(node => node.react ? [node.react] : []))), 'design.json': JSON.stringify(project, null, 2), 'DESIGN.md': designSystemMarkdown(project.designSystem), 'tokens.css': tokenCssVariables(project.designSystem), 'IMPLEMENTATION_NOTES.md': implementationNotesMarkdown(project) };
   if (project.pages.some(page => page.nodes.some(node => node.jsx))) files['jsx/README.md'] = 'These files retain the authored JSX for source-backed components. The design.json document preserves their original markup, starter names, device presentation and compiled passive HTML. Edit through canvas_write_jsx in Codex Design. Read original starter files through canvas_read_design_reference; these JSX snippets assume those component names and are not standalone application modules. HTML screens remain viewable without executing JSX.\n';
   const pages: string[] = [];
   const screens: string[] = [];

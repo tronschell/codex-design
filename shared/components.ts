@@ -1,6 +1,7 @@
+import { remapFeatureReferences } from './diagrams';
 import type { ComponentInstance, DesignNode, NativeComponentDefinition } from './types.ts';
 
-export const COMPONENT_NODE_PROPERTIES = ['type', 'name', 'x', 'y', 'width', 'height', 'content', 'notes', 'href', 'source', 'live', 'jsx', 'media', 'shader', 'effects', 'locked', 'hidden'] as const;
+export const COMPONENT_NODE_PROPERTIES = ['type', 'name', 'x', 'y', 'width', 'height', 'content', 'notes', 'href', 'source', 'live', 'react', 'jsx', 'media', 'shader', 'effects', 'locked', 'hidden', 'diagram', 'diagramElement', 'diagramEdge', 'applicationState', 'stateBinding', 'stateRules', 'journey'] as const;
 
 export function componentSubtree(nodes: DesignNode[], rootId: string): DesignNode[] {
   const children = new Map<string, string[]>();
@@ -50,6 +51,7 @@ export function materializeComponent(definition: NativeComponentDefinition, inst
     node.parentId = original.id === definition.rootNodeId ? placement.parentId : instance.nodeMap[original.parentId!];
     if (node.href?.startsWith('#') && Object.hasOwn(instance.nodeMap, node.href.slice(1))) node.href = `#${instance.nodeMap[node.href.slice(1)]}`;
     if (original.id === definition.rootNodeId) { node.x = placement.x; node.y = placement.y; node.componentInstance = instance; }
+    remapFeatureReferences(node, new Map(Object.entries(instance.nodeMap)));
     return node;
   });
 }
