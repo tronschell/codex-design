@@ -38,9 +38,14 @@
         "logo": "./assets/icon.svg",
         "logoDark": "./assets/icon-dark.svg",
         "websiteURL": "https://github.com/tronschell/codex-design",
-        "supportURL": "https://github.com/tronschell/codex-design/issues"
+        "supportURL": "https://github.com/tronschell/codex-design/issues",
+        "developerName": "tronschell"
       },
       "requires_local_executor": true
     }
+  },
+  "author": {
+    "name": "tronschell",
+    "url": "https://github.com/tronschell"
   }
 }

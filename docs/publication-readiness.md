@@ -6,6 +6,7 @@ Reviewed 2026-10-16. **Status: local distribution builds; public submission is b
 
 - Portable plugin manifest and local stdio MCP configuration; self-contained widget and bundled server. Node.js 22 or later is declared.
 - Desktop-only execution is explicit (`extensions.com.openai.requires_local_executor: true`). There is no claim of cloud or mobile availability.
+- MIT license for original contributions and explicit third-party exclusions; package author/developer name set to `tronschell`.
 - Three starter prompts, within the documented limit, an accurate description, independent-project disclosure, square light/dark icons, and verified public repository/support links.
 - Typed tool inputs, bounded asset operations, revision checks, explicit destructive annotations, and project/board rename/delete consent requirements.
 - Package allowlist excludes Git history, workspace data, credentials, and development node_modules. Required compiled runtime dependencies are included under dist.
@@ -15,13 +16,13 @@ Reviewed 2026-10-16. **Status: local distribution builds; public submission is b
 
 | Requirement | Current evidence | Needed before submission |
 | --- | --- | --- |
-| Local MCP eligibility | No organization allowlist evidence available | The publisher must obtain approval from its OpenAI representative for the submitting organization. |
-| Publisher identity | Public repository owner is `tronschell`; verified OpenAI identity is unknown | Confirm publisher name; complete individual/business verification and use an organization owner or Apps Management Write role. Populate `author.name` and `interface.developerName` with the approved identity. |
-| Public policies | Website and support URLs exist; approved privacy and terms URLs were not supplied | Review the prepared policy drafts, fill the publisher/contact/license details, publish final HTTPS pages, and set `interface.privacyPolicyURL` and `interface.termsOfServiceURL`. Do not point the listing at draft policies. |
+| Local MCP eligibility | Publisher reports not approved / unsure | The publisher must obtain approval from its OpenAI representative for the submitting organization. |
+| Publisher identity | Package author and developer name are now `tronschell`; individual publishing is supported | Complete individual verification and use an organization owner or Apps Management Write role. The directory displays the selected verified identity, which may differ from the package handle. |
+| Public policies | Website/support URLs exist; publisher is tronschell and MIT is selected for original code; policy drafts are updated | Review the prepared policy drafts, provide a private privacy contact and effective date, publish final HTTPS pages, and set `interface.privacyPolicyURL` and `interface.termsOfServiceURL`. Do not point the listing at draft policies. |
 | Third-party redistribution | `skills/codex-design/references/upstream-source.json` identifies imported Anthropic/claude-design material from `asgeirtj/system_prompts_leaks` | Establish permission from the relevant rights holder, or replace the imported guidance and starter code with independently authored material before public distribution. The source repository's CC0 notice does not establish ownership of third-party material. |
 | Installed-host review | Local browser/build inspection completed; final installed-host session still needs reload | Inspect the installed release in the supported desktop host, including embedded source previews, consent prompts, media/export, and the local MCP connection. The browser result alone does not establish host compatibility. |
 
-The imported snapshot is preserved pending the publisher's choice. It was intentionally requested for local authoring, and it is used both by the design-reference tools and by compiled device-frame starters. Removing just its Markdown directory from the ZIP would leave the compiled imported code in `dist/starters.mjs` and break reference tools. A replacement must update the catalog, skill links, four runtime device-frame implementations, and rebuilt artifacts together. Original prompts also contain original-host instructions that need a public-review audit if retained.
+The publisher authorized MIT for original code. That grant does not establish rights to the imported snapshot. The publisher chose to retain the imported snapshot. Its files, function names and provenance remain unchanged in this update. Cosmetic renaming or rewording does not establish permission; public redistribution still needs permission or an independent replacement. It was intentionally requested for local authoring, and it is used both by the design-reference tools and by compiled device-frame starters. Removing just its Markdown directory from the ZIP would leave the compiled imported code in `dist/starters.mjs` and break reference tools. A replacement must update the catalog, skill links, four runtime device-frame implementations, and rebuilt artifacts together. Original prompts also contain original-host instructions that need a public-review audit if retained.
 
 ## Review walkthrough and runtime notes
 

@@ -1,6 +1,6 @@
 # Codex Design privacy policy — publisher review draft
 
-**Not yet a published policy.** Publisher: [confirm publisher]. Private support/privacy contact: [confirm contact]. Effective date: [set on approval]. This describes the desktop-only local plugin; a hosted service needs its own policy reflecting its actual infrastructure.
+**Not yet a published policy.** Publisher: tronschell. Public support: https://github.com/tronschell/codex-design/issues. Private privacy contact: [confirm contact before publication]. Effective date: [set on approval]. This describes the desktop-only local plugin; a hosted service needs its own policy reflecting its actual infrastructure.
 
 ## Information used
 

@@ -81,3 +81,7 @@ The existing-app component discovery workflow adapts and extends [component-canv
 Thanks to [asgeirtj/system_prompts_leaks](https://github.com/asgeirtj/system_prompts_leaks) for the original design prompt, skills and JSX examples, preserved with the requested `claude-design` → `codex-design` rename. [Provenance](skills/codex-design/references/upstream-source.json) and the [upstream CC0 license](skills/codex-design/references/upstream-LICENSE) are included. Claude Design inspired the canvas workflow and visual direction. This is an independent project, unaffiliated with OpenAI or Anthropic.
 
 New shader effects use the official [shaders.com](https://shaders.com/) components (`shaders@4.0.4`, MIT) and require WebGPU. Their source and dependency licenses travel with HTML/React exports. Existing GLSL layers remain supported.
+
+## License
+
+Original Codex Design contributions are available under the [MIT License](LICENSE), copyright 2026 tronschell. Third-party materials keep their separate rights and notices; see [third-party notices](THIRD_PARTY_NOTICES.md). The imported authoring snapshot has unresolved redistribution rights and is not covered by this new MIT grant.

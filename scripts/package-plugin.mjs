@@ -17,7 +17,7 @@ const output = resolve(releases, `${manifest.name}-${manifest.version}.zip`);
 const installDirectory = join(releases, manifest.name);
 try {
   await mkdir(packageDirectory);
-  for (const entry of ['plugin.json', 'mcp.json', 'package.json', 'package-lock.json', 'README.md', 'PRODUCT.md', 'DESIGN.md', 'AGENTS.md', 'assets', 'docs', 'examples', 'skills', 'dist', 'server', 'shared', 'src', 'public', 'scripts', 'index.html', 'vite.config.ts', 'tsconfig.json', '.agents/plugins/marketplace.json']) {
+  for (const entry of ['plugin.json', 'mcp.json', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'PRODUCT.md', 'DESIGN.md', 'AGENTS.md', 'assets', 'docs', 'examples', 'skills', 'dist', 'server', 'shared', 'src', 'public', 'scripts', 'index.html', 'vite.config.ts', 'tsconfig.json', '.agents/plugins/marketplace.json']) {
     await cp(join(root, entry), join(packageDirectory, entry), { recursive: true });
   }
   await rm(output, { force: true });
