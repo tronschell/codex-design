@@ -101,7 +101,8 @@ function bytesToBase64(bytes: Uint8Array): string {
 function base64ToBytes(data: string): Uint8Array {
   try {
     const binary = atob(data);
-    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
     if (bytesToBase64(bytes) !== data) throw new Error('Invalid base64');
     return bytes;
   } catch { throw new ApiError('The server returned invalid media bytes.', 502, 'invalid_response'); }
